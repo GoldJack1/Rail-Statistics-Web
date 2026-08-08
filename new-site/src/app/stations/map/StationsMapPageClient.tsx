@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic'
 import { WarningCircle } from '@phosphor-icons/react'
 
 import { PageTopHeader } from '@/components/misc'
+import AdSlot from '@/components/ads/AdSlot'
 import { BUTWideButton } from '@/components/buttons'
 import NetworkStationTabGroup from '@/components/cards/NetworkStationTabGroup/NetworkStationTabGroup'
 import MapLiteModeGate from '@/components/maps/MapLiteModeGate'
@@ -441,6 +442,11 @@ const StationsMapPageClient: React.FC<StationsMapPageClientProps> = ({
         title="Map"
         subtitle={stationsLoading ? 'Loading stations…' : '\u00a0'}
       />
+      {!isAdminMapRoute ? (
+        <div className="stations-map-page__header-ad">
+          <AdSlot variant="banner" className="stations-map-ad-slot--banner" />
+        </div>
+      ) : null}
       <div className="stations-toolbar-band">
         <div className="stations-network-tabs-wrap stations-network-tabs-wrap--toolbar">
           <NetworkStationTabGroup

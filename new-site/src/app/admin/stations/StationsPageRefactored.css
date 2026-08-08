@@ -816,6 +816,15 @@
     overflow: visible;
 }
 
+.stations-page-grid > .stations-ad-slot--in-feed {
+    /* Full row so ads never sit beside a single orphan station card */
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    align-self: stretch;
+}
+
 /* ========================================
    PAGINATION
    ======================================== */

@@ -10,6 +10,7 @@ import type { GbnrOdmFlowsState } from '../../../hooks/useGbnrOdmFlows'
 import '../../cards/NetworkStationTabGroup/NetworkStationTabGroup.css'
 import './StationUsageDataNotice.css'
 import './StationOdmFlowsSection.css'
+import AdSlot from '@/components/ads/AdSlot'
 
 const ODM_SOURCE_HINT =
   'View the top and bottom 50 destinations by estimated journeys from this origin, using ORR Origin–Destination Matrix data.'
@@ -187,6 +188,7 @@ export function StationOdmFlowsSection({ state }: StationOdmFlowsSectionProps) {
         </>
       )}
       <KnowledgebaseSourceHint label={ODM_SOURCE_HINT} />
+      <AdSlot variant="section" className="rs-ad-slot--section-end" />
     </div>
   )
 }

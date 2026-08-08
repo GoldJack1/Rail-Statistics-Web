@@ -13,7 +13,7 @@ import './PrivacyPolicyPage.css'
 const SECTIONS: LegalDocsSection[] = [
   { id: 'section-1', label: '1. Information Collection' },
   { id: 'section-2', label: '2. Payments and In-App Purchases' },
-  { id: 'section-3', label: '3. Third-Party Services – Google AdMob' },
+  { id: 'section-3', label: '3. Third-Party Services – Advertising' },
   { id: 'section-4', label: '4. Data Sharing' },
   { id: 'section-5', label: "5. Children's Privacy" },
   { id: 'section-6', label: '6. Security' },
@@ -52,7 +52,7 @@ const PrivacyPolicyPage: React.FC = () => {
     <div className="container container--station-details">
       <PageTopHeader
         title="Privacy Policy"
-        subtitle="Last updated February 26, 2026"
+        subtitle="Last updated August 8, 2026"
         actionButton={{ to: '/', label: 'Back to home' }}
       />
       <div className="privacy-page legal-docs-page">
@@ -97,9 +97,21 @@ const PrivacyPolicyPage: React.FC = () => {
 
               {activeSectionId === 'section-3' && (
                 <section id="section-3" className="privacy-section">
-                  <h2>3. Third-Party Services – Google AdMob</h2>
+                  <h2>3. Third-Party Services – Advertising</h2>
+                  <h3 id={legalDocsSubsectionId('Mobile app – Google AdMob')}>
+                    Mobile app – Google AdMob
+                  </h3>
                   <p>
-                    Rail Statistics uses Google AdMob to serve advertisements. When you first launch the app, you will be asked to consent to advertising data collection. This data is securely stored, managed, and processed by Google in compliance with GDPR regulations. For more details, please review <BUTLink href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google&apos;s privacy policy</BUTLink>.
+                    The Rail Statistics mobile app uses Google AdMob to serve advertisements. When you first launch the app, you will be asked to consent to advertising data collection. This data is securely stored, managed, and processed by Google in compliance with applicable privacy laws, including the GDPR where it applies. For more details, please review <BUTLink href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google&apos;s privacy policy</BUTLink> and <BUTLink href="https://support.google.com/admob/answer/6128543" target="_blank" rel="noopener noreferrer">Google&apos;s AdMob help on privacy</BUTLink>.
+                  </p>
+                  <h3 id={legalDocsSubsectionId('Website – Google AdSense')}>
+                    Website – Google AdSense
+                  </h3>
+                  <p>
+                    The Rail Statistics website (including <BUTLink href="https://railstatistics.co.uk" target="_blank" rel="noopener noreferrer">railstatistics.co.uk</BUTLink>) uses Google AdSense to display advertisements. Google and its partners may collect and process information — such as cookies, device identifiers, IP address, and browsing activity on our site — to show ads, measure performance, and (where permitted) personalise advertising.
+                  </p>
+                  <p>
+                    You can learn how Google uses data when you use our sites or apps in <BUTLink href="https://policies.google.com/technologies/partner-sites" target="_blank" rel="noopener noreferrer">Google&apos;s partner sites policy</BUTLink>, and review <BUTLink href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google&apos;s privacy policy</BUTLink>. Visitors in the UK, European Economic Area, and Switzerland are shown Google&apos;s consent message (via AdSense Privacy &amp; messaging) so they can accept, decline, or manage options for advertising cookies and personalised ads before that processing takes place. You can also manage ad personalisation via <BUTLink href="https://adssettings.google.com/" target="_blank" rel="noopener noreferrer">Google Ads Settings</BUTLink>.
                   </p>
                 </section>
               )}
@@ -108,7 +120,7 @@ const PrivacyPolicyPage: React.FC = () => {
                 <section id="section-4" className="privacy-section">
                   <h2>4. Data Sharing</h2>
                   <p>
-                    Rail Statistics does not share, sell, or transmit your data externally, except for the third-party advertising outlined above. All user-generated data imported into the app is stored exclusively on your device(s).
+                    Rail Statistics does not sell your personal data. We do not share or transmit your data externally except as needed for the third-party advertising services described in section 3 (Google AdMob in the app and Google AdSense on the website), or where required by law. User-generated data imported into the mobile app remains stored on your device(s), subject to any on-device sharing features provided by your platform (for example Apple widgets).
                   </p>
                 </section>
               )}

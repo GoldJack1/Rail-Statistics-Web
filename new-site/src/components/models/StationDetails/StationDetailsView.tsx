@@ -37,6 +37,7 @@ import './StationPendingChangesBanner.css'
 import './StationUsageDataNotice.css'
 import './StationKnowledgebasePanel.css'
 import './StationUsageAreaChart.css'
+import AdSlot from '@/components/ads/AdSlot'
 import dynamic from 'next/dynamic'
 
 function KnowledgebaseSourceHint({ label }: { label?: string | null }) {
@@ -72,6 +73,22 @@ const StationResponsiveLocationMap = dynamic(() => import('./StationResponsiveLo
   ssr: false,
   loading: () => <div className="station-details-location-map-wrap" aria-hidden />,
 })
+
+
+function ModalSection({
+  className = '',
+  children,
+}: {
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className={['modal-section', className].filter(Boolean).join(' ')}>
+      {children}
+      <AdSlot variant="section" className="rs-ad-slot--section-end" />
+    </div>
+  )
+}
 
 const BLANK_DISPLAY = '---'
 
@@ -457,7 +474,7 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
       )}
       {showDetails && (
         <>
-        <div className="modal-section">
+        <ModalSection>
           <StationSectionTitle title="Details" icon={getStationDetailsSectionIcon('details')} pageHeading />
           {showStationCodeChips && (
             <div className="station-details-code-chips" role="list" aria-label="Station codes">
@@ -615,10 +632,10 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
           {!(fieldSchema.showStepFreeSection && fieldSchema.stepFreeInDetails) ? (
             <KnowledgebaseSourceHint label={detailsSourceHint} />
           ) : null}
-        </div>
+        </ModalSection>
 
         {fieldSchema.showStepFreeSection && fieldSchema.stepFreeInDetails && (
-          <div className="modal-section">
+          <ModalSection>
             <StationSectionTitle
               title={STEP_FREE_SECTION_LABEL}
               icon={getStationDetailsSectionIcon('stepFree', { label: STEP_FREE_SECTION_LABEL })}
@@ -646,13 +663,13 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
               </div>
             </StationDetailsSubsection>
             <KnowledgebaseSourceHint label={detailsSourceHint} />
-          </div>
+          </ModalSection>
         )}
         </>
       )}
 
       {showLocationTab && showLocation && (
-        <div className="modal-section modal-section--location">
+        <ModalSection className="modal-section--location">
           <StationSectionTitle title="Location" icon={getStationDetailsSectionIcon('location')} pageHeading />
           {(() => {
             const showKbAddress =
@@ -752,23 +769,23 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
             )
           })()}
           <KnowledgebaseSourceHint label={locationSourceHint} />
-        </div>
+        </ModalSection>
       )}
 
       {showAdditional && additionalLoading && (
-        <div className="modal-section">
+        <ModalSection>
           <StationDetailsFieldGridSkeleton rows={6} />
-        </div>
+        </ModalSection>
       )}
 
       {showAdditional && !additionalLoading && !additionalDoc && (
-        <div className="modal-section">
+        <ModalSection>
           <p className="modal-sandbox-loading">No additional details found for this station.</p>
-        </div>
+        </ModalSection>
       )}
 
       {showAdditional && additionalDoc && (
-        <div className="modal-section">
+        <ModalSection>
           <StationSectionTitle title="Additional details" icon={getStationDetailsSectionIcon('additional')} pageHeading />
           <StationDetailsSubsection title="Identifiers">
             <div className="modal-details-grid modal-facilities-grid">
@@ -803,11 +820,11 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
             </div>
           </StationDetailsSubsection>
           <KnowledgebaseSourceHint label={kbSourceHint} />
-        </div>
+        </ModalSection>
       )}
 
       {showFacilities && fieldSchema.showToiletsSection && additionalDoc?.toilets && (
-        <div className="modal-section">
+        <ModalSection>
           <StationSectionTitle title="Toilets" icon={getStationDetailsSectionIcon('facilities', { label: 'Toilets' })} />
           <StationDetailsSubsection title="Facilities">
             <div className="modal-details-grid modal-facilities-grid">
@@ -837,13 +854,13 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
           {!(fieldSchema.facilityKeys.length > 0 && additionalDoc?.facilities) ? (
             <KnowledgebaseSourceHint label={kbSourceHint} />
           ) : null}
-        </div>
+        </ModalSection>
       )}
 
       {showStepFree &&
         ((fieldSchema.showStepFreeSection && !fieldSchema.stepFreeInDetails) ||
           fieldSchema.showLiftSection) && (
-        <div className="modal-section">
+        <ModalSection>
           <StationSectionTitle
             title={STEP_FREE_SECTION_LABEL}
             icon={getStationDetailsSectionIcon('stepFree', { label: STEP_FREE_SECTION_LABEL })}
@@ -921,11 +938,11 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
             </StationDetailsSubsection>
           ) : null}
           <KnowledgebaseSourceHint label={kbSourceHint} />
-        </div>
+        </ModalSection>
       )}
 
       {showService && fieldSchema.isLightRail && (
-        <div className="modal-section">
+        <ModalSection>
           <StationSectionTitle title="Service & Connections" icon={getStationDetailsSectionIcon('service')} pageHeading />
           <StationDetailsSubsection title="Service">
             <div className="modal-details-grid modal-facilities-grid">
@@ -979,7 +996,7 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
             </StationDetailsSubsection>
           )}
           <KnowledgebaseSourceHint label={kbSourceHint} />
-        </div>
+        </ModalSection>
       )}
 
       {showService &&
@@ -988,7 +1005,7 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
         (fieldSchema.showConnectionBus ||
           fieldSchema.showConnectionTaxi ||
           fieldSchema.showConnectionUnderground) && (
-        <div className="modal-section">
+        <ModalSection>
           <StationSectionTitle title="Connections" icon={getStationDetailsSectionIcon('service', { label: 'Connections' })} />
           <StationDetailsSubsection title="Modes">
             <div className="modal-details-grid modal-facilities-grid">
@@ -1022,7 +1039,7 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
             </div>
           </StationDetailsSubsection>
           <KnowledgebaseSourceHint label={kbSourceHint} />
-        </div>
+        </ModalSection>
       )}
 
       {showService &&
@@ -1031,7 +1048,7 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
           fieldSchema.showStaffingLevel ||
           fieldSchema.showRequestStop ||
           fieldSchema.showLimitedService) && (
-        <div className="modal-section">
+        <ModalSection>
           <StationSectionTitle title="Service" icon={getStationDetailsSectionIcon('service')} />
           {fieldSchema.showStationStatusSection && (
             <StationDetailsSubsection title="Status">
@@ -1088,11 +1105,11 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
           ) ? (
             <KnowledgebaseSourceHint label={kbSourceHint} />
           ) : null}
-        </div>
+        </ModalSection>
       )}
 
       {showFacilities && fieldSchema.facilityKeys.length > 0 && additionalDoc?.facilities && (
-        <div className="modal-section">
+        <ModalSection>
           <StationSectionTitle title="Facilities" icon={getStationDetailsSectionIcon('facilities')} pageHeading />
           <StationDetailsSubsection title="Amenities">
             <div className="modal-details-grid modal-facilities-grid">
@@ -1109,7 +1126,7 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
             </div>
           </StationDetailsSubsection>
           <KnowledgebaseSourceHint label={kbSourceHint} />
-        </div>
+        </ModalSection>
       )}
 
       {showKnowledgebaseContent && (
@@ -1158,7 +1175,7 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
       )}
 
       {showUsage && isGbnrStation && hasGbnrPassUsageData && (
-        <div className="modal-section">
+        <ModalSection>
           <StationSectionTitle title="Station Usage" icon={getStationDetailsSectionIcon('usage')} pageHeading />
           <>
               {visibleGbnrUsageMetricOptions.length > 1 ? (
@@ -1257,7 +1274,7 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
               </p>
           </>
           <KnowledgebaseSourceHint label={usageSourceHint} />
-        </div>
+        </ModalSection>
       )}
 
       {showUsage && isGbnrStation && odmFlowsState.status === 'ready' && (
@@ -1267,7 +1284,7 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
       {showUsage &&
         !isGbnrStation &&
         (station.yearlyPassengers || additionalDoc?.yearlyPassengers) && (
-        <div className="modal-section">
+        <ModalSection>
           <StationSectionTitle title="Station Usage" icon={getStationDetailsSectionIcon('usage')} pageHeading />
           {yearlyPassengerChartPoints.length >= 2 ? (
             <StationDetailsSubsection title="Graph view">
@@ -1304,12 +1321,12 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
             )}
           </p>
           <KnowledgebaseSourceHint label={usageSourceHint} />
-        </div>
+        </ModalSection>
       )}
 
       {showAdmin && (
         <>
-          <div className="modal-section">
+          <ModalSection>
             <StationSectionTitle title="Admin" icon={getStationDetailsSectionIcon('admin')} pageHeading />
             <StationDetailsSubsection title="Identifiers">
               <div className="modal-details-grid modal-facilities-grid">
@@ -1363,7 +1380,7 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
               </StationDetailsSubsection>
             ) : null}
             <KnowledgebaseSourceHint label={kbSourceHint} />
-          </div>
+          </ModalSection>
           {fieldSchema.showKnowledgebaseTab && knowledgebaseOverviewSection && (
             <StationKnowledgebasePanel
               sectionKey={knowledgebaseOverviewSection.key}

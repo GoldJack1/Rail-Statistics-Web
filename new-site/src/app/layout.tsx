@@ -10,6 +10,8 @@ import Footer from '@/components/misc/DeferredSiteFooter'
 import AppMain from '@/components/misc/AppMain'
 import ServiceWorkerRegistration from '@/components/misc/ServiceWorkerRegistration'
 import FirebaseAnalytics from '@/components/misc/FirebaseAnalytics'
+import AdSenseScript from '@/components/ads/AdSenseScript'
+import { CONSENT_MODE_DEFAULTS_SCRIPT } from '@/components/ads/consentModeDefaults'
 import { SITE_DESCRIPTION, SITE_KEYWORDS, SITE_NAME, SITE_URL } from '@/lib/site'
 import './globals.css'
 
@@ -117,6 +119,9 @@ export default function RootLayout({
       <head>
         {/* eslint-disable-next-line @next/next/no-sync-scripts */}
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME_SCRIPT }} />
+        {/* Consent Mode v2 defaults before AdSense / Analytics tags */}
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script dangerouslySetInnerHTML={{ __html: CONSENT_MODE_DEFAULTS_SCRIPT }} />
       </head>
       <body suppressHydrationWarning>
         <ThemeProvider>
@@ -124,6 +129,7 @@ export default function RootLayout({
           <AuthProvider>
             <StationCollectionProvider>
               <ServiceWorkerRegistration />
+              <AdSenseScript />
               <div className="app">
                 <Header />
                 <AppMain>

@@ -1,0 +1,119 @@
+.rs-ad-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  align-self: flex-start;
+  gap: 0;
+  min-width: 0;
+  width: 100%;
+  height: auto;
+  box-sizing: border-box;
+}
+
+.rs-ad-slot__text-card.rs-text-card {
+  --text-card-bg-active: var(--button-bg-active);
+  --text-card-bg-pressed: var(--button-bg-inactive);
+  --text-card-text-active: var(--button-text-active);
+  --text-card-text-pressed: var(--button-text-inactive);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  height: auto !important;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.rs-ad-slot__text-card .rs-text-card__chevron {
+  display: none;
+}
+
+.rs-ad-slot__text-card .rs-text-card__content {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 0;
+  width: 100%;
+  min-width: 0;
+  padding-right: 0;
+}
+
+.rs-ad-slot__text-card .rs-text-card__title {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1;
+  margin: 0 0 8px 0;
+  color: var(--text-secondary);
+}
+
+.rs-ad-slot__text-card .rs-text-card__description {
+  display: block;
+  flex: 0 0 72px;
+  width: 100%;
+  height: 72px;
+  max-height: 72px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: 0;
+}
+
+/*
+ * Fixed-height clip frame. Keep the unit in normal flow (not absolute) so
+ * AdSense can measure availableWidth; overflow clips excess height.
+ */
+.rs-ad-slot__unit-frame {
+  width: 100%;
+  height: 72px;
+  max-height: 72px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.rs-ad-slot__unit-frame .rs-ad-slot__ins,
+.rs-ad-slot__unit-frame .adsbygoogle {
+  display: block;
+  width: 100% !important;
+  max-width: 100%;
+  height: 72px !important;
+  max-height: 72px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  box-sizing: border-box;
+}
+
+.rs-ad-slot__unit-frame iframe {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 72px !important;
+  max-height: 72px !important;
+}
+
+/* Desktop page banner — sits top-right in PageTopHeader */
+.rs-ad-slot--banner {
+  flex: 0 0 auto;
+  width: 100%;
+}
+
+/* Section — only mounted on tablet/mobile in JS; keep CSS as a fallback */
+.rs-ad-slot--section {
+  width: 100%;
+  margin-bottom: var(--space-md, 12px);
+}
+
+.rs-ad-slot--section-end {
+  margin-top: var(--space-lg, 16px);
+  margin-bottom: 0;
+}
+
+/* Full-width grid row between station cards */
+.rs-ad-slot--inFeed {
+  width: 100%;
+}

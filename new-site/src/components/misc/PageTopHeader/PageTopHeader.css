@@ -16,8 +16,24 @@
   box-sizing: border-box;
 }
 
+.rs-page-top-header__inner--with-trailing {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+}
+
 .rs-page-top-header__copy {
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+.rs-page-top-header__trailing {
+  flex: 0 1 auto;
+  width: min(100%, 1000px);
+  max-width: min(100%, 1000px);
+  min-width: 0;
+  padding-top: 2px;
 }
 
 .rs-page-top-header__eyebrow {
@@ -113,6 +129,14 @@
 
   .rs-page-top-header__inner {
     padding: 0 var(--space-2xl);
+  }
+
+  .rs-page-top-header__trailing {
+    display: none;
+  }
+
+  .rs-page-top-header__inner--with-trailing {
+    display: block;
   }
 }
 

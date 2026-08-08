@@ -15,6 +15,7 @@ import {
   BUTWideButton,
 } from '@/components/buttons'
 import PageTopHeader from '@/components/misc/PageTopHeader/PageTopHeader'
+import AdSlot from '@/components/ads/AdSlot'
 import NetworkMessageAlertBanner from '@/components/stations/NetworkMessageAlertBanner'
 import StationsBrowseSidebar from '@/components/stations/StationsBrowseSidebar'
 import { useNetworkMessages } from '@/hooks/useNetworkMessages'
@@ -73,6 +74,47 @@ const StationsTableColumnsModal = dynamic(
 const MIN_SKELETON_MS = 1500
 /** Minimum skeleton time when switching network tabs. */
 const MIN_NETWORK_TAB_SKELETON_MS = 1000
+
+/**
+ * In-feed ad cadence by grid width (station cards between ads).
+ * Intervals are multiples of column count so ads always land on complete rows:
+ * - 4 wide → 12 stations then an ad
+ * - 3 wide → 9 stations then an ad
+ * - 2 wide → 6 stations then an ad
+ * - 1 wide → 8 stations then an ad
+ */
+function getInFeedAdEveryNStations(columnCount: number): number {
+  if (columnCount >= 4) return 12
+  if (columnCount === 3) return 9
+  if (columnCount === 2) return 6
+  return 8
+}
+
+/** Matches `.stations-page-grid` auto-fill min track (`minmax(min(100%, 350px), 1fr)`). */
+const STATION_CARD_MIN_WIDTH_PX = 350
+
+function estimateStationCardColumnsFromWidth(grid: HTMLElement): number {
+  const width = grid.clientWidth
+  if (width <= 0) return 1
+  const gap = parseFloat(window.getComputedStyle(grid).columnGap) || 0
+  const minTrack = Math.min(width, STATION_CARD_MIN_WIDTH_PX)
+  return Math.max(1, Math.floor((width + gap) / (minTrack + gap)))
+}
+
+/**
+ * Column count for ad cadence / page size.
+ * Prefer computed grid tracks (auto-fill includes empty tracks = real column count).
+ * Card offsetTop is unreliable once full-width ads are in the grid.
+ */
+function countStationCardColumns(grid: HTMLElement): number {
+  const template = window.getComputedStyle(grid).gridTemplateColumns.trim()
+  if (template && template !== 'none') {
+    // Resolved tracks look like "360px 360px 360px" (not minmax() source text).
+    const tracks = template.split(/\s+/).filter((track) => track.length > 0)
+    if (tracks.length > 0) return tracks.length
+  }
+  return estimateStationCardColumnsFromWidth(grid)
+}
 
 interface StationsPageProps {
   /** Public list defers auth/table/admin chunks; admin keeps full editing surface. */
@@ -241,31 +283,46 @@ const StationsPageClient: React.FC<StationsPageProps> = ({
   // Enough ghost rows to fill the viewport without rendering a full 100-row page.
   const TABLE_SKELETON_ROW_COUNT = 25
   // Fewer skeleton cards on narrow viewports — less style/layout work on mobile LCP.
+  // Use 18 before viewport measure so desktop does not flash 8 → full count.
   const cardSkeletonCount = !viewportMeasured
-    ? 8
+    ? 18
     : isMobileStationsLayout
       ? 6
       : viewportWidth < 1024
         ? 12
-        : CARD_ITEMS_PER_PAGE
+        : 18
+  const showPublicAds = surface === 'public'
   const stationsPageGridRef = useRef<HTMLDivElement>(null)
   const [cardColumnCount, setCardColumnCount] = useState(1)
+  /** True after at least one successful measure (skeleton or live grid). */
+  const [cardColumnsMeasured, setCardColumnsMeasured] = useState(false)
 
   const updateCardColumnCount = useCallback(() => {
     const grid = stationsPageGridRef.current
     if (!grid) return
-    const template = window.getComputedStyle(grid).gridTemplateColumns
-    const columnCount = template.split(' ').filter((track) => track.trim().length > 0).length
+    const columnCount = countStationCardColumns(grid)
     setCardColumnCount((current) => {
       const next = Math.max(1, columnCount)
       return current === next ? current : next
     })
+    setCardColumnsMeasured(true)
   }, [])
+
+  // Declared early so column-measure effects can re-run when skeleton ↔ content swaps.
+  const showMainSkeleton =
+    !error && (loading || !minSkeletonElapsed || networkTabSkeletonActive)
 
   useLayoutEffect(() => {
     if (effectiveDisplayMode !== 'cards') return
     updateCardColumnCount()
-  }, [effectiveDisplayMode, updateCardColumnCount, visibleStations.length])
+  }, [
+    effectiveDisplayMode,
+    updateCardColumnCount,
+    visibleStations.length,
+    currentPage,
+    showPublicAds,
+    showMainSkeleton,
+  ])
 
   useEffect(() => {
     if (effectiveDisplayMode !== 'cards') return
@@ -284,7 +341,7 @@ const StationsPageClient: React.FC<StationsPageProps> = ({
       observer.disconnect()
       window.removeEventListener('resize', updateCardColumnCount)
     }
-  }, [effectiveDisplayMode, updateCardColumnCount])
+  }, [effectiveDisplayMode, updateCardColumnCount, showPublicAds, showMainSkeleton])
 
   const cardItemsPerPage = useMemo(() => {
     if (cardColumnCount === 3) {
@@ -310,6 +367,7 @@ const StationsPageClient: React.FC<StationsPageProps> = ({
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   )
+  const inFeedAdEveryNStations = getInFeedAdEveryNStations(cardColumnCount)
   const tableStations = paginatedStations
   const passengerYears = useMemo(
     () => collectYearlyPassengerYears(visibleStations),
@@ -409,8 +467,6 @@ const StationsPageClient: React.FC<StationsPageProps> = ({
     return () => window.clearTimeout(timer)
   }, [effectiveNetworkView])
 
-  const showMainSkeleton =
-    !error && (loading || !minSkeletonElapsed || networkTabSkeletonActive)
   const showMainError = Boolean(error)
   const showMainContent = !showMainSkeleton && !showMainError
   const { messages: networkMessages } = useNetworkMessages(effectiveNetworkView)
@@ -430,6 +486,9 @@ const StationsPageClient: React.FC<StationsPageProps> = ({
           isEditMode
             ? 'View or edit station fields and prepare changes for publishing'
             : 'Explore all Railway Stations, Metro and Tram Stops.'
+        }
+        trailingContent={
+          showPublicAds ? <AdSlot variant="banner" className="stations-ad-slot--banner" /> : null
         }
       />
       <div className="stations-toolbar-band">
@@ -519,6 +578,9 @@ const StationsPageClient: React.FC<StationsPageProps> = ({
 
         {/* Main Content */}
         <main className="stations-main" aria-busy={showMainSkeleton}>
+          {showPublicAds ? (
+            <AdSlot variant="section" className="stations-ad-slot--section" />
+          ) : null}
           <NetworkMessageAlertBanner messages={networkMessages} />
           {showMainError ? (
             <div className="stations-main-error" role="alert">
@@ -542,7 +604,7 @@ const StationsPageClient: React.FC<StationsPageProps> = ({
                 skeletonRowCount={TABLE_SKELETON_ROW_COUNT}
               />
             ) : (
-              <StationsCardGridSkeleton count={cardSkeletonCount} />
+              <StationsCardGridSkeleton count={cardSkeletonCount} gridRef={stationsPageGridRef} />
             )
           ) : effectiveDisplayMode === 'table' ? (
             <StationsTableView
@@ -561,14 +623,14 @@ const StationsPageClient: React.FC<StationsPageProps> = ({
             />
           ) : (
             <div className="stations-page-grid" ref={stationsPageGridRef}>
-              {paginatedStations.map((station) => {
+              {paginatedStations.flatMap((station, index) => {
                 const cardProps = {
                   station,
                   locationDisplay: formatStationLocationDisplay(station),
                   onCardClick: () => handleStationNavigate(station),
                   onInfoClick: () => handleStationNavigate(station),
                 }
-                return isLightRailStop(station) ? (
+                const card = isLightRailStop(station) ? (
                   <LightRailStopCard
                     key={getStationMapKey(station)}
                     {...cardProps}
@@ -583,6 +645,27 @@ const StationsPageClient: React.FC<StationsPageProps> = ({
                     reserveOpenedOnSpace={effectiveNetworkView === 'all' && showOpenedOn}
                   />
                 )
+
+                const stationNumber = index + 1
+                const shouldInsertAd =
+                  showPublicAds &&
+                  cardColumnsMeasured &&
+                  stationNumber % inFeedAdEveryNStations === 0 &&
+                  // No trailing ad after the last card on the page.
+                  stationNumber < paginatedStations.length
+
+                if (!shouldInsertAd) {
+                  return [card]
+                }
+
+                return [
+                  card,
+                  <AdSlot
+                    key={`in-feed-ad-${currentPage}-${index}`}
+                    variant="inFeed"
+                    className="stations-ad-slot--in-feed"
+                  />,
+                ]
               })}
             </div>
           )}

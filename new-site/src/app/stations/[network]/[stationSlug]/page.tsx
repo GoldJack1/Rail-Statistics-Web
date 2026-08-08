@@ -43,6 +43,7 @@ import { BUTWideButton } from '@/components/buttons'
 import { BUTCircleButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import PageTopHeader from '@/components/misc/PageTopHeader/PageTopHeader'
+import AdSlot from '@/components/ads/AdSlot'
 import '@/components/models/StationModal/StationModal.css'
 import { PencilSimple } from '@phosphor-icons/react'
 import { paramAsString } from '@/utils/nextParams'
@@ -550,6 +551,8 @@ function StationDetailsPage() {
     </div>
   )
 
+  const headerBannerAd = <AdSlot variant="banner" />
+
   if (error && !station) {
     return (
       <div className="container container--station-details">
@@ -557,7 +560,9 @@ function StationDetailsPage() {
           title="Failed to load station"
           subtitle={error}
           actionContent={headerActions}
+          trailingContent={headerBannerAd}
         />
+        <AdSlot variant="section" />
       </div>
     )
   }
@@ -569,7 +574,9 @@ function StationDetailsPage() {
           title="Station not found"
           subtitle="We couldn’t find that station in the current data source."
           actionContent={headerActions}
+          trailingContent={headerBannerAd}
         />
+        <AdSlot variant="section" />
       </div>
     )
   }
@@ -596,6 +603,7 @@ function StationDetailsPage() {
         title={headerTitle}
         subtitle={headerSubtitleNode}
         actionContent={headerActions}
+        trailingContent={headerBannerAd}
       />
       <div
         className={[
@@ -618,6 +626,7 @@ function StationDetailsPage() {
           />
 
           <main className="station-details-main" aria-busy={showContentSkeleton}>
+            <AdSlot variant="section" className="station-details-ad-slot--section" />
             <section className="station-details-card modal-content">
               <div
                 className="modal-body station-details-visible-body"

@@ -30,6 +30,8 @@ interface PageTopHeaderProps {
   innerClassName?: string
   actionButton?: PageTopHeaderActionButton
   actionContent?: React.ReactNode
+  /** Top-right slot (e.g. desktop banner ad). Kept outside the title copy column. */
+  trailingContent?: React.ReactNode
 }
 
 const PageTopHeader: React.FC<PageTopHeaderProps> = ({
@@ -41,10 +43,17 @@ const PageTopHeader: React.FC<PageTopHeaderProps> = ({
   className = '',
   innerClassName = '',
   actionButton,
-  actionContent
+  actionContent,
+  trailingContent,
 }) => {
   const headerClassName = ['rs-page-top-header', className].filter(Boolean).join(' ')
-  const innerClassNameCombined = ['rs-page-top-header__inner', innerClassName].filter(Boolean).join(' ')
+  const innerClassNameCombined = [
+    'rs-page-top-header__inner',
+    trailingContent ? 'rs-page-top-header__inner--with-trailing' : '',
+    innerClassName,
+  ]
+    .filter(Boolean)
+    .join(' ')
   const buttonLabel = actionButton?.label ?? 'Back'
   const buttonMode = actionButton?.mode ?? (actionButton ? 'iconText' : 'text')
   const buttonIcon = actionButton?.icon ?? (buttonMode !== 'text' ? <BackIcon /> : undefined)
@@ -94,6 +103,9 @@ const PageTopHeader: React.FC<PageTopHeaderProps> = ({
             </div>
           ) : null}
         </div>
+        {trailingContent ? (
+          <div className="rs-page-top-header__trailing">{trailingContent}</div>
+        ) : null}
       </div>
     </header>
   )

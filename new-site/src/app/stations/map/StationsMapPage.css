@@ -10,6 +10,7 @@
     --network-tab-group-shadow-pad: 8px;
     --network-tab-toolbar-bleed: var(--stations-map-chrome-inset);
     --stations-map-float-width: min(22.5rem, calc(100% - 2 * var(--stations-map-chrome-inset)));
+    position: relative;
     flex: 1;
     min-height: 0;
     display: flex;
@@ -130,6 +131,33 @@
     position: relative;
     top: auto;
     z-index: auto;
+}
+
+/*
+ * Desktop header ad — out of the flex column so map height matches the
+ * committed layout. Must not sit between toolbar and .stations-content.
+ */
+.stations-map-page__header-ad {
+    display: none;
+}
+
+@media (min-width: 1024px) {
+    .stations-map-page__header-ad {
+        display: block;
+        position: absolute;
+        top: calc(var(--space-lg) + 15px);
+        right: var(--stations-map-chrome-inset);
+        z-index: 940;
+        width: min(1000px, calc(100% - 2 * var(--stations-map-chrome-inset) - 8rem));
+        max-width: 1000px;
+        pointer-events: auto;
+    }
+
+    .stations-map-page .rs-page-top-header__copy {
+        /* Keep the title clear of the overlay ad */
+        padding-right: min(1040px, calc(100% - 2 * var(--stations-map-chrome-inset) - 6rem));
+        box-sizing: border-box;
+    }
 }
 
 /* Match +/- zoom to the Map title / network-tab inset when the panel is closed */
