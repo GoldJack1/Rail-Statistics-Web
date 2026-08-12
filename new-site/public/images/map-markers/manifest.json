@@ -1,0 +1,108 @@
+{
+  "viewBox": "0 0 32 32",
+  "selectedStroke": "#B20016",
+  "unselectedStroke": "#FFFFFF",
+  "note": "Circle pins use white (unselected) / accent (selected) strokes. SuperTram unselected is logo-only; selected uses the same r=11 stroke-width=3 circle as other networks.",
+  "supertram": {
+    "arrow": "#FF5700",
+    "blob": {
+      "light": "#000000",
+      "dark": "#FFFFFF"
+    },
+    "selectedStrokeWidth": 3,
+    "selected": {
+      "radius": 11,
+      "strokeWidth": 3
+    },
+    "unselected": {
+      "radius": 10
+    }
+  },
+  "networks": [
+    {
+      "collectionId": "stations_gbnr",
+      "slug": "gbnr",
+      "label": "GB National Rail",
+      "fill": "#312783",
+      "kind": "circle",
+      "files": {
+        "light": {
+          "unselected": "/images/map-markers/gbnr.light.unselected.svg",
+          "selected": "/images/map-markers/gbnr.light.selected.svg"
+        },
+        "dark": {
+          "unselected": "/images/map-markers/gbnr.dark.unselected.svg",
+          "selected": "/images/map-markers/gbnr.dark.selected.svg"
+        }
+      }
+    },
+    {
+      "collectionId": "stations_nitranslink",
+      "slug": "nitranslink",
+      "label": "NI Translink",
+      "fill": "#03846E",
+      "kind": "circle",
+      "files": {
+        "light": {
+          "unselected": "/images/map-markers/nitranslink.light.unselected.svg",
+          "selected": "/images/map-markers/nitranslink.light.selected.svg"
+        },
+        "dark": {
+          "unselected": "/images/map-markers/nitranslink.dark.unselected.svg",
+          "selected": "/images/map-markers/nitranslink.dark.selected.svg"
+        }
+      }
+    },
+    {
+      "collectionId": "stations_roiirerail",
+      "slug": "irish-rail",
+      "label": "Irish Rail",
+      "fill": "#32A441",
+      "kind": "circle",
+      "files": {
+        "light": {
+          "unselected": "/images/map-markers/irish-rail.light.unselected.svg",
+          "selected": "/images/map-markers/irish-rail.light.selected.svg"
+        },
+        "dark": {
+          "unselected": "/images/map-markers/irish-rail.dark.unselected.svg",
+          "selected": "/images/map-markers/irish-rail.dark.selected.svg"
+        }
+      }
+    },
+    {
+      "collectionId": "stations_gbheritage",
+      "slug": "gb-heritage",
+      "label": "GB Heritage",
+      "fill": "#dc2626",
+      "kind": "circle",
+      "files": {
+        "light": {
+          "unselected": "/images/map-markers/gb-heritage.light.unselected.svg",
+          "selected": "/images/map-markers/gb-heritage.light.selected.svg"
+        },
+        "dark": {
+          "unselected": "/images/map-markers/gb-heritage.dark.unselected.svg",
+          "selected": "/images/map-markers/gb-heritage.dark.selected.svg"
+        }
+      }
+    },
+    {
+      "collectionId": "lightrail_GBSHEFFSUPERTRAM",
+      "slug": "supertram",
+      "label": "South Yorkshire SuperTram",
+      "fill": "#f0632a",
+      "kind": "supertram",
+      "files": {
+        "light": {
+          "unselected": "/images/map-markers/supertram.light.unselected.svg",
+          "selected": "/images/map-markers/supertram.light.selected.svg"
+        },
+        "dark": {
+          "unselected": "/images/map-markers/supertram.dark.unselected.svg",
+          "selected": "/images/map-markers/supertram.dark.selected.svg"
+        }
+      }
+    }
+  ]
+}
