@@ -83,8 +83,7 @@
     padding: 0 var(--space-md) calc(var(--space-md) + var(--space-xs));
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .sidebar-dropdown__chevron {
-        transition: none;
-    }
+.sidebar-dropdown--skeleton .sidebar-dropdown__header {
+    cursor: default;
+    pointer-events: none;
 }

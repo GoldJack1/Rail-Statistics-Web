@@ -27,6 +27,7 @@ function getHeaderPageTitle(pathname: string): string {
   if (pathname === '/stations/map') return 'Maps'
   if (pathname.startsWith('/stations/')) return 'Station'
   if (pathname === '/stations') return 'Stations'
+  if (pathname === '/d-payg-fares' || pathname === '/tickets') return 'D-PAYG Fares'
   if (pathname.startsWith('/admin/design-system/colours')) return 'Colours'
   if (pathname.startsWith('/admin/design-system/typography')) return 'Typography'
   if (pathname.startsWith('/admin/design-system/buttons')) return 'Buttons'
@@ -38,6 +39,7 @@ function getHeaderPageTitle(pathname: string): string {
   if (pathname.startsWith('/admin/stations')) return 'Stations'
   if (pathname.startsWith('/admin/messages')) return 'Messages'
   if (pathname.startsWith('/admin/network-messages')) return 'Network Messages'
+  if (pathname.startsWith('/admin/d-payg')) return 'D-PAYG'
   if (pathname.startsWith('/units')) return 'Units'
   if (pathname.startsWith('/admin/api-status')) return 'API Status'
   return 'Rail Statistics'
@@ -55,6 +57,7 @@ const Header: React.FC = () => {
 
   const isHomeActive = pathname === '/' || pathname === '/home'
   const isStationsActive = pathname === '/stations' || pathname.startsWith('/admin/stations')
+  const isDpaygFaresActive = pathname === '/d-payg-fares' || pathname === '/tickets'
   const isMapActive = pathname === '/stations/map' || pathname === '/admin/map'
 
   const pageTitle = getHeaderPageTitle(pathname)
@@ -62,6 +65,7 @@ const Header: React.FC = () => {
   const navItems: MobileHeaderNavItem[] = [
     { to: '/', label: 'Home', active: isHomeActive },
     { to: '/stations', label: 'Stations', active: isStationsActive && !isMapActive },
+    { to: '/d-payg-fares', label: 'D-PAYG Fares', active: isDpaygFaresActive },
     { to: '/stations/map', label: 'Maps', active: isMapActive },
   ]
 

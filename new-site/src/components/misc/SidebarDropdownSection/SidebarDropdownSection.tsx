@@ -3,6 +3,8 @@
 import React, { useId, useState } from 'react'
 import { ChevronRightIcon } from '@/components/icons'
 import AutoAnimateCollapse from '@/components/misc/AutoAnimateCollapse/AutoAnimateCollapse'
+import { Skeleton } from '@/components/misc/Skeleton/Skeleton'
+import { TextSkeletonLine } from '@/components/misc/Skeleton/TextSkeletonLine'
 import './SidebarDropdownSection.css'
 
 interface SidebarDropdownSectionProps {
@@ -13,6 +15,8 @@ interface SidebarDropdownSectionProps {
   onExpandedChange?: (expanded: boolean) => void
   className?: string
   headerAction?: React.ReactNode
+  /** Redact title/chevron with text skeleton bars while parent content loads. */
+  skeleton?: boolean
 }
 
 const SidebarDropdownSection: React.FC<SidebarDropdownSectionProps> = ({
@@ -23,6 +27,7 @@ const SidebarDropdownSection: React.FC<SidebarDropdownSectionProps> = ({
   onExpandedChange,
   className = '',
   headerAction,
+  skeleton = false,
 }) => {
   const [internalOpen, setInternalOpen] = useState(defaultExpanded)
   const isControlled = expanded !== undefined
@@ -43,6 +48,7 @@ const SidebarDropdownSection: React.FC<SidebarDropdownSectionProps> = ({
       className={[
         'sidebar-dropdown',
         isOpen ? 'sidebar-dropdown--open' : 'sidebar-dropdown--closed',
+        skeleton ? 'sidebar-dropdown--skeleton' : '',
         className,
       ]
         .filter(Boolean)
@@ -54,10 +60,20 @@ const SidebarDropdownSection: React.FC<SidebarDropdownSectionProps> = ({
           className="sidebar-dropdown__header"
           aria-expanded={isOpen}
           aria-controls={panelId}
-          onClick={() => setIsOpen((current) => !current)}
+          disabled={skeleton}
+          onClick={() => {
+            if (skeleton) return
+            setIsOpen((current) => !current)
+          }}
         >
-          <span className="sidebar-dropdown__title">{title}</span>
-          <ChevronRightIcon className="sidebar-dropdown__chevron" aria-hidden />
+          <span className="sidebar-dropdown__title">
+            {skeleton ? <TextSkeletonLine>{title}</TextSkeletonLine> : title}
+          </span>
+          {skeleton ? (
+            <Skeleton className="station-details-nav-skeleton-icon" style={{ width: 16, height: 16 }} />
+          ) : (
+            <ChevronRightIcon className="sidebar-dropdown__chevron" aria-hidden />
+          )}
         </button>
         {isOpen && headerAction ? (
           <div className="sidebar-dropdown__header-action" onClick={(event) => event.stopPropagation()}>

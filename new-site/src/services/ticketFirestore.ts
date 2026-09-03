@@ -1,0 +1,25 @@
+import { getFirestore, type Firestore } from 'firebase/firestore'
+
+import { getFirebaseApp, initializeFirebase } from './firebase'
+
+/** Named Firestore database used by D-PAYG schemes/fares (and iOS tickets). */
+export const TICKETS_FIRESTORE_DATABASE_ID = 'railstatisticstickets'
+
+let ticketsDb: Firestore | null = null
+
+/**
+ * Returns a Firestore client bound to `railstatisticstickets`.
+ * Auth / App Check share the same Firebase app as the default DB.
+ */
+export const getTicketsFirestore = async (): Promise<Firestore> => {
+  if (ticketsDb) return ticketsDb
+
+  await initializeFirebase()
+  const app = getFirebaseApp()
+  if (!app) {
+    throw new Error('Firebase app is not initialized.')
+  }
+
+  ticketsDb = getFirestore(app, TICKETS_FIRESTORE_DATABASE_ID)
+  return ticketsDb
+}

@@ -77,12 +77,15 @@ const Footer: React.FC = () => {
             <BUTFooterLink to="/">
               Home
             </BUTFooterLink>
-            <BUTFooterLink to="/stations">
-              Stations
-            </BUTFooterLink>
-            <BUTFooterLink to="/stations/map">
-              Maps
-            </BUTFooterLink>
+              <BUTFooterLink to="/stations">
+                Stations
+              </BUTFooterLink>
+              <BUTFooterLink to="/d-payg-fares">
+                D-PAYG Fares
+              </BUTFooterLink>
+              <BUTFooterLink to="/stations/map">
+                Maps
+              </BUTFooterLink>
             <BUTFooterLink to="/migration">
               Migration
             </BUTFooterLink>
@@ -121,6 +124,9 @@ const Footer: React.FC = () => {
               </BUTFooterLink>
               <BUTFooterLink to="/admin/network-messages">
                 Network Messages
+              </BUTFooterLink>
+              <BUTFooterLink to="/admin/d-payg">
+                D-PAYG
               </BUTFooterLink>
               <BUTFooterLink to="/admin/api-status">
                 API Status

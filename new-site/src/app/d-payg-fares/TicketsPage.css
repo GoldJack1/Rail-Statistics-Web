@@ -1,0 +1,345 @@
+/* Tickets page — reuses stations-page layout grid; ticket-specific chrome only here. */
+
+.tickets-page .tickets-main {
+  min-width: 0;
+}
+
+.tickets-od-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+}
+
+.tickets-od-stack .rs-input,
+.tickets-od-stack .tickets-od-input {
+  width: 100%;
+  transition: border-radius 300ms ease-in-out;
+}
+
+.tickets-search-button {
+  margin-top: var(--space-md);
+}
+
+.tickets-station-suggestions-panel {
+  overflow: hidden;
+  opacity: 0;
+  max-height: 0;
+  transition: max-height 300ms ease-in-out, opacity 300ms ease-in-out;
+}
+
+.tickets-station-suggestions-panel--open {
+  opacity: 1;
+}
+
+.tickets-station-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tickets-station-suggestions::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.tickets-station-suggestion.rs-button {
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  justify-content: flex-start;
+}
+
+.tickets-station-suggestion__label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.tickets-station-suggestion__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tickets-station-suggestion__crs {
+  flex: 0 0 auto;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.tickets-toolbar-error {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+/* Keep tab strip interactive shell while labels shimmer (station-details TextSkeletonLine). */
+.tickets-page .network-station-tab-group--loading {
+  pointer-events: none;
+  user-select: none;
+}
+
+.tickets-page .network-station-tab-group--loading .rs-button--tab {
+  cursor: default;
+}
+
+/* OD skeleton shells — same layout as live inputs, TextSkeletonLine for copy. */
+.tickets-od-input--skeleton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.tickets-od-input__skeleton-placeholder {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: normal;
+}
+
+/*
+ * Tickets sidebar uses TextSkeletonLine explicitly. Neutralize the stations-page
+ * CSS redact fill so Journey / Find fares don’t get a double skeleton wash.
+ */
+.tickets-page .stations-sidebar--loading .sidebar-dropdown__title,
+.tickets-page .stations-sidebar--loading .tickets-search-button .rs-button__text {
+  color: inherit !important;
+  background-color: transparent !important;
+  border-radius: 0;
+}
+
+.tickets-trial-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-top: var(--space-xl);
+}
+
+.tickets-trial-meta__operators {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.tickets-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 40rem;
+}
+
+.tickets-empty-state__intro {
+  margin: 0 0 var(--space-md);
+}
+
+.tickets-empty-state .station-section-title--page-heading {
+  margin-top: 0;
+  margin-bottom: var(--space-md);
+}
+
+.tickets-empty-state__meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.tickets-empty-state__meta .tickets-trial-meta__operators {
+  margin: 0;
+}
+
+.tickets-empty-state__meta .station-details-subsection {
+  margin-top: var(--space-sm);
+  margin-bottom: 0;
+}
+
+.tickets-empty-state__meta .modal-details-grid,
+.tickets-trial-meta .modal-details-grid {
+  grid-template-columns: repeat(2, minmax(0, 10rem));
+  gap: var(--space-lg);
+  max-width: 22rem;
+}
+
+.tickets-main .station-section-title--page-heading {
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-sm);
+}
+
+.tickets-results-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin: 0 0 var(--space-xl);
+  max-width: 40rem;
+}
+
+.tickets-journey-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+}
+
+.tickets-journey-heading .tickets-trial-meta__operators {
+  margin: 0;
+  order: 0;
+  font-size: var(--text-sm);
+  line-height: 1.35;
+}
+
+.tickets-results-header .tickets-results-muted {
+  margin: 0;
+}
+
+.tickets-trial-meta .station-details-subsection {
+  margin-top: 0;
+}
+
+.tickets-trial-meta .tickets-results-disclaimer + .station-details-subsection {
+  margin-top: var(--space-sm);
+}
+
+.tickets-trial-meta__note {
+  margin: var(--space-md) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.tickets-main .modal-section > .tickets-trial-meta {
+  margin-top: var(--space-xl);
+}
+
+.tickets-results-muted,
+.tickets-results-error {
+  margin: 0 0 var(--space-xl);
+  line-height: 1.5;
+}
+
+.tickets-results-muted {
+  color: var(--text-secondary);
+}
+
+.tickets-results-error {
+  color: var(--text-primary);
+}
+
+.tickets-results-route {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-lg, 1.125rem);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.tickets-results-route__station {
+  display: inline;
+}
+
+.tickets-results-route__crs {
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.tickets-results-route__arrow {
+  display: inline-block;
+  margin: 0 0.35em;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.tickets-results-disclaimer {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 40rem;
+}
+
+.tickets-trial-meta .tickets-results-disclaimer {
+  margin-bottom: 0;
+}
+
+/* Keep the browse-page grid padding while using the station-details card chrome. */
+.tickets-page .station-details-main.stations-main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tickets-page .station-details-main .station-details-card.modal-content {
+  background: transparent !important;
+  max-width: none;
+  width: 100%;
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
+  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  animation: none;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.tickets-page .station-details-main .station-details-visible-body {
+  flex: 1 1 auto;
+}
+
+/*
+ * Match station-details height floor so short fare content doesn’t leave a stubby
+ * card/sidebar. Layout + sidebar stretch to at least ~11 section rows.
+ */
+@media (min-width: 1024px) {
+  .tickets-page {
+    --station-details-section-row: 64px;
+    --station-details-min-section-count: 11;
+  }
+
+  .tickets-page .stations-content {
+    min-height: calc(
+      var(--station-details-min-section-count) * var(--station-details-section-row)
+    );
+    align-items: stretch;
+  }
+
+  .tickets-page .stations-sidebar {
+    min-height: calc(
+      var(--station-details-min-section-count) * var(--station-details-section-row)
+    );
+  }
+
+  .tickets-page .stations-sidebar-panel {
+    flex: 1 1 auto;
+    min-height: calc(
+      var(--station-details-min-section-count) * var(--station-details-section-row)
+    );
+    height: 100%;
+  }
+
+  .tickets-page .station-details-main.stations-main {
+    align-self: stretch;
+    min-height: 100%;
+  }
+
+  .tickets-page .station-details-main .station-details-card.modal-content {
+    min-height: 100%;
+  }
+}
