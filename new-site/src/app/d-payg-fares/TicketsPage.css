@@ -9,6 +9,9 @@
   flex-direction: column;
   gap: 0;
   width: 100%;
+  /* Vertical room for `--button-drop-shadow`; keep full width to match Find fares. */
+  padding: 4px 0 8px;
+  box-sizing: border-box;
 }
 
 .tickets-od-stack .rs-input,
@@ -19,17 +22,26 @@
 
 .tickets-search-button {
   margin-top: var(--space-md);
+  width: 100%;
 }
 
 .tickets-station-suggestions-panel {
   overflow: hidden;
   opacity: 0;
   max-height: 0;
+  box-sizing: border-box;
   transition: max-height 300ms ease-in-out, opacity 300ms ease-in-out;
 }
 
 .tickets-station-suggestions-panel--open {
   opacity: 1;
+  /* Allow side/bottom drop shadows once the list is open. */
+  overflow: visible;
+}
+
+/* Destination list sits above Find fares — leave room for the bottom-rounded shadow. */
+.tickets-station-suggestions-panel--dest .tickets-station-suggestions {
+  padding-bottom: 8px;
 }
 
 .tickets-station-suggestions {
@@ -39,14 +51,8 @@
   margin: 0;
   padding: 0;
   width: 100%;
-  overflow-y: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.tickets-station-suggestions::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+  overflow: visible;
+  box-sizing: border-box;
 }
 
 .tickets-station-suggestion.rs-button {
@@ -280,6 +286,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Don’t clip the results card drop shadow (stations layout uses overflow-x: clip). */
+  overflow: visible;
 }
 
 .tickets-page .station-details-main .station-details-card.modal-content {
@@ -304,6 +312,21 @@
 }
 
 /*
+ * Journey section: don’t clip OD input / suggestion / Find-fares drop shadows.
+ * (AutoAnimateCollapse defaults to overflow:hidden for height animation.)
+ */
+.tickets-page .stations-sidebar-panel .sidebar-dropdown__panel-host.collapse-panel,
+.tickets-page .stations-sidebar-panel .sidebar-dropdown__panel.collapse-panel__item {
+  overflow: visible;
+}
+
+.tickets-page .stations-sidebar-panel .sidebar-dropdown__panel-inner {
+  /* Room for first OD input shadow; bottom already has section padding. */
+  padding-top: 2px;
+  overflow: visible;
+}
+
+/*
  * Match station-details height floor so short fare content doesn’t leave a stubby
  * card/sidebar. Layout + sidebar stretch to at least ~11 section rows.
  */
@@ -313,7 +336,9 @@
     --station-details-min-section-count: 11;
   }
 
+  /* Allow card / button shadows to paint into the content gap. */
   .tickets-page .stations-content {
+    overflow: visible;
     min-height: calc(
       var(--station-details-min-section-count) * var(--station-details-section-row)
     );
@@ -337,6 +362,11 @@
   .tickets-page .station-details-main.stations-main {
     align-self: stretch;
     min-height: 100%;
+    /* Room for the results card shadow inside the main column. */
+    padding-inline: 4px;
+    margin-inline: -4px;
+    width: calc(100% + 8px);
+    box-sizing: border-box;
   }
 
   .tickets-page .station-details-main .station-details-card.modal-content {

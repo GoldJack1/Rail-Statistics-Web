@@ -27,7 +27,7 @@ function getHeaderPageTitle(pathname: string): string {
   if (pathname === '/stations/map') return 'Maps'
   if (pathname.startsWith('/stations/')) return 'Station'
   if (pathname === '/stations') return 'Stations'
-  if (pathname === '/d-payg-fares' || pathname === '/tickets') return 'D-PAYG Fares'
+  if (pathname.startsWith('/d-payg-fares') || pathname === '/tickets') return 'D-PAYG Fares'
   if (pathname.startsWith('/admin/design-system/colours')) return 'Colours'
   if (pathname.startsWith('/admin/design-system/typography')) return 'Typography'
   if (pathname.startsWith('/admin/design-system/buttons')) return 'Buttons'
@@ -57,7 +57,7 @@ const Header: React.FC = () => {
 
   const isHomeActive = pathname === '/' || pathname === '/home'
   const isStationsActive = pathname === '/stations' || pathname.startsWith('/admin/stations')
-  const isDpaygFaresActive = pathname === '/d-payg-fares' || pathname === '/tickets'
+  const isDpaygFaresActive = pathname.startsWith('/d-payg-fares') || pathname === '/tickets'
   const isMapActive = pathname === '/stations/map' || pathname === '/admin/map'
 
   const pageTitle = getHeaderPageTitle(pathname)

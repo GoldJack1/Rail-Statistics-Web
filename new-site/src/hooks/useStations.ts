@@ -81,9 +81,12 @@ export const useStations = (options?: { defer?: boolean }): UseStationsReturn =>
   const snapshot = useMemo(() => {
     if (!hydrated) return SERVER_STATION_SNAPSHOT
     const stations = getMergedNetworkStationsForDisplay()
+    // Once IndexedDB (or network) has rows, clear the page skeleton even if
+    // initial sync is still waiting on freshness/network for other collections.
+    // Min-skeleton timing in the page UI covers the fast-cache flash case.
     const loading =
-      isStationsInitialSyncPending() ||
-      (isAnyNetworkCollectionLoading() && stations.length === 0)
+      stations.length === 0 &&
+      (isStationsInitialSyncPending() || isAnyNetworkCollectionLoading())
     const isRefreshing = isAnyNetworkCollectionRefreshing()
     const error = stations.length === 0 ? buildStationsError() : null
     return { stations, loading, isRefreshing, error }
@@ -153,11 +156,11 @@ export const useStationsMap = (): UseStationsMapReturn => {
           ? leanStations
           : fullStations
     const loading =
-      isStationsInitialSyncPending() ||
-      (isAnyNetworkCollectionLoading() && stations.length === 0)
+      stations.length === 0 &&
+      (isStationsInitialSyncPending() || isAnyNetworkCollectionLoading())
     const isRefreshing = isAnyNetworkCollectionRefreshing()
     const stationsLoading =
-      isStationsInitialSyncPending() ||
+      (stations.length === 0 && isStationsInitialSyncPending()) ||
       (networkView === 'all'
         ? isAnyNetworkCollectionLoading() || isAnyNetworkCollectionRefreshing()
         : isNetworkCollection(networkView)

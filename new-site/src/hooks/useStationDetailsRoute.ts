@@ -34,7 +34,6 @@ export function useStationDetailsRoute(network: string, stationSlug: string) {
   const routeStillSettling = useMemo(() => {
     if (station) return false
     if (!network || !stationSlug) return false
-    if (loading || isStationsInitialSyncPending()) return true
 
     if (routeCollectionId) {
       if (isCollectionLoading(routeCollectionId)) return true
@@ -45,10 +44,14 @@ export function useStationDetailsRoute(network: string, stationSlug: string) {
       if (hasRows) return false
       // Empty collection: wait while anything is still loading, unless this route failed.
       if (getCollectionError(routeCollectionId)) return false
-      return isAnyNetworkCollectionLoading()
+      return (
+        loading ||
+        isStationsInitialSyncPending() ||
+        isAnyNetworkCollectionLoading()
+      )
     }
 
-    return isAnyNetworkCollectionLoading()
+    return loading || isStationsInitialSyncPending() || isAnyNetworkCollectionLoading()
   }, [station, network, stationSlug, loading, routeCollectionId, stations])
 
   return {

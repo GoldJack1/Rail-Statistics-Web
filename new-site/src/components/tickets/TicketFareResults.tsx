@@ -403,7 +403,7 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
     )
   }
 
-  if (isMidlandsTrial(scheme)) {
+  if (isMidlandsTrial(scheme) && !fare) {
     return (
       <TicketFareCard>
         <div className="modal-section">

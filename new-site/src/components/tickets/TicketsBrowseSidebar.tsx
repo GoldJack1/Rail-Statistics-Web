@@ -29,6 +29,8 @@ type ActiveField = 'origin' | 'dest'
 
 const SUGGESTION_ROW_HEIGHT_PX = 40
 const MAX_VISIBLE_SUGGESTIONS = 8
+/** Bottom pad on destination suggestions so the last row’s drop shadow isn’t clipped. */
+const DEST_SUGGESTION_SHADOW_PAD_PX = 8
 
 function stationPickLabel(station: DPAYGStation): string {
   return `${station.name} (${station.crs})`
@@ -112,14 +114,17 @@ function StationSuggestionPanel({
   if (!isPanelVisible) return null
 
   const rowCount = Math.min(Math.max(renderedStations.length, 1), MAX_VISIBLE_SUGGESTIONS)
-  const rowViewportHeight = `${rowCount * SUGGESTION_ROW_HEIGHT_PX}px`
-  const panelMaxHeight = isOpen ? rowViewportHeight : '0px'
+  const shadowPad = roundLast ? DEST_SUGGESTION_SHADOW_PAD_PX : 0
+  const panelMaxHeight = isOpen
+    ? `${rowCount * SUGGESTION_ROW_HEIGHT_PX + shadowPad}px`
+    : '0px'
 
   return (
     <div
       className={[
         'tickets-station-suggestions-panel',
         isOpen ? 'tickets-station-suggestions-panel--open' : '',
+        roundLast ? 'tickets-station-suggestions-panel--dest' : '',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -130,7 +135,6 @@ function StationSuggestionPanel({
         className="tickets-station-suggestions"
         role="listbox"
         aria-label={field === 'origin' ? 'Origin suggestions' : 'Destination suggestions'}
-        style={{ maxHeight: rowViewportHeight }}
       >
         {renderedStations.map((station, index) => {
           const isLast = index === renderedStations.length - 1

@@ -774,10 +774,14 @@ export async function bootstrapStationsData(options: {
     return
   }
 
-  await loadAllNetworkStationsProgressive({
+  // Load the default network first so the UI can paint; remaining networks continue
+  // in the background. Waiting on every collection here kept initialSyncPending (and
+  // the page skeleton) stuck on refresh even after IndexedDB already had rows.
+  await ensureCollectionLoaded(DEFAULT_NETWORK_COLLECTION_ID, { detailLevel, force })
+  void loadAllNetworkStationsProgressive({
     priorityCollectionId: DEFAULT_NETWORK_COLLECTION_ID,
     detailLevel,
-    force,
+    force: false,
   })
 }
 

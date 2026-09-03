@@ -1,6 +1,7 @@
 'use client'
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useParams, usePathname, useRouter } from 'next/navigation'
 
 import DpaygTrialTabGroup from '@/components/tickets/DpaygTrialTabGroup'
 import TicketFareResults from '@/components/tickets/TicketFareResults'
@@ -9,22 +10,38 @@ import { PageTopHeader } from '@/components/misc'
 import { getFareForOd, getScheme, listSchemes } from '@/services/dpaygSchemes'
 import type { DPAYGFare, DPAYGScheme, DPAYGStation } from '@/types/dpayg'
 import { matchDpaygStation } from '@/utils/dpaygStationSearch'
+import {
+  buildDpaygFaresPath,
+  buildDpaygOdSlug,
+  findSchemeByAreaSlug,
+  getDpaygAreaSlug,
+  parseDpaygOdSlug,
+} from '@/utils/dpaygUrl'
 
 import '@/app/admin/stations/StationsPageRefactored.css'
 import '@/app/stations/[network]/[stationSlug]/StationDetailsPage.css'
 import './TicketsPage.css'
 
-/** Minimum time the loading skeleton stays visible so fast cache hits do not flash. */
-const MIN_SKELETON_MS = 1500
-
 const TicketsPageClient: React.FC = () => {
+  const router = useRouter()
+  const pathname = usePathname() ?? '/d-payg-fares'
+  const params = useParams()
+  const slugParts = useMemo(() => {
+    const raw = params.slug
+    if (Array.isArray(raw)) return raw.map((part) => String(part).toLowerCase())
+    if (typeof raw === 'string' && raw) return [raw.toLowerCase()]
+    return [] as string[]
+  }, [params.slug])
+  const areaSlug = slugParts[0] ?? ''
+  const odSlug = slugParts[1] ?? ''
+  const urlOd = useMemo(() => (odSlug ? parseDpaygOdSlug(odSlug) : null), [odSlug])
+
   const [schemes, setSchemes] = useState<DPAYGScheme[]>([])
   const [selectedSchemeId, setSelectedSchemeId] = useState('')
   const [scheme, setScheme] = useState<DPAYGScheme | null>(null)
   const [loadingSchemes, setLoadingSchemes] = useState(true)
   const [loadingScheme, setLoadingScheme] = useState(false)
   const [loadingFare, setLoadingFare] = useState(false)
-  const [minSkeletonElapsed, setMinSkeletonElapsed] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [searchError, setSearchError] = useState<string | null>(null)
 
@@ -35,10 +52,28 @@ const TicketsPageClient: React.FC = () => {
   const [fare, setFare] = useState<DPAYGFare | null>(null)
   const [searched, setSearched] = useState(false)
 
-  useEffect(() => {
-    setMinSkeletonElapsed(false)
-    const timer = window.setTimeout(() => setMinSkeletonElapsed(true), MIN_SKELETON_MS)
-    return () => window.clearTimeout(timer)
+  /** Avoid re-running the URL OD lookup for the same path. */
+  const appliedOdPathRef = useRef<string | null>(null)
+  /** Area slug from a tab click while the router pathname is still catching up. */
+  const pendingAreaSlugRef = useRef<string | null>(null)
+
+  const syncPath = useCallback(
+    (nextAreaSlug: string, nextOdSlug?: string | null, mode: 'push' | 'replace' = 'replace') => {
+      const nextPath = buildDpaygFaresPath(nextAreaSlug, nextOdSlug)
+      if (nextPath === pathname) return
+      if (mode === 'push') router.push(nextPath)
+      else router.replace(nextPath)
+    },
+    [pathname, router]
+  )
+
+  const resetSearch = useCallback(() => {
+    setSearched(false)
+    setOrigin(null)
+    setDest(null)
+    setFare(null)
+    setSearchError(null)
+    setLoadingFare(false)
   }, [])
 
   useEffect(() => {
@@ -49,8 +84,6 @@ const TicketsPageClient: React.FC = () => {
         const rows = await listSchemes()
         const trials = rows.filter((s) => s.status === 'trial' || rows.length <= 3)
         setSchemes(trials.length > 0 ? trials : rows)
-        if (trials[0]?.id) setSelectedSchemeId(trials[0].id)
-        else if (rows[0]?.id) setSelectedSchemeId(rows[0].id)
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : 'Failed to load D-PAYG trials.')
       } finally {
@@ -59,6 +92,53 @@ const TicketsPageClient: React.FC = () => {
     })()
   }, [])
 
+  // Resolve / canonicalize area from the URL (or default to the first trial).
+  useEffect(() => {
+    if (loadingSchemes || schemes.length === 0) return
+
+    // Tab click already chose a scheme; wait until the pathname matches before
+    // re-deriving from the (stale) URL — otherwise Midlands snaps back to Sheffield.
+    if (pendingAreaSlugRef.current) {
+      if (areaSlug === pendingAreaSlugRef.current) {
+        pendingAreaSlugRef.current = null
+      } else {
+        return
+      }
+    }
+
+    const fromUrl = areaSlug ? findSchemeByAreaSlug(schemes, areaSlug) : null
+    const nextScheme = fromUrl ?? schemes[0]
+    if (!nextScheme) return
+
+    const canonicalArea = getDpaygAreaSlug(nextScheme)
+    if (!areaSlug || !fromUrl || areaSlug !== canonicalArea) {
+      // Keep a valid OD only when the area matched; otherwise drop it.
+      const keepOd = fromUrl && urlOd ? odSlug : null
+      syncPath(canonicalArea, keepOd, 'replace')
+    }
+
+    if (selectedSchemeId === nextScheme.id) return
+
+    // Area changed via URL (tabs / back-forward) — clear local search unless OD is present.
+    appliedOdPathRef.current = null
+    if (!urlOd) {
+      resetSearch()
+      setOriginQuery('')
+      setDestQuery('')
+    }
+    setSelectedSchemeId(nextScheme.id)
+  }, [
+    loadingSchemes,
+    schemes,
+    areaSlug,
+    odSlug,
+    urlOd,
+    syncPath,
+    selectedSchemeId,
+    resetSearch,
+  ])
+
+  // Prefer the scheme already returned by listSchemes (includes stations); refresh in background.
   useEffect(() => {
     if (!selectedSchemeId) {
       setScheme(null)
@@ -66,17 +146,29 @@ const TicketsPageClient: React.FC = () => {
       return
     }
 
-    let cancelled = false
-    setScheme(null)
-    setLoadingScheme(true)
-    setLoadError(null)
+    const fromList = schemes.find((row) => row.id === selectedSchemeId) ?? null
+    if (fromList) {
+      setScheme(fromList)
+      setLoadingScheme(false)
+      setLoadError(null)
+    } else {
+      setScheme(null)
+      setLoadingScheme(true)
+    }
 
+    let cancelled = false
     void (async () => {
       try {
         const loaded = await getScheme(selectedSchemeId)
-        if (!cancelled) setScheme(loaded)
+        if (cancelled) return
+        if (loaded) setScheme(loaded)
+        else if (!fromList) {
+          setScheme(null)
+          setLoadError('Failed to load trial.')
+        }
       } catch (err) {
-        if (!cancelled) {
+        if (cancelled) return
+        if (!fromList) {
           setScheme(null)
           setLoadError(err instanceof Error ? err.message : 'Failed to load trial.')
         }
@@ -88,30 +180,21 @@ const TicketsPageClient: React.FC = () => {
     return () => {
       cancelled = true
     }
-  }, [selectedSchemeId])
-
-  const resetSearch = useCallback(() => {
-    setSearched(false)
-    setOrigin(null)
-    setDest(null)
-    setFare(null)
-    setSearchError(null)
-    setLoadingFare(false)
-  }, [])
+  }, [selectedSchemeId, schemes])
 
   const handleSchemeChange = (schemeId: string) => {
     if (schemeId === selectedSchemeId) return
+    const next = schemes.find((row) => row.id === schemeId)
+    if (!next) return
+    const nextArea = getDpaygAreaSlug(next)
+    pendingAreaSlugRef.current = nextArea
+    appliedOdPathRef.current = null
+    resetSearch()
+    setOriginQuery('')
+    setDestQuery('')
     setSelectedSchemeId(schemeId)
-    resetSearch()
-    setOriginQuery('')
-    setDestQuery('')
+    syncPath(nextArea, null, 'push')
   }
-
-  useEffect(() => {
-    resetSearch()
-    setOriginQuery('')
-    setDestQuery('')
-  }, [selectedSchemeId, resetSearch])
 
   const handleOriginQueryChange = (value: string) => {
     setOriginQuery(value)
@@ -129,50 +212,90 @@ const TicketsPageClient: React.FC = () => {
     else setDestQuery(label)
   }
 
-  const runSearch = useCallback(async () => {
-    if (!scheme) return
-    setLoadingFare(true)
-    setSearchError(null)
-    setSearched(true)
+  const runSearch = useCallback(
+    async (opts?: {
+      originCrs?: string
+      destCrs?: string
+      originQueryOverride?: string
+      destQueryOverride?: string
+      updateUrl?: boolean
+    }) => {
+      if (!scheme) return
+      setLoadingFare(true)
+      setSearchError(null)
+      setSearched(true)
 
-    const matchedOrigin = matchDpaygStation(scheme.stations, originQuery)
-    const matchedDest = matchDpaygStation(scheme.stations, destQuery)
-    setOrigin(matchedOrigin)
-    setDest(matchedDest)
+      const matchedOrigin = opts?.originCrs
+        ? scheme.stations.find((s) => s.crs.toUpperCase() === opts.originCrs!.toUpperCase()) ??
+          null
+        : matchDpaygStation(scheme.stations, opts?.originQueryOverride ?? originQuery)
+      const matchedDest = opts?.destCrs
+        ? scheme.stations.find((s) => s.crs.toUpperCase() === opts.destCrs!.toUpperCase()) ?? null
+        : matchDpaygStation(scheme.stations, opts?.destQueryOverride ?? destQuery)
 
-    if (!matchedOrigin || !matchedDest) {
-      setFare(null)
-      setLoadingFare(false)
+      setOrigin(matchedOrigin)
+      setDest(matchedDest)
+
+      if (matchedOrigin) {
+        setOriginQuery(`${matchedOrigin.name} (${matchedOrigin.crs})`)
+      }
+      if (matchedDest) {
+        setDestQuery(`${matchedDest.name} (${matchedDest.crs})`)
+      }
+
+      if (!matchedOrigin || !matchedDest) {
+        setFare(null)
+        setLoadingFare(false)
+        return
+      }
+
+      if (matchedOrigin.crs === matchedDest.crs) {
+        setSearchError('Origin and destination must be different stations.')
+        setFare(null)
+        setLoadingFare(false)
+        return
+      }
+
+      const nextOd = buildDpaygOdSlug(matchedOrigin.crs, matchedDest.crs)
+      if (opts?.updateUrl !== false) {
+        syncPath(getDpaygAreaSlug(scheme), nextOd, 'replace')
+        appliedOdPathRef.current = buildDpaygFaresPath(getDpaygAreaSlug(scheme), nextOd)
+      }
+
+      // Dynamic corridors may still have published OD rows — always try the table.
+      // If none exist, results UI shows the dynamic/in-app pricing message instead.
+      try {
+        const loadedFare = await getFareForOd(scheme.id, matchedOrigin.crs, matchedDest.crs)
+        setFare(loadedFare)
+      } catch (err) {
+        setSearchError(err instanceof Error ? err.message : 'Failed to load fare.')
+        setFare(null)
+      } finally {
+        setLoadingFare(false)
+      }
+    },
+    [scheme, originQuery, destQuery, syncPath]
+  )
+
+  // Deep-link: /area/shf-mhs → fill fields and look up fare once scheme is ready.
+  useEffect(() => {
+    if (!scheme || !urlOd || loadingScheme) return
+    const pathKey = buildDpaygFaresPath(getDpaygAreaSlug(scheme), odSlug)
+    if (appliedOdPathRef.current === pathKey) return
+    if (getDpaygAreaSlug(scheme) !== areaSlug && areaSlug) {
+      // Wait until area slug is canonicalized to this scheme.
       return
     }
-
-    if (matchedOrigin.crs === matchedDest.crs) {
-      setSearchError('Origin and destination must be different stations.')
-      setFare(null)
-      setLoadingFare(false)
-      return
-    }
-
-    if (scheme.pricingModel === 'dynamic') {
-      setFare(null)
-      setLoadingFare(false)
-      return
-    }
-
-    try {
-      const loadedFare = await getFareForOd(scheme.id, matchedOrigin.crs, matchedDest.crs)
-      setFare(loadedFare)
-    } catch (err) {
-      setSearchError(err instanceof Error ? err.message : 'Failed to load fare.')
-      setFare(null)
-    } finally {
-      setLoadingFare(false)
-    }
-  }, [scheme, originQuery, destQuery])
+    appliedOdPathRef.current = pathKey
+    void runSearch({
+      originCrs: urlOd.originCrs,
+      destCrs: urlOd.destCrs,
+      updateUrl: false,
+    })
+  }, [scheme, urlOd, odSlug, areaSlug, loadingScheme, runSearch])
 
   // Keep skeleton up across the schemes→scheme handoff (avoids an empty-state flash).
   const contentLoading =
-    !minSkeletonElapsed ||
     loadingSchemes ||
     loadingScheme ||
     (Boolean(selectedSchemeId) && !scheme && !loadError)
@@ -194,7 +317,7 @@ const TicketsPageClient: React.FC = () => {
             schemes={schemes}
             value={selectedSchemeId}
             onChange={handleSchemeChange}
-            loading={loadingSchemes || !minSkeletonElapsed}
+            loading={loadingSchemes}
           />
         </div>
       </div>
