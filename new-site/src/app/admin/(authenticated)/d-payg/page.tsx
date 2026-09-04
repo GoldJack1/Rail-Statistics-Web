@@ -31,7 +31,7 @@ const DpaygSchemesListPage: React.FC = () => {
     setLoading(true)
     setError(null)
     try {
-      const schemes = await listSchemes()
+      const schemes = await listSchemes({ includeFareCounts: true })
       setRows(schemes)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load D-PAYG schemes.')

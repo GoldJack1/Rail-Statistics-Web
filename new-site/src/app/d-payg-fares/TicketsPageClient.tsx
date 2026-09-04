@@ -138,7 +138,8 @@ const TicketsPageClient: React.FC = () => {
     resetSearch,
   ])
 
-  // Prefer the scheme already returned by listSchemes (includes stations); refresh in background.
+  // Use the scheme from listSchemes directly — it already includes stations/caps.
+  // A second getScheme round-trip was adding lag on tab switches (e.g. Midlands).
   useEffect(() => {
     if (!selectedSchemeId) {
       setScheme(null)
@@ -151,27 +152,27 @@ const TicketsPageClient: React.FC = () => {
       setScheme(fromList)
       setLoadingScheme(false)
       setLoadError(null)
-    } else {
-      setScheme(null)
-      setLoadingScheme(true)
+      return
     }
 
     let cancelled = false
+    setScheme(null)
+    setLoadingScheme(true)
     void (async () => {
       try {
         const loaded = await getScheme(selectedSchemeId)
         if (cancelled) return
-        if (loaded) setScheme(loaded)
-        else if (!fromList) {
+        if (loaded) {
+          setScheme(loaded)
+          setLoadError(null)
+        } else {
           setScheme(null)
           setLoadError('Failed to load trial.')
         }
       } catch (err) {
         if (cancelled) return
-        if (!fromList) {
-          setScheme(null)
-          setLoadError(err instanceof Error ? err.message : 'Failed to load trial.')
-        }
+        setScheme(null)
+        setLoadError(err instanceof Error ? err.message : 'Failed to load trial.')
       } finally {
         if (!cancelled) setLoadingScheme(false)
       }

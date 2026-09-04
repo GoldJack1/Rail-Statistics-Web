@@ -195,26 +195,68 @@ export const faresEqual = (a: DPAYGFare, b: DPAYGFare): boolean =>
 
 export type DPAYGSchemeListItem = DPAYGScheme & { fareCount: number }
 
-export const listSchemes = async (): Promise<DPAYGSchemeListItem[]> => {
-  const db = await ensureTicketsDb()
-  const [schemesSnap, faresSnap] = await Promise.all([
-    getDocs(collection(db, DPAYG_SCHEMES_COLLECTION)),
-    getDocs(collection(db, DPAYG_FARES_COLLECTION))
-  ])
+export type ListSchemesOptions = {
+  /**
+   * When true, also download every `dpayg_fares` doc to compute per-scheme counts.
+   * Admin list needs this; the public fare lookup does not (and it dominates cold load time).
+   */
+  includeFareCounts?: boolean
+}
 
-  const fareCounts = new Map<string, number>()
-  for (const fareDoc of faresSnap.docs) {
-    const schemeId = asString(fareDoc.data().schemeId).trim()
-    if (!schemeId) continue
-    fareCounts.set(schemeId, (fareCounts.get(schemeId) ?? 0) + 1)
+/** Session cache for the lightweight schemes list (no fare scan). */
+let schemesListCache: DPAYGSchemeListItem[] | null = null
+let schemesListInflight: Promise<DPAYGSchemeListItem[]> | null = null
+
+export const invalidateSchemesListCache = (): void => {
+  schemesListCache = null
+  schemesListInflight = null
+}
+
+export const listSchemes = async (
+  options?: ListSchemesOptions
+): Promise<DPAYGSchemeListItem[]> => {
+  const includeFareCounts = options?.includeFareCounts === true
+
+  if (!includeFareCounts) {
+    if (schemesListCache) return schemesListCache
+    if (schemesListInflight) return schemesListInflight
   }
 
-  return schemesSnap.docs
-    .map((snap) => {
-      const scheme = mapSchemeDoc(snap.id, snap.data())
-      return { ...scheme, fareCount: fareCounts.get(scheme.id) ?? 0 }
-    })
-    .sort((a, b) => a.sortOrder - b.sortOrder || a.shortName.localeCompare(b.shortName))
+  const load = (async (): Promise<DPAYGSchemeListItem[]> => {
+    const db = await ensureTicketsDb()
+    const schemesSnap = await getDocs(collection(db, DPAYG_SCHEMES_COLLECTION))
+
+    let fareCounts = new Map<string, number>()
+    if (includeFareCounts) {
+      const faresSnap = await getDocs(collection(db, DPAYG_FARES_COLLECTION))
+      fareCounts = new Map<string, number>()
+      for (const fareDoc of faresSnap.docs) {
+        const schemeId = asString(fareDoc.data().schemeId).trim()
+        if (!schemeId) continue
+        fareCounts.set(schemeId, (fareCounts.get(schemeId) ?? 0) + 1)
+      }
+    }
+
+    return schemesSnap.docs
+      .map((snap) => {
+        const scheme = mapSchemeDoc(snap.id, snap.data())
+        return { ...scheme, fareCount: fareCounts.get(scheme.id) ?? 0 }
+      })
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.shortName.localeCompare(b.shortName))
+  })()
+
+  if (!includeFareCounts) {
+    schemesListInflight = load
+    try {
+      const rows = await load
+      schemesListCache = rows
+      return rows
+    } finally {
+      schemesListInflight = null
+    }
+  }
+
+  return load
 }
 
 export const getScheme = async (schemeId: string): Promise<DPAYGScheme | null> => {
@@ -323,6 +365,7 @@ export const publishSchemeAndFares = async (input: PublishSchemeAndFaresInput): 
 
   if (ops.length === 0) return
   await commitInChunks(db, ops)
+  invalidateSchemesListCache()
 }
 
 /** Convenience: overwrite a single fare doc (tests / scripts). */
