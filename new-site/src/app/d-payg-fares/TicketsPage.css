@@ -87,42 +87,6 @@
   color: var(--text-primary);
 }
 
-/* Keep tab strip interactive shell while labels shimmer (station-details TextSkeletonLine). */
-.tickets-page .network-station-tab-group--loading {
-  pointer-events: none;
-  user-select: none;
-}
-
-.tickets-page .network-station-tab-group--loading .rs-button--tab {
-  cursor: default;
-}
-
-/* OD skeleton shells — same layout as live inputs, TextSkeletonLine for copy. */
-.tickets-od-input--skeleton {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  pointer-events: none;
-  user-select: none;
-}
-
-.tickets-od-input__skeleton-placeholder {
-  flex: 1 1 auto;
-  min-width: 0;
-  line-height: normal;
-}
-
-/*
- * Tickets sidebar uses TextSkeletonLine explicitly. Neutralize the stations-page
- * CSS redact fill so Journey / Find fares don’t get a double skeleton wash.
- */
-.tickets-page .stations-sidebar--loading .sidebar-dropdown__title,
-.tickets-page .stations-sidebar--loading .tickets-search-button .rs-button__text {
-  color: inherit !important;
-  background-color: transparent !important;
-  border-radius: 0;
-}
-
 .tickets-trial-meta {
   display: flex;
   flex-direction: column;

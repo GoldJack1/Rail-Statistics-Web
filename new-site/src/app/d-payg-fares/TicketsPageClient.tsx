@@ -294,14 +294,9 @@ const TicketsPageClient: React.FC = () => {
     })
   }, [scheme, urlOd, odSlug, areaSlug, loadingScheme, runSearch])
 
-  // Keep skeleton up across the schemes→scheme handoff (avoids an empty-state flash).
-  const contentLoading =
-    loadingSchemes ||
-    loadingScheme ||
-    (Boolean(selectedSchemeId) && !scheme && !loadError)
   const searchDisabled = useMemo(
-    () => contentLoading || !scheme || !originQuery.trim() || !destQuery.trim(),
-    [contentLoading, scheme, originQuery, destQuery]
+    () => !scheme || !originQuery.trim() || !destQuery.trim() || loadingFare,
+    [scheme, originQuery, destQuery, loadingFare]
   )
 
   return (
@@ -317,7 +312,6 @@ const TicketsPageClient: React.FC = () => {
             schemes={schemes}
             value={selectedSchemeId}
             onChange={handleSchemeChange}
-            loading={loadingSchemes}
           />
         </div>
       </div>
@@ -325,13 +319,12 @@ const TicketsPageClient: React.FC = () => {
       <div className="stations-content">
         <TicketsBrowseSidebar
           scheme={scheme}
-          loading={contentLoading}
           originQuery={originQuery}
           destQuery={destQuery}
           onOriginQueryChange={handleOriginQueryChange}
           onDestQueryChange={handleDestQueryChange}
           onSearch={() => void runSearch()}
-          searchDisabled={searchDisabled || loadingFare}
+          searchDisabled={searchDisabled}
           onPickStation={handlePickStation}
         />
 
@@ -341,8 +334,6 @@ const TicketsPageClient: React.FC = () => {
           dest={dest}
           fare={fare}
           searched={searched}
-          loading={loadingFare}
-          contentLoading={contentLoading}
           error={searchError ?? loadError}
         />
       </div>

@@ -6,7 +6,6 @@ import { Ticket } from '@phosphor-icons/react'
 import { StationDetailField } from '@/components/models/StationDetails/StationDetailField'
 import { StationDetailsSubsection } from '@/components/models/StationDetails/StationDetailsSubsection'
 import { StationSectionTitle } from '@/components/models/StationDetails/StationSectionTitle'
-import { TextSkeletonLine } from '@/components/misc/Skeleton/TextSkeletonLine'
 import type { DPAYGFare, DPAYGScheme, DPAYGStation } from '@/types/dpayg'
 import { formatDpaygPence } from '@/types/dpayg'
 import '@/components/models/StationModal/StationModal.css'
@@ -26,9 +25,6 @@ type TicketFareResultsProps = {
   dest: DPAYGStation | null
   fare: DPAYGFare | null
   searched: boolean
-  loading?: boolean
-  /** Initial schemes / selected-scheme fetch — redact copy like the stations page. */
-  contentLoading?: boolean
   error?: string | null
 }
 
@@ -42,45 +38,7 @@ function TicketFareCard({ children }: { children: React.ReactNode }) {
   )
 }
 
-function CapsSubsection({
-  scheme,
-  skeleton = false,
-}: {
-  scheme?: DPAYGScheme | null
-  skeleton?: boolean
-}) {
-  if (skeleton) {
-    return (
-      <div className="station-details-subsection">
-        <h4 className="station-details-subsection__title">
-          <TextSkeletonLine>Caps</TextSkeletonLine>
-        </h4>
-        <div className="modal-details-grid modal-facilities-grid">
-          <div className="modal-detail-item">
-            <div className="modal-detail-label-row">
-              <span className="modal-detail-label">
-                <TextSkeletonLine>Daily</TextSkeletonLine>
-              </span>
-            </div>
-            <span className="modal-detail-value">
-              <TextSkeletonLine>£0.00</TextSkeletonLine>
-            </span>
-          </div>
-          <div className="modal-detail-item">
-            <div className="modal-detail-label-row">
-              <span className="modal-detail-label">
-                <TextSkeletonLine>Weekly</TextSkeletonLine>
-              </span>
-            </div>
-            <span className="modal-detail-value">
-              <TextSkeletonLine>£00.00</TextSkeletonLine>
-            </span>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
+function CapsSubsection({ scheme }: { scheme?: DPAYGScheme | null }) {
   if (!scheme) return null
 
   return (
@@ -115,22 +73,7 @@ function operatorsValidOnLabel(scheme: DPAYGScheme): string {
   )
 }
 
-function OperatorsValidOn({
-  scheme,
-  skeleton = false,
-}: {
-  scheme?: DPAYGScheme | null
-  skeleton?: boolean
-}) {
-  if (skeleton) {
-    return (
-      <p className="tickets-trial-meta__operators">
-        <TextSkeletonLine>
-          Operators valid on: Northern Trains & TransPennine Express
-        </TextSkeletonLine>
-      </p>
-    )
-  }
+function OperatorsValidOn({ scheme }: { scheme?: DPAYGScheme | null }) {
   if (!scheme) return null
   const operatorsLabel = operatorsValidOnLabel(scheme)
   if (!operatorsLabel) return null
@@ -208,138 +151,15 @@ function trialAreaHeading(scheme: DPAYGScheme | null): string {
   return `${areaName} Trial Area`
 }
 
-function PageHeading({
-  title,
-  skeleton = false,
-}: {
-  title: string
-  skeleton?: boolean
-}) {
-  if (!skeleton) {
-    return <StationSectionTitle title={title} icon={Ticket} pageHeading />
-  }
-  return (
-    <h3 className="modal-section-title station-section-title station-section-title--page-heading">
-      <Ticket className="station-section-title__icon" size={20} weight="regular" aria-hidden />
-      <span className="station-section-title__text">
-        <TextSkeletonLine>{title}</TextSkeletonLine>
-      </span>
-    </h3>
-  )
-}
-
-function ContentLoadingSkeleton() {
-  return (
-    <TicketFareCard>
-      <div className="modal-section tickets-empty-state" aria-busy="true">
-        <p className="tickets-results-muted tickets-empty-state__intro">
-          <TextSkeletonLine>
-            Choose a trial area, enter origin and destination, then tap Find fares to see
-            published single fares for that journey.
-          </TextSkeletonLine>
-        </p>
-        <PageHeading title="D-PAYG Trial Area" skeleton />
-        <div className="tickets-empty-state__meta">
-          <OperatorsValidOn skeleton />
-          <CapsSubsection skeleton />
-        </div>
-      </div>
-    </TicketFareCard>
-  )
-}
-
-function FareLoadingSkeleton({ scheme }: { scheme: DPAYGScheme | null }) {
-  const pageTitle = trialAreaHeading(scheme)
-  return (
-    <TicketFareCard>
-      <div className="modal-section" aria-busy="true">
-        <PageHeading title={pageTitle} skeleton />
-        <div className="tickets-results-header">
-          <p className="tickets-results-route">
-            <TextSkeletonLine>Origin Station (XXX) → Destination Station (YYY)</TextSkeletonLine>
-          </p>
-          <p className="tickets-results-muted">
-            <TextSkeletonLine>Loading published fares for this journey.</TextSkeletonLine>
-          </p>
-        </div>
-        <div className="station-details-subsection">
-          <h4 className="station-details-subsection__title">
-            <TextSkeletonLine>Peak</TextSkeletonLine>
-          </h4>
-          <div className="modal-details-grid modal-facilities-grid">
-            <div className="modal-detail-item">
-              <div className="modal-detail-label-row">
-                <span className="modal-detail-label">
-                  <TextSkeletonLine>Standard single</TextSkeletonLine>
-                </span>
-              </div>
-              <span className="modal-detail-value">
-                <TextSkeletonLine>£0.00</TextSkeletonLine>
-              </span>
-            </div>
-            <div className="modal-detail-item">
-              <div className="modal-detail-label-row">
-                <span className="modal-detail-label">
-                  <TextSkeletonLine>Railcard</TextSkeletonLine>
-                </span>
-              </div>
-              <span className="modal-detail-value">
-                <TextSkeletonLine>£0.00</TextSkeletonLine>
-              </span>
-            </div>
-          </div>
-        </div>
-        <div className="station-details-subsection">
-          <h4 className="station-details-subsection__title">
-            <TextSkeletonLine>Off-Peak</TextSkeletonLine>
-          </h4>
-          <div className="modal-details-grid modal-facilities-grid">
-            <div className="modal-detail-item">
-              <div className="modal-detail-label-row">
-                <span className="modal-detail-label">
-                  <TextSkeletonLine>Standard single</TextSkeletonLine>
-                </span>
-              </div>
-              <span className="modal-detail-value">
-                <TextSkeletonLine>£0.00</TextSkeletonLine>
-              </span>
-            </div>
-            <div className="modal-detail-item">
-              <div className="modal-detail-label-row">
-                <span className="modal-detail-label">
-                  <TextSkeletonLine>Railcard</TextSkeletonLine>
-                </span>
-              </div>
-              <span className="modal-detail-value">
-                <TextSkeletonLine>£0.00</TextSkeletonLine>
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </TicketFareCard>
-  )
-}
-
 const TicketFareResults: React.FC<TicketFareResultsProps> = ({
   scheme,
   origin,
   dest,
   fare,
   searched,
-  loading = false,
-  contentLoading = false,
   error,
 }) => {
   const pageTitle = trialAreaHeading(scheme)
-
-  if (contentLoading) {
-    return <ContentLoadingSkeleton />
-  }
-
-  if (loading) {
-    return <FareLoadingSkeleton scheme={scheme} />
-  }
 
   if (error && !searched) {
     return (

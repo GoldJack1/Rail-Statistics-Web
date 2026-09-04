@@ -6,7 +6,6 @@ import { BUTWideButton } from '@/components/buttons'
 import BUTBaseButton from '@/components/buttons/base/BUTBaseButton/BUTBaseButton'
 import SidebarDropdownSection from '@/components/misc/SidebarDropdownSection/SidebarDropdownSection'
 import { SidebarPanel } from '@/components/misc/SidebarPanel'
-import { TextSkeletonLine } from '@/components/misc/Skeleton/TextSkeletonLine'
 import TXTINPBUTBaseButton from '@/components/textInputButtons/base/TXTINPBUTBaseButton/TXTINPBUTBaseButton'
 import TXTINPBUTLabelTopRoundedButton from '@/components/textInputButtons/label/TXTINPBUTLabelTopRoundedButton'
 import type { DPAYGScheme, DPAYGStation } from '@/types/dpayg'
@@ -14,7 +13,6 @@ import { filterDpaygStations } from '@/utils/dpaygStationSearch'
 
 type TicketsBrowseSidebarProps = {
   scheme: DPAYGScheme | null
-  loading?: boolean
   collapsed?: boolean
   originQuery: string
   destQuery: string
@@ -164,45 +162,8 @@ function StationSuggestionPanel({
   )
 }
 
-/** Input-shaped shell with shimmering label + placeholder text. */
-function OdInputSkeleton({
-  label,
-  placeholder,
-  shape,
-}: {
-  label: string
-  placeholder: string
-  shape: 'top-rounded' | 'bottom-rounded'
-}) {
-  return (
-    <div
-      className={[
-        'rs-button',
-        'rs-button--wide',
-        `rs-button--${shape}`,
-        'rs-button--active',
-        'rs-button--color-primary',
-        'rs-input',
-        'rs-input--prefix-label',
-        'tickets-od-input',
-        'tickets-od-input--skeleton',
-      ].join(' ')}
-      aria-hidden="true"
-    >
-      <span className="rs-input__prefix rs-input__prefix--label">
-        <TextSkeletonLine>{label}</TextSkeletonLine>
-      </span>
-      <span className="tickets-od-input__skeleton-placeholder">
-        <TextSkeletonLine>{placeholder}</TextSkeletonLine>
-      </span>
-      <div className="rs-button__inner-shadow" aria-hidden="true" />
-    </div>
-  )
-}
-
 const TicketsBrowseSidebar: React.FC<TicketsBrowseSidebarProps> = ({
   scheme,
-  loading = false,
   collapsed = false,
   originQuery,
   destQuery,
@@ -217,23 +178,20 @@ const TicketsBrowseSidebar: React.FC<TicketsBrowseSidebarProps> = ({
   const [destPanelExpanded, setDestPanelExpanded] = useState(false)
 
   const originSuggestions = useMemo(() => {
-    if (loading || !scheme || activeField !== 'origin') return []
+    if (!scheme || activeField !== 'origin') return []
     return suggestionStations(scheme.stations, originQuery)
-  }, [loading, scheme, activeField, originQuery])
+  }, [scheme, activeField, originQuery])
 
   const destSuggestions = useMemo(() => {
-    if (loading || !scheme || activeField !== 'dest') return []
+    if (!scheme || activeField !== 'dest') return []
     return suggestionStations(scheme.stations, destQuery)
-  }, [loading, scheme, activeField, destQuery])
+  }, [scheme, activeField, destQuery])
 
   const toInputShape = destPanelExpanded ? 'squared' : 'bottom-rounded'
 
   return (
     <aside
-      className={['stations-sidebar', loading ? 'stations-sidebar--loading' : '']
-        .filter(Boolean)
-        .join(' ')}
-      aria-busy={loading || undefined}
+      className="stations-sidebar"
       aria-hidden={collapsed || undefined}
       inert={collapsed || undefined}
     >
@@ -242,93 +200,75 @@ const TicketsBrowseSidebar: React.FC<TicketsBrowseSidebarProps> = ({
           title="Journey"
           expanded={journeyExpanded}
           onExpandedChange={setJourneyExpanded}
-          skeleton={loading}
         >
           <div className="tickets-od-stack">
-            {loading ? (
-              <>
-                <OdInputSkeleton
-                  label="From:"
-                  placeholder="Origin station or CRS"
-                  shape="top-rounded"
-                />
-                <OdInputSkeleton
-                  label="To:"
-                  placeholder="Destination station or CRS"
-                  shape="bottom-rounded"
-                />
-              </>
-            ) : (
-              <>
-                <TXTINPBUTLabelTopRoundedButton
-                  label="From:"
-                  colorVariant="primary"
-                  className="tickets-od-input"
-                  value={originQuery}
-                  onChange={(value) => {
-                    setActiveField('origin')
-                    onOriginQueryChange(value)
-                  }}
-                  onFocus={() => setActiveField('origin')}
-                  placeholder="Origin station or CRS"
-                  ariaLabel="Origin station"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  showClear
-                />
+            <TXTINPBUTLabelTopRoundedButton
+              label="From:"
+              colorVariant="primary"
+              className="tickets-od-input"
+              value={originQuery}
+              onChange={(value) => {
+                setActiveField('origin')
+                onOriginQueryChange(value)
+              }}
+              onFocus={() => setActiveField('origin')}
+              placeholder="Origin station or CRS"
+              ariaLabel="Origin station"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              showClear
+            />
 
-                <StationSuggestionPanel
-                  field="origin"
-                  open={originSuggestions.length > 0}
-                  stations={originSuggestions}
-                  onPickStation={onPickStation}
-                />
+            <StationSuggestionPanel
+              field="origin"
+              open={originSuggestions.length > 0}
+              stations={originSuggestions}
+              onPickStation={onPickStation}
+            />
 
-                <TXTINPBUTBaseButton
-                  shape={toInputShape}
-                  prefixType="label"
-                  label="To:"
-                  colorVariant="primary"
-                  className="tickets-od-input"
-                  value={destQuery}
-                  onChange={(value) => {
-                    setActiveField('dest')
-                    onDestQueryChange(value)
-                  }}
-                  onFocus={() => setActiveField('dest')}
-                  placeholder="Destination station or CRS"
-                  ariaLabel="Destination station"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  showClear
-                  onSubmit={onSearch}
-                />
+            <TXTINPBUTBaseButton
+              shape={toInputShape}
+              prefixType="label"
+              label="To:"
+              colorVariant="primary"
+              className="tickets-od-input"
+              value={destQuery}
+              onChange={(value) => {
+                setActiveField('dest')
+                onDestQueryChange(value)
+              }}
+              onFocus={() => setActiveField('dest')}
+              placeholder="Destination station or CRS"
+              ariaLabel="Destination station"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              showClear
+              onSubmit={onSearch}
+            />
 
-                <StationSuggestionPanel
-                  field="dest"
-                  open={destSuggestions.length > 0}
-                  stations={destSuggestions}
-                  roundLast
-                  onPickStation={onPickStation}
-                  onOpenChange={setDestPanelExpanded}
-                />
-              </>
-            )}
+            <StationSuggestionPanel
+              field="dest"
+              open={destSuggestions.length > 0}
+              stations={destSuggestions}
+              roundLast
+              onPickStation={onPickStation}
+              onOpenChange={setDestPanelExpanded}
+            />
           </div>
 
           <BUTWideButton
             width="fill"
             colorVariant="accent"
             instantAction
-            disabled={loading || searchDisabled}
+            disabled={searchDisabled}
             onClick={onSearch}
             className="tickets-search-button"
           >
-            {loading ? <TextSkeletonLine>Find fares</TextSkeletonLine> : 'Find fares'}
+            Find fares
           </BUTWideButton>
         </SidebarDropdownSection>
       </SidebarPanel>
