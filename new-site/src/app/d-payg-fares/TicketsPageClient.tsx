@@ -56,6 +56,8 @@ const TicketsPageClient: React.FC = () => {
   const appliedOdPathRef = useRef<string | null>(null)
   /** Area slug from a tab click while the router pathname is still catching up. */
   const pendingAreaSlugRef = useRef<string | null>(null)
+  /** Ignore stale fare responses when a newer search has started. */
+  const searchGenerationRef = useRef(0)
 
   const syncPath = useCallback(
     (nextAreaSlug: string, nextOdSlug?: string | null, mode: 'push' | 'replace' = 'replace') => {
@@ -68,6 +70,7 @@ const TicketsPageClient: React.FC = () => {
   )
 
   const resetSearch = useCallback(() => {
+    searchGenerationRef.current += 1
     setSearched(false)
     setOrigin(null)
     setDest(null)
@@ -222,9 +225,11 @@ const TicketsPageClient: React.FC = () => {
       updateUrl?: boolean
     }) => {
       if (!scheme) return
+      const generation = ++searchGenerationRef.current
       setLoadingFare(true)
       setSearchError(null)
       setSearched(true)
+      setFare(null)
 
       const matchedOrigin = opts?.originCrs
         ? scheme.stations.find((s) => s.crs.toUpperCase() === opts.originCrs!.toUpperCase()) ??
@@ -245,34 +250,36 @@ const TicketsPageClient: React.FC = () => {
       }
 
       if (!matchedOrigin || !matchedDest) {
-        setFare(null)
-        setLoadingFare(false)
+        if (generation === searchGenerationRef.current) setLoadingFare(false)
         return
       }
 
       if (matchedOrigin.crs === matchedDest.crs) {
+        if (generation !== searchGenerationRef.current) return
         setSearchError('Origin and destination must be different stations.')
-        setFare(null)
         setLoadingFare(false)
         return
       }
 
       const nextOd = buildDpaygOdSlug(matchedOrigin.crs, matchedDest.crs)
       if (opts?.updateUrl !== false) {
-        syncPath(getDpaygAreaSlug(scheme), nextOd, 'replace')
+        // Mark the OD path before navigating so the deep-link effect does not double-fetch.
         appliedOdPathRef.current = buildDpaygFaresPath(getDpaygAreaSlug(scheme), nextOd)
+        syncPath(getDpaygAreaSlug(scheme), nextOd, 'replace')
       }
 
       // Dynamic corridors may still have published OD rows — always try the table.
       // If none exist, results UI shows the dynamic/in-app pricing message instead.
       try {
         const loadedFare = await getFareForOd(scheme.id, matchedOrigin.crs, matchedDest.crs)
+        if (generation !== searchGenerationRef.current) return
         setFare(loadedFare)
       } catch (err) {
+        if (generation !== searchGenerationRef.current) return
         setSearchError(err instanceof Error ? err.message : 'Failed to load fare.')
         setFare(null)
       } finally {
-        setLoadingFare(false)
+        if (generation === searchGenerationRef.current) setLoadingFare(false)
       }
     },
     [scheme, originQuery, destQuery, syncPath]
@@ -335,6 +342,7 @@ const TicketsPageClient: React.FC = () => {
           dest={dest}
           fare={fare}
           searched={searched}
+          loading={loadingFare}
           error={searchError ?? loadError}
         />
       </div>

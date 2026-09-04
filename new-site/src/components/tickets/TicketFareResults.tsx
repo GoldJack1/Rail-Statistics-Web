@@ -25,6 +25,8 @@ type TicketFareResultsProps = {
   dest: DPAYGStation | null
   fare: DPAYGFare | null
   searched: boolean
+  /** True while a fare document lookup is in flight — do not show “not found” yet. */
+  loading?: boolean
   error?: string | null
 }
 
@@ -157,6 +159,7 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
   dest,
   fare,
   searched,
+  loading = false,
   error,
 }) => {
   const pageTitle = trialAreaHeading(scheme)
@@ -218,6 +221,22 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
             Check the station name or CRS code matches a stop in this trial corridor.
           </p>
           {scheme ? <TrialInfoSection scheme={scheme} /> : null}
+        </div>
+      </TicketFareCard>
+    )
+  }
+
+  if (loading && !fare) {
+    return (
+      <TicketFareCard>
+        <div className="modal-section">
+          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading />
+          <div className="tickets-results-header">
+            <JourneyRouteHeading scheme={scheme} origin={origin} dest={dest} />
+            <p className="tickets-results-muted" aria-live="polite">
+              Looking up fare…
+            </p>
+          </div>
         </div>
       </TicketFareCard>
     )

@@ -272,10 +272,27 @@ export const getFareForOd = async (
   destCrs: string
 ): Promise<DPAYGFare | null> => {
   const db = await ensureTicketsDb()
-  const fareId = dpaygFareDocId(schemeId, originCrs, destCrs)
+  const origin = originCrs.trim().toUpperCase()
+  const dest = destCrs.trim().toUpperCase()
+  const fareId = dpaygFareDocId(schemeId, origin, dest)
   const snap = await getDoc(doc(db, DPAYG_FARES_COLLECTION, fareId))
-  if (!snap.exists()) return null
-  return mapFareDoc(snap.id, snap.data())
+  if (snap.exists()) return mapFareDoc(snap.id, snap.data())
+
+  // Fallback if a row was stored under a non-canonical doc id but matching fields.
+  try {
+    const q = query(
+      collection(db, DPAYG_FARES_COLLECTION),
+      where('schemeId', '==', schemeId),
+      where('originCrs', '==', origin),
+      where('destCrs', '==', dest)
+    )
+    const byFields = await getDocs(q)
+    const first = byFields.docs[0]
+    if (!first) return null
+    return mapFareDoc(first.id, first.data())
+  } catch {
+    return null
+  }
 }
 
 export const listFares = async (schemeId: string): Promise<DPAYGFare[]> => {

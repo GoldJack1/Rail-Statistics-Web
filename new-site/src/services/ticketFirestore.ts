@@ -1,6 +1,6 @@
 import { getFirestore, type Firestore } from 'firebase/firestore'
 
-import { getFirebaseApp, initializeFirebase } from './firebase'
+import { ensureFirebaseAppCheck, getFirebaseApp, initializeFirebase } from './firebase'
 
 /** Named Firestore database used by D-PAYG schemes/fares (and iOS tickets). */
 export const TICKETS_FIRESTORE_DATABASE_ID = 'railstatisticstickets'
@@ -15,6 +15,8 @@ export const getTicketsFirestore = async (): Promise<Firestore> => {
   if (ticketsDb) return ticketsDb
 
   await initializeFirebase()
+  // Production may enforce App Check on Firestore; align with other public data reads.
+  await ensureFirebaseAppCheck()
   const app = getFirebaseApp()
   if (!app) {
     throw new Error('Firebase app is not initialized.')
