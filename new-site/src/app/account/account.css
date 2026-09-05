@@ -1,0 +1,423 @@
+/* Account / leaderboards — tokens aligned with stations + /log-in */
+
+/* ——— Auth shell (sign-in, sign-up, MFA, verify) ——— */
+.rs-account-auth {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: calc(100vh - 4rem - env(safe-area-inset-top, 0px) - 5.5rem);
+  min-height: calc(100svh - 4rem - env(safe-area-inset-top, 0px) - 5.5rem);
+  min-height: calc(100dvh - 4rem - env(safe-area-inset-top, 0px) - 5.5rem);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: var(--space-2xl) var(--space-lg);
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+@media (max-width: 639px) {
+  .rs-account-auth {
+    min-height: calc(100vh - 3.5rem - env(safe-area-inset-top, 0px) - 5.5rem);
+    min-height: calc(100svh - 3.5rem - env(safe-area-inset-top, 0px) - 5.5rem);
+    min-height: calc(100dvh - 3.5rem - env(safe-area-inset-top, 0px) - 5.5rem);
+    padding: var(--space-xl) var(--space-md);
+    align-items: flex-start;
+  }
+}
+
+.rs-account-auth__card {
+  position: relative;
+  width: 100%;
+  max-width: min(28rem, 100%);
+  min-width: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: clamp(var(--space-xl), 5vw, var(--space-3xl));
+  box-shadow: var(--shadow-lg);
+}
+
+.rs-account-auth__title {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 var(--space-sm);
+  text-align: center;
+}
+
+.rs-account-auth__subtitle {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-lg);
+  text-align: center;
+  line-height: 1.45;
+  max-width: 26rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ——— Content shell (hub, settings, leaderboards) ——— */
+.rs-account-page-shell {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-tertiary);
+}
+
+/* PageTopHeader is a direct child (full-bleed) — same as stations / privacy. */
+
+.rs-account-page-shell .rs-account-page-header {
+  padding: calc(var(--space-lg) + 10px) 0 var(--space-lg) 0;
+}
+
+.rs-account-page-shell .rs-account-page-header .rs-page-top-header__action {
+  margin-top: var(--space-md);
+}
+
+.rs-account-page-shell .rs-account-page-header .rs-page-top-header__subtitle + .rs-page-top-header__action,
+.rs-account-page-shell .rs-account-page-header .rs-page-top-header__subtitle-addon + .rs-page-top-header__action {
+  margin-top: var(--space-lg);
+}
+
+.rs-account-body {
+  width: 100%;
+  padding: var(--space-lg) var(--space-2xl) var(--space-4xl);
+  box-sizing: border-box;
+}
+
+@media (max-width: 1023px) {
+  .rs-account-body {
+    padding-left: var(--space-2xl);
+    padding-right: var(--space-2xl);
+  }
+}
+
+@media (max-width: 639px) {
+  .rs-account-body {
+    padding-left: var(--space-lg);
+    padding-right: var(--space-lg);
+  }
+}
+
+/* TextCard stack — matches .dpayg-scheme-list */
+.rs-account-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.rs-account-stack--narrow {
+  max-width: 40rem;
+}
+
+.rs-account-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-xl);
+  min-width: 0;
+}
+
+@media (max-width: 639px) {
+  .rs-account-panel {
+    padding: var(--space-lg);
+  }
+}
+
+.rs-account-profile {
+  display: flex;
+  gap: var(--space-md);
+  align-items: center;
+  margin-bottom: var(--space-lg);
+}
+
+.rs-account-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.rs-account-avatar--placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  font-size: 1rem;
+}
+
+.rs-account-profile__name {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.rs-account-profile__meta {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin: var(--space-xs) 0 0;
+}
+
+.rs-account-section-gap {
+  margin-top: var(--space-md);
+}
+
+.rs-account-form-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+/* Legacy bare main (loading stubs) */
+.rs-account-page {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-lg) var(--space-4xl);
+}
+
+.rs-account-page__title {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  margin: 0 0 var(--space-sm);
+  color: var(--text-primary);
+}
+
+.rs-account-page__subtitle {
+  font-size: var(--text-base);
+  font-weight: 400;
+  margin: 0 0 var(--space-lg);
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.rs-account-section-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: var(--space-lg) 0 var(--space-sm);
+}
+
+.rs-account-section-label:first-child {
+  margin-top: 0;
+}
+
+.rs-account-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: var(--space-md) 0;
+  border: none;
+}
+
+/* Read-only secret display (recovery key / TOTP secret) — matches login TOTP key */
+.rs-account-secret-display {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  word-break: break-all;
+  color: var(--text-primary);
+  user-select: text;
+  margin: 0 0 var(--space-md);
+  line-height: 1.45;
+}
+
+.rs-account-error {
+  color: color-mix(in srgb, #c62828 85%, transparent);
+  font-size: var(--text-sm);
+  margin: var(--space-sm) 0;
+}
+
+.rs-account-info {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  margin: var(--space-sm) 0;
+  line-height: 1.45;
+}
+
+.rs-account-info a {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.rs-account-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.rs-account-check {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: flex-start;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+/*
+ * Global styles set appearance:none + large min size on all inputs, which hides
+ * native checkboxes. Restore a visible control (same pattern as pending-review).
+ */
+.rs-account-check input[type='checkbox'] {
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  -moz-appearance: checkbox;
+  min-width: unset;
+  min-height: unset;
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+  margin: 0.15rem 0 0;
+  accent-color: var(--accent-color, var(--text-primary));
+  cursor: pointer;
+  vertical-align: top;
+}
+
+.rs-account-check a {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.rs-account-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
+}
+
+.rs-account-sticky-out {
+  position: sticky;
+  bottom: 0;
+  padding: var(--space-md) 0 var(--space-xs);
+  background: linear-gradient(to top, var(--bg-secondary) 70%, transparent);
+  margin-top: var(--space-2xl);
+}
+
+/* Leaderboard TextCard avatars */
+.rs-account-stack .rs-text-card__chevron:has(.rs-leaderboard-row__avatar) {
+  width: 40px;
+  height: 40px;
+  right: 12px;
+}
+
+.rs-account-stack .rs-text-card:has(.rs-leaderboard-row__avatar) .rs-text-card__content {
+  padding-right: 56px;
+}
+
+.rs-account-topic-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.rs-account-topic-list > li {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rs-account-qr {
+  background: #fff;
+  padding: var(--space-md);
+  max-width: 220px;
+  margin: var(--space-sm) auto var(--space-md);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+}
+
+.rs-account-qr img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.rs-account-sync-cue {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-sm);
+}
+
+.rs-account-sync-cue a {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.rs-account-sync-cue--error {
+  color: var(--text-danger, #b42318);
+}
+
+.rs-account-conflict-side {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
+.rs-account-conflict-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin: 0 0 var(--space-sm);
+  color: var(--text-primary);
+}
+
+.rs-account-newer {
+  display: inline-block;
+  margin-left: var(--space-xs);
+  padding: 0.1rem 0.4rem;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  background: var(--text-primary);
+  color: var(--bg-secondary);
+}
+
+.rs-leaderboard-row {
+  display: grid;
+  grid-template-columns: 2rem 2.75rem 1fr auto;
+  gap: var(--space-md);
+  align-items: center;
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.rs-leaderboard-row__rank {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.rs-leaderboard-row__avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+}
+
+.rs-leaderboard-tabs {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  flex-wrap: wrap;
+}

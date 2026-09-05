@@ -551,6 +551,7 @@ const StationsPageClient: React.FC<StationsPageProps> = ({
           showProvinceFilterInline={showProvinceFilterInline}
           showIrishNiSection={showIrishNiSection}
           showSupertramOnlyFilters={showSupertramOnlyFilters}
+          showCloudSyncCue={showPublicAds}
           supertramLineFilter={supertramLineFilter}
           onSupertramLineFilterChange={setSupertramLineFilter}
           supertramFiltersExpanded={supertramFiltersExpanded}

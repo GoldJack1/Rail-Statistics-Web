@@ -53,7 +53,12 @@ const StationCard: React.FC<StationCardProps> = ({
           />
         ) : null}
       </section>
-      <StationCardActionBar onInfoClick={onInfoClick} disabled={actionsDisabled} />
+      <StationCardActionBar
+        onInfoClick={onInfoClick}
+        disabled={actionsDisabled}
+        stationId={station.id}
+        stnarea={station.stnarea ?? ''}
+      />
     </article>
   )
 }

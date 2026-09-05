@@ -4,6 +4,11 @@ import React, { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { userMustEnrollTotpMfaOnFirebase } from '@/services/firebaseTotpMfa'
+import {
+  getMasterPublishEmail,
+  isMasterPublishEmailUser,
+  STATION_EDITOR_DENIED_MESSAGE,
+} from '@/utils/masterPublishPolicy'
 
 interface ProtectedRouteProps {
   children: React.ReactNode
@@ -14,13 +19,20 @@ interface ProtectedRouteProps {
   showShellWhileChecking?: boolean
 }
 
-type ProfileCheck = 'idle' | 'checking' | 'ok' | 'need-email-verify' | 'need-totp-enroll'
+type ProfileCheck =
+  | 'idle'
+  | 'checking'
+  | 'ok'
+  | 'need-email-verify'
+  | 'need-totp-enroll'
+  | 'need-editor'
 
 const isLocalDevLoginBypassEnabled =
   process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_LOCAL_DEV_LOGIN_BYPASS === 'true'
 
 /**
- * Requires a signed-in user with verified email and TOTP (authenticator) MFA enrolled.
+ * Requires a signed-in catalogue user with verified email, TOTP MFA, and station-editor
+ * authority (`rs_station_editor` claim or owner email).
  */
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
@@ -69,6 +81,31 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
           setProfileCheck('need-totp-enroll')
           return
         }
+
+        let hasEditorClaim = false
+        try {
+          const token = await u.getIdTokenResult(true)
+          hasEditorClaim = token.claims.rs_station_editor === true
+        } catch {
+          hasEditorClaim = false
+        }
+
+        const isEditor =
+          hasEditorClaim ||
+          isMasterPublishEmailUser({
+            ...u,
+            email: u.email,
+          } as Parameters<typeof isMasterPublishEmailUser>[0])
+
+        // Also allow when email matches master even if User type differs
+        const emailOk =
+          (u.email?.trim().toLowerCase() ?? '') === getMasterPublishEmail()
+
+        if (!isEditor && !emailOk && !hasEditorClaim) {
+          setProfileCheck('need-editor')
+          return
+        }
+
         setProfileCheck('ok')
       } catch {
         if (!cancelled) setProfileCheck('need-email-verify')
@@ -97,6 +134,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
     if (profileCheck === 'need-totp-enroll') {
       router.replace('/log-in?reason=enroll-totp')
+      return
+    }
+
+    if (profileCheck === 'need-editor') {
+      router.replace('/log-in?reason=not-editor')
     }
   }, [user, loading, profileCheck, pathname, router])
 
@@ -108,10 +150,9 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     !loading &&
     (!user ||
       profileCheck === 'need-email-verify' ||
-      profileCheck === 'need-totp-enroll')
+      profileCheck === 'need-totp-enroll' ||
+      profileCheck === 'need-editor')
 
-  // Block only while auth state is unknown or a redirect is in flight, unless the route
-  // opts into rendering its shell (e.g. stations skeleton) during that window.
   if (!showShellWhileChecking && (loading || isRedirecting)) {
     return (
       <div
@@ -124,7 +165,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
           color: 'var(--text-secondary)',
         }}
       >
-        Loading…
+        {profileCheck === 'need-editor' ? STATION_EDITOR_DENIED_MESSAGE : 'Loading…'}
       </div>
     )
   }

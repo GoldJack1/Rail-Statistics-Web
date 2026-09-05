@@ -16,6 +16,8 @@ import './Header.css'
 
 /** Title shown next to the logo on narrow viewports (main nav items stay in the hamburger). */
 function getHeaderPageTitle(pathname: string): string {
+  if (pathname.startsWith('/account')) return 'Account'
+  if (pathname.startsWith('/leaderboards')) return 'Leaderboards'
   if (pathname === '/' || pathname === '/home') return 'Home'
   if (pathname === '/migration') return 'Migration'
   if (pathname === '/log-in') return 'Log in'
@@ -60,6 +62,8 @@ const Header: React.FC = () => {
   const isDpaygFaresActive = pathname.startsWith('/d-payg-fares') || pathname === '/tickets'
   const isMapActive = pathname === '/stations/map' || pathname === '/admin/map'
 
+  const isAccountActive = pathname.startsWith('/account') || pathname.startsWith('/leaderboards')
+
   const pageTitle = getHeaderPageTitle(pathname)
 
   const navItems: MobileHeaderNavItem[] = [
@@ -67,6 +71,7 @@ const Header: React.FC = () => {
     { to: '/stations', label: 'Stations', active: isStationsActive && !isMapActive },
     { to: '/d-payg-fares', label: 'D-PAYG Fares', active: isDpaygFaresActive },
     { to: '/stations/map', label: 'Maps', active: isMapActive },
+    { to: '/account', label: 'Account', active: isAccountActive },
   ]
 
   const onDownloadApp = useCallback(() => {

@@ -83,6 +83,10 @@ const PrivacyPolicyPage: React.FC = () => {
                   <p>
                     The app allows you to import data (e.g., station visits and ticket data) from files on your device. All imported data remains solely on your device and is not transmitted or shared externally by the app. However, imported data can appear on your other devices via the widget functionality provided by Apple&apos;s ecosystem.
                   </p>
+                  <h3 id={legalDocsSubsectionId('Optional Account and Cloud Sync')}>1.2 – Optional Account and Cloud Sync</h3>
+                  <p>
+                    If you create a Rail Statistics account on the website or apps, we process your email address, display name, username, and authentication data (including authenticator-based 2-Factor Auth) in a dedicated user-accounts Firebase project. Station visits and ticket diaries synced with cloud sync are stored as end-to-end encrypted ciphertext; Rail Statistics cannot read that content without your recovery key. Password reset restores sign-in only and does not unlock encrypted cloud sync. Optional leaderboard participation publishes aggregate visit counts and profile display fields you choose to share.
+                  </p>
                 </section>
               )}
 

@@ -54,7 +54,12 @@ const LightRailStopCard: React.FC<LightRailStopCardProps> = ({
         )}
         <LightRailLineStrip linesServed={station.linesServed} />
       </section>
-      <StationCardActionBar onInfoClick={onInfoClick} disabled={actionsDisabled} />
+      <StationCardActionBar
+        onInfoClick={onInfoClick}
+        disabled={actionsDisabled}
+        stationId={station.id}
+        stnarea={station.stnarea ?? ''}
+      />
     </article>
   )
 }

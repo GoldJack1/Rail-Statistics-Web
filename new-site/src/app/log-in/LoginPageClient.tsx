@@ -36,6 +36,7 @@ export default function LoginPageClient() {
   const searchParams = useSearchParams()
   const redirectedForVerify = searchParams.get('reason') === 'verify-email'
   const redirectedForTotpEnroll = searchParams.get('reason') === 'enroll-totp'
+  const redirectedForNotEditor = searchParams.get('reason') === 'not-editor'
 
   const postLoginPath = () => {
     const from = searchParams.get('from')
@@ -346,6 +347,12 @@ export default function LoginPageClient() {
         {redirectedForTotpEnroll && (
           <p className="login-info-banner" role="status">
             Add an authenticator app before continuing.
+          </p>
+        )}
+        {redirectedForNotEditor && (
+          <p className="login-info-banner" role="status">
+            This account is signed in but is not a station editor. Contact the site owner if you need
+            access.
           </p>
         )}
         {info && <p className="login-info-banner">{info}</p>}

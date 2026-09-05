@@ -27,6 +27,7 @@ import {
 } from '@/hooks/useStationsBrowseFilters'
 import { sortOptionToTableSort } from '@/utils/stationSearchFiltering'
 import type { StationsTableSort } from '@/utils/stationsTableColumns'
+import StationsCloudSyncCue from '@/components/misc/StationsCloudSyncCue'
 
 const StationAdminControls = dynamic(
   () => import('@/components/cards/StationAdminControls/StationAdminControls'),
@@ -112,6 +113,8 @@ export interface StationsBrowseSidebarProps {
   showProvinceFilterInline: boolean
   showIrishNiSection: boolean
   showSupertramOnlyFilters: boolean
+  /** Public stations: cloud-sync status capsule above Search. */
+  showCloudSyncCue?: boolean
   supertramLineFilter: SupertramLineFilter
   onSupertramLineFilterChange: (value: SupertramLineFilter) => void
   supertramFiltersExpanded: boolean
@@ -190,6 +193,7 @@ const StationsBrowseSidebar: React.FC<StationsBrowseSidebarProps> = ({
   showProvinceFilterInline,
   showIrishNiSection,
   showSupertramOnlyFilters,
+  showCloudSyncCue = false,
   supertramLineFilter,
   onSupertramLineFilterChange,
   supertramFiltersExpanded,
@@ -594,6 +598,7 @@ const StationsBrowseSidebar: React.FC<StationsBrowseSidebarProps> = ({
       inert={collapsed || undefined}
     >
       <SidebarPanel className="stations-sidebar-panel">
+        {showCloudSyncCue ? <StationsCloudSyncCue /> : null}
         <SidebarDropdownSection
           title="Search"
           expanded={sidebarSections.search}

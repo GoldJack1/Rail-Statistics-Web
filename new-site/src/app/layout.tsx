@@ -3,6 +3,7 @@ import { Suspense } from 'react'
 import { geologica, aronetiv, aronetivNormal } from './fonts'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import { AuthProvider } from '@/contexts/AuthContext'
+import { ConsumerAuthProvider } from '@/contexts/ConsumerAuthContext'
 import { StationCollectionProvider } from '@/contexts/StationCollectionContext'
 import { PhosphorIconProvider } from '@/components/icons/PhosphorIconProvider'
 import Header from '@/components/misc/Header/Header'
@@ -127,20 +128,22 @@ export default function RootLayout({
         <ThemeProvider>
           <PhosphorIconProvider>
           <AuthProvider>
-            <StationCollectionProvider>
-              <ServiceWorkerRegistration />
-              <AdSenseScript />
-              <div className="app">
-                <Header />
-                <AppMain>
-                  <Suspense fallback={null}>{children}</Suspense>
-                </AppMain>
-                <Suspense fallback={null}>
-                  <Footer />
-                  <FirebaseAnalytics />
-                </Suspense>
-              </div>
-            </StationCollectionProvider>
+            <ConsumerAuthProvider>
+              <StationCollectionProvider>
+                <ServiceWorkerRegistration />
+                <AdSenseScript />
+                <div className="app">
+                  <Header />
+                  <AppMain>
+                    <Suspense fallback={null}>{children}</Suspense>
+                  </AppMain>
+                  <Suspense fallback={null}>
+                    <Footer />
+                    <FirebaseAnalytics />
+                  </Suspense>
+                </div>
+              </StationCollectionProvider>
+            </ConsumerAuthProvider>
           </AuthProvider>
           </PhosphorIconProvider>
         </ThemeProvider>

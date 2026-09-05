@@ -1,29 +1,36 @@
 'use client'
 
-import React, { useMemo, useState } from 'react'
+import React from 'react'
 import { Info, Star } from '@phosphor-icons/react'
 import { BUTBaseButton as Button } from '../../buttons'
 import VisitButton from '../../buttons/other/BUTVisitStatusButton'
+import { useConsumerAuth } from '@/contexts/ConsumerAuthContext'
+import { getStationLocalData, upsertStationLocalData } from '@/services/stationDiaryStore'
 import './StationCardActionBar.css'
 
 interface StationCardActionBarProps {
   onInfoClick: () => void
   disabled?: boolean
+  stationId?: string
+  stnarea?: string
 }
 
-type VisitStatus = 'visited' | 'not-visited'
 const StationCardActionBar: React.FC<StationCardActionBarProps> = ({
   onInfoClick,
   disabled = false,
+  stationId,
+  stnarea = '',
 }) => {
-  const [visitStatus, setVisitStatus] = useState<VisitStatus>('not-visited')
-  const [isFavorite, setIsFavorite] = useState(false)
+  const { user, vaultUnlocked, diaryRevision, noteDiaryChanged } = useConsumerAuth()
+  const liveMode = Boolean(user && vaultUnlocked && stationId)
 
-  const isVisited = useMemo(() => visitStatus === 'visited', [visitStatus])
+  // Read diary whenever auth/diary revision changes (avoid stale memoized visit state).
+  const local = liveMode && stationId ? getStationLocalData(stationId, stnarea) : null
+  void diaryRevision
 
-  const handleVisitToggle = () => {
-    setVisitStatus((current) => (current === 'visited' ? 'not-visited' : 'visited'))
-  }
+  const isVisited = Boolean(local?.isVisited)
+  const isFavorite = Boolean(local?.isFavorite)
+  const visitDate = local?.visitedDates?.[local.visitedDates.length - 1]
 
   const StarIcon = (
     <Star size={16} weight={isFavorite ? 'fill' : 'regular'} aria-hidden />
@@ -39,8 +46,13 @@ const StationCardActionBar: React.FC<StationCardActionBarProps> = ({
     >
       <VisitButton
         visited={isVisited}
-        onToggle={handleVisitToggle}
-        disabled
+        date={isVisited && visitDate ? visitDate.slice(0, 10) : undefined}
+        onToggle={() => {
+          if (!liveMode || !stationId) return
+          upsertStationLocalData(stationId, stnarea, { isVisited: !isVisited })
+          noteDiaryChanged()
+        }}
+        disabled={!liveMode || disabled}
         className="rs-station-card-action-bar__visit"
       />
       <Button
@@ -50,10 +62,12 @@ const StationCardActionBar: React.FC<StationCardActionBarProps> = ({
         colorVariant={isFavorite ? 'fav-action' : 'primary'}
         ariaLabel={isFavorite ? 'Remove favorite' : 'Add favorite'}
         icon={StarIcon}
-        disabled
+        disabled={!liveMode || disabled}
         onClick={(event) => {
           event.stopPropagation()
-          setIsFavorite((current) => !current)
+          if (!liveMode || !stationId) return
+          upsertStationLocalData(stationId, stnarea, { isFavorite: !isFavorite })
+          noteDiaryChanged()
         }}
       />
       <Button

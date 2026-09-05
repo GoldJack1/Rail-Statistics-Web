@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Moon, Sun } from '@phosphor-icons/react'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useStationAdminMode } from '../../../hooks/useStationAdminMode'
+import { useIsStationEditor } from '../../../hooks/useIsStationEditor'
 import { useTheme } from '../../../hooks/useTheme'
 import {
   isStationAdminSearchParam,
@@ -18,6 +19,7 @@ const LOGIN_TAP_WINDOW_MS = 700
 
 const Footer: React.FC = () => {
   const { user, logout } = useAuth()
+  const { isEditor } = useIsStationEditor()
   const { toggleTheme } = useTheme()
   const pathname = usePathname() ?? '/'
   const searchParams = useSearchParams()
@@ -107,7 +109,7 @@ const Footer: React.FC = () => {
             </span>
           </BUTFooterLink>
         </div>
-        {user ? (
+        {user && isEditor ? (
           <div className="site-footer-secondary-row">
             <div className="site-footer-admin-toggle">
               <span className="site-footer-admin-toggle__label">Admin</span>
@@ -134,6 +136,14 @@ const Footer: React.FC = () => {
               <BUTFooterLink to="/admin/design-system">
                 Design System
               </BUTFooterLink>
+              <BUTFooterLink onActivate={logout} className="site-footer-logout">
+                Log out
+              </BUTFooterLink>
+            </div>
+          </div>
+        ) : user ? (
+          <div className="site-footer-secondary-row">
+            <div className="site-footer-links site-footer-links--logged-in-row">
               <BUTFooterLink onActivate={logout} className="site-footer-logout">
                 Log out
               </BUTFooterLink>
