@@ -195,6 +195,26 @@ type FetchedVault = {
   devPreferencesJson: unknown
 }
 
+
+/** Read cloud-synced developer subscription override flags (when vault is unlocked). */
+export async function fetchCloudDevOverrideFlags(
+  uid: string
+): Promise<{ overrideStandardPremium: boolean; overrideFirstClass: boolean } | null> {
+  try {
+    const key = requireUnlockedVaultKey()
+    const fetched = await fetchCloudSnapshotDetailed(uid, key)
+    const raw = fetched?.devPreferencesJson
+    if (!raw || typeof raw !== 'object') return null
+    const prefs = raw as Record<string, unknown>
+    return {
+      overrideStandardPremium: Boolean(prefs.overrideStandardPremium),
+      overrideFirstClass: Boolean(prefs.overrideFirstClass),
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function fetchCloudSnapshot(
   uid: string,
   key: Uint8Array
@@ -282,7 +302,7 @@ export async function pullFromCloud(uid: string, options?: PullOptions): Promise
     const cloud = fetched?.snapshot ?? null
     if (!cloud) {
       startRemoteVaultListening(uid)
-      setStatus({ statusMessage: 'No cloud sync data yet — mark a station to create it.' })
+      setStatus({ statusMessage: 'No cloud data yet — visit a station to create it.' })
       return
     }
     applySnapshotStationsToDiary(cloud)
@@ -290,7 +310,7 @@ export async function pullFromCloud(uid: string, options?: PullOptions): Promise
     lastHandledRemoteMs = Math.max(lastHandledRemoteMs, cloud.updatedAt.getTime())
     startRemoteVaultListening(uid)
     setStatus({
-      statusMessage: `Loaded from cloud sync (${visitedStationCount(cloud)} visited).`,
+      statusMessage: `Loaded ${visitedStationCount(cloud)} visited stations from the cloud.`,
       lastSyncedAt: new Date(),
     })
   } catch (e) {
@@ -325,7 +345,7 @@ export async function pushStationsToCloud(uid: string): Promise<void> {
       }
       startRemoteVaultListening(uid)
       setStatus({
-        statusMessage: `Loaded from cloud sync (${visitedStationCount(cloud!)} visited).`,
+        statusMessage: `Loaded ${visitedStationCount(cloud!)} visited stations from the cloud.`,
         lastSyncedAt: new Date(),
       })
       return
@@ -337,7 +357,7 @@ export async function pushStationsToCloud(uid: string): Promise<void> {
       passThroughDevPreferences: fetched?.devPreferencesJson,
     })
     startRemoteVaultListening(uid)
-    setStatus({ statusMessage: 'Saved stations to cloud sync.' })
+    setStatus({ statusMessage: 'Saved your stations to the cloud.' })
   } catch (e) {
     console.warn('Vault push failed:', e)
     setStatus({ lastError: e instanceof Error ? e.message : String(e) })

@@ -1,0 +1,58 @@
+.rs-camera-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10015;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+}
+
+.rs-camera-dialog {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+  padding-bottom: calc(var(--space-xl) + var(--rs-control-shadow-pad, 8px));
+  box-shadow: var(--shadow-lg);
+}
+
+.rs-camera-title {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rs-camera-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: #111;
+  margin-bottom: var(--space-lg);
+}
+
+.rs-camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.rs-camera-error {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.rs-camera-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-bottom: var(--rs-control-shadow-pad, 8px);
+}

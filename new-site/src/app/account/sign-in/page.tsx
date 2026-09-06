@@ -1,11 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { BUTWideButton } from '@/components/buttons'
 import { AccountAuthShell } from '@/components/misc/AccountPageShell/AccountPageShell'
-import TXTINPWideButton from '@/components/textInputs/plain/TXTINPWideButton'
+import TXTINPBUTWideButton from '@/components/textInputButtons/plain/TXTINPBUTWideButton'
 import { useConsumerAuth } from '@/contexts/ConsumerAuthContext'
 import { MFA_AUTOFILL, MFA_OTP_INPUT_NAME } from '@/constants/mfaAutofill'
 import '../account.css'
@@ -37,21 +36,21 @@ export default function AccountSignInPage() {
     >
       {step === 'credentials' ? (
         <div className="rs-account-form-stack">
-          <TXTINPWideButton
+          <TXTINPBUTWideButton
             placeholder="Email"
             value={email}
             onChange={setEmail}
             type="email"
             autoComplete="username"
-            colorVariant="secondary"
+            colorVariant="primary"
           />
-          <TXTINPWideButton
+          <TXTINPBUTWideButton
             placeholder="Password"
             value={password}
             onChange={setPassword}
             type="password"
             autoComplete="current-password"
-            colorVariant="secondary"
+            colorVariant="primary"
           />
           {error ? <p className="rs-account-error">{error}</p> : null}
           <BUTWideButton
@@ -73,20 +72,20 @@ export default function AccountSignInPage() {
           >
             {busy ? 'Signing in…' : 'Sign in'}
           </BUTWideButton>
-          <p className="rs-account-info" style={{ textAlign: 'center' }}>
-            <Link href="/account/reset-password">Forgot password?</Link>
-          </p>
+          <BUTWideButton type="button" width="fill" to="/account/reset-password">
+            Forgot password?
+          </BUTWideButton>
         </div>
       ) : (
         <div className="rs-account-form-stack">
-          <TXTINPWideButton
+          <TXTINPBUTWideButton
             placeholder="6-digit code"
             value={code}
             onChange={setCode}
             inputMode="numeric"
             autoComplete={MFA_AUTOFILL.signInOtp}
             name={MFA_OTP_INPUT_NAME}
-            colorVariant="secondary"
+            colorVariant="primary"
           />
           {error ? <p className="rs-account-error">{error}</p> : null}
           <BUTWideButton

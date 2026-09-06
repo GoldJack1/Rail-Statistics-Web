@@ -1,0 +1,83 @@
+.rs-photo-crop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+}
+
+.rs-photo-crop-dialog {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+  padding-bottom: calc(var(--space-xl) + var(--rs-control-shadow-pad, 8px));
+  box-shadow: var(--shadow-lg);
+}
+
+.rs-photo-crop-title {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rs-photo-crop-hint {
+  margin: 0 0 var(--space-lg);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.rs-photo-crop-stage {
+  position: relative;
+  margin: 0 auto var(--space-lg);
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  background: #111;
+  border-radius: var(--radius-md);
+  cursor: grab;
+  max-width: 100%;
+}
+
+.rs-photo-crop-stage:active {
+  cursor: grabbing;
+}
+
+.rs-photo-crop-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  pointer-events: none;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.rs-photo-crop-frame {
+  position: absolute;
+  inset: 0;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.rs-photo-crop-error {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.rs-photo-crop-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-bottom: var(--rs-control-shadow-pad, 8px);
+}

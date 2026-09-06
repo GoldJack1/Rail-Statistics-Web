@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import QRCode from 'qrcode'
 import { BUTWideButton } from '@/components/buttons'
 import { AccountAuthShell } from '@/components/misc/AccountPageShell/AccountPageShell'
-import TXTINPWideButton from '@/components/textInputs/plain/TXTINPWideButton'
+import TXTINPBUTWideButton from '@/components/textInputButtons/plain/TXTINPBUTWideButton'
 import { useConsumerAuth } from '@/contexts/ConsumerAuthContext'
 import { MFA_AUTOFILL, MFA_OTP_INPUT_NAME } from '@/constants/mfaAutofill'
 import type { TotpSecret } from '@/services/consumerAccountAuth'
@@ -87,7 +87,7 @@ export default function AccountMfaPage() {
           {showQr ? 'Show secret key' : 'View QR code'}
         </BUTWideButton>
 
-        <TXTINPWideButton
+        <TXTINPBUTWideButton
           id="totp-enroll"
           value={code}
           onChange={setCode}
@@ -95,7 +95,7 @@ export default function AccountMfaPage() {
           inputMode="numeric"
           autoComplete={MFA_AUTOFILL.signInOtp}
           name={MFA_OTP_INPUT_NAME}
-          colorVariant="secondary"
+          colorVariant="primary"
         />
         {error ? <p className="rs-account-error">{error}</p> : null}
         <BUTWideButton

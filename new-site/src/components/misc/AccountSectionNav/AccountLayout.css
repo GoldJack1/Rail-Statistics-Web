@@ -1,0 +1,516 @@
+/* Shared station-details-style layout chrome for the account hub. */
+
+.rs-account-page-shell--details {
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  align-self: stretch;
+  /*
+   * Fill the viewport below the fixed site header so the footer sits below the
+   * fold (scroll to see it) — do not reserve footer height in the viewport.
+   */
+  min-height: calc(100vh - var(--app-header-offset));
+  min-height: calc(100svh - var(--app-header-offset));
+  min-height: calc(100dvh - var(--app-header-offset));
+  --stations-card-gap: var(--space-lg);
+  --stations-content-inset: var(--stations-card-gap);
+  --stations-panel-text-inset: var(--stations-content-inset);
+}
+
+/* Force main to at least one viewport so footer cannot sit in the first screen. */
+.app:has(.rs-account-page-shell--details) .main-content.app-main {
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+}
+
+@supports (-webkit-touch-callout: none) {
+  @media (max-width: 1199px) {
+    .rs-account-page-shell--details {
+      min-height: calc(100vh - var(--app-header-offset));
+      min-height: calc(100svh - var(--app-header-offset));
+      min-height: calc(100dvh - var(--app-header-offset));
+    }
+
+    .app:has(.rs-account-page-shell--details) .main-content.app-main {
+      min-height: 100vh;
+      min-height: 100svh;
+      min-height: 100dvh;
+    }
+  }
+}
+
+/* Keep the page header band continuous with the left panel — no seam/gap. */
+.rs-account-page-shell--details > .rs-page-top-header {
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.account-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 0;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  /* Fill the viewport-tall shell so the left panel can stretch. */
+  min-height: 100%;
+  --stations-card-gap: var(--space-lg);
+  --stations-content-inset: var(--stations-card-gap);
+}
+
+.account-layout.station-details-layout {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 0;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+}
+
+.account-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.account-card {
+  width: 100%;
+  max-width: none;
+  background: transparent;
+  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  padding: var(--space-xl);
+  /* Keep last control shadows inside the card */
+  padding-bottom: calc(var(--space-xl) + var(--rs-control-shadow-pad, 8px));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  min-width: 0;
+  overflow: visible;
+}
+
+.station-details-mobile-sections.account-mobile-sections {
+  display: none;
+}
+
+.station-details-sidebar-panel .station-details-tab .sidebar-dropdown__header {
+  padding: var(--space-lg) var(--space-md);
+  box-sizing: border-box;
+  font-family: var(--font-body);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: 1.2;
+  -webkit-font-variation-settings: 'CRSV' 1, 'MONO' 0, 'slnt' 0;
+  font-variation-settings: 'CRSV' 1, 'MONO' 0, 'slnt' 0;
+}
+
+.station-details-sidebar-panel .station-details-tab .sidebar-dropdown__header-row,
+.station-details-sidebar-panel .station-details-tab .sidebar-dropdown__header {
+  min-height: var(--station-details-section-row, 64px);
+  height: auto;
+}
+
+.account-section-spacer {
+  flex-shrink: 0;
+  width: 100%;
+  pointer-events: none;
+}
+
+.account-section-spacer-item {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+
+/* Sign out — red-action fill (must beat .sidebar-panel .sidebar-dropdown).
+ * Label always uses dark-mode --text-primary (#ffffff) on both themes. */
+.account-section-tab--danger {
+  --button-bg-active: hsl(0 68% 58%);
+  --button-bg-inactive: hsl(0 68% 48%);
+  --button-text-active: #ffffff;
+  --button-text-inactive: #ffffff;
+  --account-danger-label: #ffffff;
+}
+
+[data-theme='dark'] .account-section-tab--danger {
+  --button-bg-active: hsl(359 100% 25%);
+  --button-bg-inactive: hsl(359 100% 17%);
+}
+
+.sidebar-panel .account-section-tab--danger.sidebar-dropdown,
+.account-section-tab--danger.header-nav-link {
+  background-color: var(--button-bg-active);
+  color: var(--account-danger-label);
+}
+
+/* Extend red into the panel’s left inset without a 100vw ::before bleed. */
+@media (min-width: 1024px) {
+  .account-sidebar .sidebar-panel .account-section-tab--danger.sidebar-dropdown {
+    margin-left: calc(-1 * var(--stations-content-inset, 0px));
+    padding-left: var(--stations-content-inset, 0px);
+    box-sizing: border-box;
+  }
+}
+
+.sidebar-panel .account-section-tab--danger .sidebar-dropdown__header-row {
+  background-color: transparent;
+}
+
+.sidebar-panel .account-section-tab--danger .sidebar-dropdown__header,
+.sidebar-panel .account-section-tab--danger .sidebar-panel-nav-item__chevron-btn {
+  background-color: transparent;
+  color: var(--account-danger-label);
+}
+
+/* Kill the default sidebar quinary hover wash on Sign out */
+.account-section-tab--danger .sidebar-dropdown__header-row::after,
+.sidebar-panel
+  .account-section-tab--danger:not(.sidebar-dropdown--selected)
+  .sidebar-dropdown__header-row:has(.sidebar-dropdown__header:hover)::after,
+.sidebar-panel
+  .account-section-tab--danger:not(.sidebar-dropdown--selected)
+  .sidebar-dropdown__header-row:has(.sidebar-panel-nav-item__chevron-btn:hover)::after {
+  content: none !important;
+  display: none !important;
+}
+
+.account-section-tab--danger .sidebar-dropdown__title,
+.account-section-tab--danger .sidebar-panel-nav-item__label,
+.account-section-tab--danger .sidebar-dropdown__chevron,
+.account-section-tab--danger .sidebar-panel-nav-item__chevron-btn,
+.account-section-tab--danger .sidebar-panel-nav-item__icon,
+.account-section-tab--danger .header-nav-link__label,
+.account-section-tab--danger .station-details-tab__icon {
+  color: var(--account-danger-label);
+}
+
+/* Hover — red-action pressed fill */
+@media (hover: hover) and (pointer: fine) {
+  .sidebar-panel .account-section-tab--danger.sidebar-dropdown:has(.sidebar-dropdown__header:hover),
+  .sidebar-panel
+    .account-section-tab--danger.sidebar-dropdown:has(.sidebar-panel-nav-item__chevron-btn:hover),
+  .account-section-tab--danger.header-nav-link:hover {
+    background-color: var(--button-bg-inactive);
+    color: var(--account-danger-label);
+  }
+
+  .account-section-tab--danger:has(.sidebar-dropdown__header:hover) .sidebar-dropdown__title,
+  .account-section-tab--danger:has(.sidebar-dropdown__header:hover) .sidebar-panel-nav-item__label,
+  .account-section-tab--danger:has(.sidebar-dropdown__header:hover) .sidebar-dropdown__chevron,
+  .account-section-tab--danger:has(.sidebar-dropdown__header:hover)
+    .sidebar-panel-nav-item__chevron-btn,
+  .account-section-tab--danger:has(.sidebar-dropdown__header:hover) .sidebar-panel-nav-item__icon,
+  .account-section-tab--danger:has(.sidebar-panel-nav-item__chevron-btn:hover)
+    .sidebar-dropdown__title,
+  .account-section-tab--danger:has(.sidebar-panel-nav-item__chevron-btn:hover)
+    .sidebar-panel-nav-item__label,
+  .account-section-tab--danger:has(.sidebar-panel-nav-item__chevron-btn:hover)
+    .sidebar-dropdown__chevron,
+  .account-section-tab--danger:has(.sidebar-panel-nav-item__chevron-btn:hover)
+    .sidebar-panel-nav-item__chevron-btn,
+  .account-section-tab--danger:has(.sidebar-panel-nav-item__chevron-btn:hover)
+    .sidebar-panel-nav-item__icon,
+  .account-section-tab--danger.header-nav-link:hover .header-nav-link__label,
+  .account-section-tab--danger.header-nav-link:hover .station-details-tab__icon {
+    color: var(--account-danger-label);
+  }
+}
+
+/* Pressed (click) */
+.sidebar-panel .account-section-tab--danger.sidebar-dropdown:has(.sidebar-dropdown__header:active),
+.sidebar-panel
+  .account-section-tab--danger.sidebar-dropdown:has(.sidebar-panel-nav-item__chevron-btn:active),
+.account-section-tab--danger.header-nav-link:active {
+  background-color: var(--button-bg-inactive);
+  color: var(--account-danger-label);
+}
+
+.account-section-tab--danger.header-nav-link:active .header-nav-link__label,
+.account-section-tab--danger.header-nav-link:active .station-details-tab__icon {
+  color: var(--account-danger-label);
+}
+
+@media (min-width: 1024px) {
+  .account-page {
+    --stations-content-inset: calc(var(--space-2xl) * 2 / 3);
+  }
+
+  .rs-account-page-shell--details .rs-page-top-header__inner {
+    padding-left: var(--space-2xl);
+    padding-right: var(--space-2xl);
+  }
+
+  .account-layout.station-details-layout {
+    display: grid;
+    grid-template-columns: 360px minmax(0, 1fr);
+    gap: 0;
+    align-items: stretch;
+    flex: 1 1 auto;
+    max-width: var(--container-3xl);
+    margin: 0 auto;
+    padding: 0 var(--stations-content-inset);
+    box-sizing: border-box;
+    --station-details-section-row: 64px;
+    --station-details-min-section-count: 5;
+    /* Prefer filling the viewport shell; keep section-row floor as a fallback. */
+    min-height: max(
+      100%,
+      calc(var(--station-details-min-section-count) * var(--station-details-section-row))
+    );
+    width: 100%;
+  }
+
+  .account-sidebar.station-details-sidebar {
+    width: auto;
+    min-width: 0;
+    margin-left: calc(var(--stations-content-inset) * -1);
+    align-self: stretch;
+    padding: 0;
+    margin-top: 0;
+    gap: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    height: 100%;
+  }
+
+  .account-sidebar .station-details-sidebar-panel {
+    flex: 1 1 auto;
+    min-height: 100%;
+    height: 100%;
+    padding-top: 0 !important;
+    padding-left: var(--stations-content-inset);
+    padding-right: 0;
+    padding-bottom: 0;
+    margin-top: 0;
+    border-top: 0;
+    border-right: 0;
+    border-bottom: 0;
+  }
+
+  .account-sidebar .station-details-sidebar-panel .station-details-tabs,
+  .account-sidebar
+    .station-details-sidebar-panel
+    .station-details-tabs
+    > .station-details-tab:first-child {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+  }
+
+  .account-sidebar
+    .station-details-sidebar-panel
+    .station-details-tab
+    .sidebar-dropdown__header {
+    padding-block: var(--space-lg);
+    padding-left: calc(var(--space-2xl) - var(--stations-content-inset));
+    padding-right: var(--space-md);
+  }
+
+  .account-sidebar
+    .station-details-sidebar-panel
+    .station-details-tab.sidebar-dropdown--selected
+    .sidebar-dropdown__header {
+    margin-right: 0;
+  }
+
+  .account-main.station-details-main {
+    padding: calc(var(--stations-content-inset) / 4);
+    box-sizing: border-box;
+    min-height: 100%;
+    align-self: stretch;
+  }
+}
+
+@media (max-width: 1023px) {
+  .rs-account-page-shell--details {
+    --stations-content-inset: var(--stations-card-gap, var(--space-lg));
+    --stations-panel-text-inset: var(--space-2xl);
+  }
+
+  .account-page {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .rs-account-page-shell--details .rs-page-top-header__inner {
+    max-width: none;
+    padding-left: var(--stations-panel-text-inset);
+    padding-right: var(--stations-panel-text-inset);
+  }
+
+  .account-layout.station-details-layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  .account-sidebar.station-details-sidebar {
+    display: none;
+  }
+
+  .station-details-mobile-sections.account-mobile-sections {
+    display: block;
+    order: 1;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    min-width: 0;
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .account-mobile-sections .station-details-mobile-sections__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    min-height: 44px;
+    padding: var(--space-xs) var(--stations-panel-text-inset);
+    box-sizing: border-box;
+    background-color: var(--bg-secondary);
+    background-image: linear-gradient(
+      color-mix(in srgb, var(--bg-primary) 50%, transparent),
+      color-mix(in srgb, var(--bg-primary) 50%, transparent)
+    );
+  }
+
+  .account-mobile-sections .station-details-mobile-sections__title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-family: var(--font-body);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--text-primary);
+    font-variation-settings: 'CRSV' 1, 'wght' 600, 'MONO' 0, 'slnt' 0;
+    min-width: 0;
+  }
+
+  .account-mobile-sections .station-details-mobile-sections__menu .header-mobile-panel {
+    padding: 0;
+  }
+
+  /* Desktop-only gap above Forget device / Sign out */
+  .account-mobile-sections .account-section-spacer-item,
+  .account-mobile-sections .account-section-spacer {
+    display: none;
+  }
+
+  .account-mobile-sections
+    .station-details-mobile-sections__menu
+    .header-nav--mobile
+    .header-nav-link {
+    padding-left: var(--stations-panel-text-inset);
+    padding-right: var(--stations-panel-text-inset);
+  }
+
+  /* Beat .header-nav--mobile button.header-nav-link { background: transparent } */
+  .account-mobile-sections
+    .header-nav--mobile
+    button.header-nav-link.account-section-tab--danger,
+  .account-mobile-sections
+    .header-nav--mobile
+    button.header-nav-link.account-section-tab--danger:hover,
+  .account-mobile-sections
+    .header-nav--mobile
+    button.header-nav-link.account-section-tab--danger:active {
+    background: var(--button-bg-active);
+    background-color: var(--button-bg-active);
+    color: var(--account-danger-label);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .account-mobile-sections
+      .header-nav--mobile
+      button.header-nav-link.account-section-tab--danger:hover {
+      background: var(--button-bg-inactive);
+      background-color: var(--button-bg-inactive);
+    }
+  }
+
+  .account-mobile-sections
+    .header-nav--mobile
+    button.header-nav-link.account-section-tab--danger:active {
+    background: var(--button-bg-inactive);
+    background-color: var(--button-bg-inactive);
+  }
+
+  .account-mobile-sections
+    .header-nav--mobile
+    button.header-nav-link.account-section-tab--danger
+    .header-nav-link__label,
+  .account-mobile-sections
+    .header-nav--mobile
+    button.header-nav-link.account-section-tab--danger
+    .station-details-tab__icon {
+    color: var(--account-danger-label);
+  }
+
+  .account-main.station-details-main {
+    order: 2;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: var(--stations-panel-text-inset);
+    box-sizing: border-box;
+    overflow-x: visible;
+  }
+
+  .account-main .account-card {
+    padding: 0;
+    /* Still leave room under the last TXTINP / button for drop shadows */
+    padding-bottom: var(--rs-control-shadow-pad, 8px);
+    gap: var(--space-lg);
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 639px) {
+  .rs-account-page-shell--details {
+    --stations-card-gap: var(--space-md);
+    --stations-content-inset: var(--stations-card-gap);
+    --stations-panel-text-inset: var(--space-lg);
+  }
+
+  .rs-account-page-shell--details .rs-page-top-header__inner {
+    padding-left: var(--stations-panel-text-inset);
+    padding-right: var(--stations-panel-text-inset);
+  }
+
+  .account-mobile-sections .station-details-mobile-sections__bar {
+    padding-left: var(--stations-panel-text-inset);
+    padding-right: var(--stations-panel-text-inset);
+  }
+
+  .account-mobile-sections
+    .station-details-mobile-sections__menu
+    .header-nav--mobile
+    .header-nav-link {
+    padding-left: var(--stations-panel-text-inset);
+    padding-right: var(--stations-panel-text-inset);
+  }
+
+  .account-main.station-details-main {
+    padding: var(--stations-panel-text-inset);
+  }
+}

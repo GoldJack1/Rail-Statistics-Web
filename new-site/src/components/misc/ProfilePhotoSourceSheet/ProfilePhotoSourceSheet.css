@@ -1,0 +1,57 @@
+.rs-photo-source-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10010;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: var(--space-lg);
+}
+
+@media (min-width: 640px) {
+  .rs-photo-source-overlay {
+    align-items: center;
+  }
+}
+
+.rs-photo-source-dialog {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+  box-shadow: var(--shadow-lg);
+}
+
+.rs-photo-source-title {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rs-photo-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.rs-photo-source-cancel {
+  display: block;
+  width: 100%;
+  margin-top: var(--space-lg);
+  padding: var(--space-sm) 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  text-align: center;
+}
+
+.rs-photo-source-cancel:hover {
+  color: var(--text-primary);
+}

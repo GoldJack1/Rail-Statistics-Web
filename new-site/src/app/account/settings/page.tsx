@@ -1,53 +1,111 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Camera,
+  CloudArrowUp,
+  EnvelopeSimple,
+  IdentificationCard,
+  Password,
+  ShieldCheck,
+  Storefront,
+  Trophy,
+} from '@phosphor-icons/react'
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
 import { BUTWideButton } from '@/components/buttons'
 import { TextCard } from '@/components/cards'
+import AccountConfirmModal from '@/components/misc/AccountConfirmModal/AccountConfirmModal'
 import {
   AccountAuthShell,
   AccountContentShell,
 } from '@/components/misc/AccountPageShell/AccountPageShell'
-import TXTINPWideButton from '@/components/textInputs/plain/TXTINPWideButton'
+import {
+  AccountSectionNav,
+  type AccountSection,
+} from '@/components/misc/AccountSectionNav/AccountSectionNav'
+import CameraCaptureModal from '@/components/misc/CameraCaptureModal/CameraCaptureModal'
+import ProfilePhotoCropModal from '@/components/misc/ProfilePhotoCropModal/ProfilePhotoCropModal'
+import ProfilePhotoSourceSheet from '@/components/misc/ProfilePhotoSourceSheet/ProfilePhotoSourceSheet'
+import TXTINPBUTWideButton from '@/components/textInputButtons/plain/TXTINPBUTWideButton'
 import { useConsumerAuth } from '@/contexts/ConsumerAuthContext'
-import { LEADERBOARD_FAIR_NETWORK_IDS } from '@/services/accountModels'
+import {
+  LEADERBOARD_FAIR_NETWORK_IDS,
+  isValidUsername,
+  leaderboardNetworkDisplayName,
+  normalizeUsername,
+} from '@/services/accountModels'
 import { ensureUserAccountsFirebase } from '@/services/userAccountsFirebase'
 import { publishLeaderboardIfNeeded } from '@/services/leaderboardService'
-import './settings.css'
+import {
+  devOverrideMessageFromPrefs,
+  fetchAccountSubscriptionStatus,
+  type AccountSubscriptionStatus,
+} from '@/services/subscriptionStatus'
+import { fetchCloudDevOverrideFlags } from '@/services/encryptedVaultSync'
 import '../account.css'
 
 const TOPICS = [
-  { id: 'photo', title: 'Profile photo', sub: 'Change or remove the photo shown on leaderboards.' },
-  { id: 'name', title: 'Name & username', sub: 'Update your display name and @username.' },
-  { id: 'password', title: 'Password', sub: 'Change your account password.' },
-  { id: 'twoFactor', title: '2-Factor Auth', sub: 'Authenticator status, or replace your app.' },
-  { id: 'email', title: 'Email', sub: 'View your address or request a change.' },
-  { id: 'leaderboards', title: 'Leaderboards', sub: 'Opt in and choose what you share.' },
-  { id: 'cloudSync', title: 'Cloud sync', sub: 'Recovery key, status, and Sync Now.' },
+  {
+    id: 'photo',
+    title: 'Profile photo',
+    sub: 'Change or remove the photo shown on leaderboards.',
+    icon: Camera,
+  },
+  {
+    id: 'name',
+    title: 'Name & username',
+    sub: 'Update your display name and @username.',
+    icon: IdentificationCard,
+  },
+  {
+    id: 'password',
+    title: 'Password',
+    sub: 'Change your account password.',
+    icon: Password,
+  },
+  {
+    id: 'twoFactor',
+    title: '2-Factor Auth',
+    sub: 'Authenticator status, or replace your app.',
+    icon: ShieldCheck,
+  },
+  {
+    id: 'email',
+    title: 'Email',
+    sub: 'View your address or request a change.',
+    icon: EnvelopeSimple,
+  },
+  {
+    id: 'leaderboards',
+    title: 'Leaderboards',
+    sub: 'Opt in and choose what you share.',
+    icon: Trophy,
+  },
+  {
+    id: 'cloudSync',
+    title: 'Cloud sync',
+    sub: 'Recovery key, status, and Sync Now.',
+    icon: CloudArrowUp,
+  },
+  {
+    id: 'subscription',
+    title: 'Subscription',
+    sub: 'See where your plan was purchased and how to manage it.',
+    icon: Storefront,
+  },
 ] as const
 
 type TopicId = (typeof TOPICS)[number]['id']
+type PendingLeave = { type: 'back' } | { type: 'topic'; id: TopicId }
 
-async function resizeToJpeg(file: File): Promise<Blob> {
-  const bitmap = await createImageBitmap(file)
-  const max = 512
-  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height))
-  const w = Math.max(1, Math.round(bitmap.width * scale))
-  const h = Math.max(1, Math.round(bitmap.height * scale))
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Could not process image.')
-  ctx.drawImage(bitmap, 0, 0, w, h)
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82))
-  if (!blob) throw new Error('Could not encode image.')
-  if (blob.size > 2 * 1024 * 1024) throw new Error('Image must be under 2MB.')
-  return blob
+function looksLikeEmail(value: string): boolean {
+  return value.includes('@') && value.includes('.')
 }
 
 export default function AccountSettingsPage() {
+  const router = useRouter()
   const {
     user,
     profile,
@@ -55,6 +113,7 @@ export default function AccountSettingsPage() {
     vaultUnlocked,
     vaultRememberedOnDevice,
     hasTotp,
+    needsEmailVerify,
     syncStatus,
     unlockVault,
     forgetDeviceVault,
@@ -65,25 +124,256 @@ export default function AccountSettingsPage() {
     updateBoardPrefs,
     saveProfileFields,
     noteDiaryChanged,
+    resendVerification,
+    refreshUser,
   } = useConsumerAuth()
 
-  const [topic, setTopic] = useState<TopicId | null>(null)
+  const [topic, setTopic] = useState<TopicId>('photo')
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const [displayName, setDisplayName] = useState('')
-  const [username, setUsername] = useState('')
+  const [displayName, setDisplayName] = useState(() => profile?.displayName ?? '')
+  const [username, setUsername] = useState(() => profile?.username ?? '')
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [emailPassword, setEmailPassword] = useState('')
   const [newEmail, setNewEmail] = useState('')
   const [recovery, setRecovery] = useState('')
   const [rememberDevice, setRememberDevice] = useState(true)
+  const [subscription, setSubscription] = useState<AccountSubscriptionStatus | null>(null)
+  const [subscriptionLoading, setSubscriptionLoading] = useState(false)
+  const [subscriptionDevOverrideNote, setSubscriptionDevOverrideNote] = useState<string | null>(null)
+  const [cropImageUrl, setCropImageUrl] = useState<string | null>(null)
+  const [showPhotoSource, setShowPhotoSource] = useState(false)
+  const [showCamera, setShowCamera] = useState(false)
+  const [cameraAvailable, setCameraAvailable] = useState(false)
+  const [pendingLeave, setPendingLeave] = useState<PendingLeave | null>(null)
+
+  const libraryInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setCameraAvailable(Boolean(navigator.mediaDevices?.getUserMedia))
+  }, [])
+
+  useEffect(() => {
+    if (!profile) return
+    if (topic === 'name') {
+      setDisplayName(profile.displayName)
+      setUsername(profile.username)
+    }
+  }, [profile, topic])
+
+  const trimmedDisplayName = displayName.trim()
+  const trimmedUsername = username.trim()
+  const savedDisplayName = (profile?.displayName ?? '').trim()
+  const savedUsername = (profile?.username ?? '').trim()
+  const trimmedNewEmail = newEmail.trim()
+
+  const hasUnsavedNameChanges =
+    trimmedDisplayName !== savedDisplayName || trimmedUsername !== savedUsername
+  const canSaveName =
+    hasUnsavedNameChanges &&
+    !busy &&
+    trimmedDisplayName.length > 0 &&
+    isValidUsername(trimmedUsername)
+
+  const hasUnsavedPasswordChanges =
+    currentPassword.length > 0 || newPassword.length > 0 || confirmPassword.length > 0
+  const canSavePassword =
+    !busy &&
+    currentPassword.length > 0 &&
+    newPassword.length >= 8 &&
+    newPassword === confirmPassword
+
+  const hasUnsavedEmailChanges = trimmedNewEmail.length > 0 || emailPassword.length > 0
+  const canRequestEmailChange =
+    hasUnsavedEmailChanges &&
+    !busy &&
+    emailPassword.length > 0 &&
+    looksLikeEmail(trimmedNewEmail) &&
+    trimmedNewEmail.toLowerCase() !== (profile?.email ?? '').toLowerCase()
+
+  const hasUnsavedCloudUnlock = !vaultUnlocked && recovery.trim().length > 0
+  const canEnableCloudSync = !busy && recovery.trim().length > 0
+
+  const hasUnsavedChanges = useMemo(() => {
+    switch (topic) {
+      case 'name':
+        return hasUnsavedNameChanges
+      case 'password':
+        return hasUnsavedPasswordChanges
+      case 'email':
+        return hasUnsavedEmailChanges
+      case 'cloudSync':
+        return hasUnsavedCloudUnlock
+      default:
+        return false
+    }
+  }, [
+    topic,
+    hasUnsavedNameChanges,
+    hasUnsavedPasswordChanges,
+    hasUnsavedEmailChanges,
+    hasUnsavedCloudUnlock,
+  ])
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [hasUnsavedChanges])
+
+  const resetTopicDraft = (topicId: TopicId) => {
+    if (!profile) return
+    if (topicId === 'name') {
+      setDisplayName(profile.displayName)
+      setUsername(profile.username)
+    }
+    if (topicId === 'password') {
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+    }
+    if (topicId === 'email') {
+      setEmailPassword('')
+      setNewEmail('')
+    }
+    if (topicId === 'cloudSync') {
+      setRecovery('')
+      setRememberDevice(true)
+    }
+  }
+
+  const applyTopic = (nextId: TopicId) => {
+    setTopic(nextId)
+    setError(null)
+    setInfo(null)
+    resetTopicDraft(nextId)
+  }
+
+  const requestLeave = (next: PendingLeave) => {
+    if (hasUnsavedChanges) {
+      setPendingLeave(next)
+      return
+    }
+    if (next.type === 'back') {
+      router.push('/account')
+      return
+    }
+    applyTopic(next.id)
+  }
+
+  const confirmDiscard = () => {
+    const next = pendingLeave
+    setPendingLeave(null)
+    if (!next) return
+    resetTopicDraft(topic)
+    if (next.type === 'back') {
+      router.push('/account')
+      return
+    }
+    applyTopic(next.id)
+  }
+
+  const openCropFromFile = (file: File | undefined | null) => {
+    if (!file) return
+    setError(null)
+    setInfo(null)
+    const url = URL.createObjectURL(file)
+    setCropImageUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return url
+    })
+  }
+
+  const closeCropModal = () => {
+    setCropImageUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+    if (libraryInputRef.current) libraryInputRef.current.value = ''
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const uploadCroppedAvatar = async (blob: Blob) => {
+    if (!profile) return
+    setBusy(true)
+    setError(null)
+    try {
+      const { storage } = await ensureUserAccountsFirebase()
+      const path = `avatars/${profile.uid}/profile.jpg`
+      const storageRef = ref(storage, path)
+      await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' })
+      const url = await getDownloadURL(storageRef)
+      const next = { ...profile, avatarURL: url }
+      await saveProfileFields(next)
+      await publishLeaderboardIfNeeded({ profile: next, catalogue: [], force: true })
+      setInfo('Profile photo updated.')
+      noteDiaryChanged()
+      closeCropModal()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const lastSynced = useMemo(() => {
     const d = syncStatus.lastSyncedAt
     return d ? d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : null
   }, [syncStatus.lastSyncedAt])
+
+  const sections = useMemo(
+    (): AccountSection[] =>
+      TOPICS.map((t) => ({
+        id: t.id,
+        label: t.title,
+        icon: t.icon,
+      })),
+    []
+  )
+
+  const activeTopic = TOPICS.find((t) => t.id === topic) ?? TOPICS[0]
+
+  useEffect(() => {
+    if (topic !== 'subscription' || !user) return
+    let cancelled = false
+    setSubscriptionLoading(true)
+    setError(null)
+    setSubscriptionDevOverrideNote(null)
+    void (async () => {
+      try {
+        const token = await user.getIdToken()
+        const status = await fetchAccountSubscriptionStatus(token)
+        if (!cancelled) setSubscription(status)
+      } catch (err) {
+        if (!cancelled) {
+          setSubscription(null)
+          setError(err instanceof Error ? err.message : String(err))
+        }
+      } finally {
+        if (!cancelled) setSubscriptionLoading(false)
+      }
+      if (vaultUnlocked) {
+        try {
+          const flags = await fetchCloudDevOverrideFlags(user.uid)
+          if (!cancelled) setSubscriptionDevOverrideNote(devOverrideMessageFromPrefs(flags))
+        } catch {
+          if (!cancelled) setSubscriptionDevOverrideNote(null)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [topic, user, vaultUnlocked])
 
   if (loading) {
     return (
@@ -107,371 +397,556 @@ export default function AccountSettingsPage() {
     )
   }
 
-  if (!topic) {
-    return (
-      <AccountContentShell
-        title="Account Settings"
-        actionButton={{ to: '/account', label: 'Back' }}
-      >
-        {TOPICS.map((t) => (
-          <TextCard
-            key={t.id}
-            title={t.title}
-            description={t.sub}
-            onClick={() => {
-              setTopic(t.id)
-              setError(null)
-              setInfo(null)
-              if (t.id === 'name') {
-                setDisplayName(profile.displayName)
-                setUsername(profile.username)
-              }
-            }}
-          />
-        ))}
-      </AccountContentShell>
-    )
-  }
-
-  const title = TOPICS.find((t) => t.id === topic)?.title ?? 'Settings'
-
   return (
     <AccountContentShell
-      title={title}
+      title="Account Settings"
       actionButton={{
         label: 'Back',
-        onClick: () => {
-          setTopic(null)
-          setError(null)
-          setInfo(null)
+        onClick: (e) => {
+          e.preventDefault()
+          requestLeave({ type: 'back' })
         },
       }}
+      detailsLayout
     >
-      {error ? <p className="rs-account-error">{error}</p> : null}
-      {info ? <p className="rs-account-info">{info}</p> : null}
-
-      {topic === 'photo' ? (
-        <div className="rs-account-actions">
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (!file) return
-              setBusy(true)
-              setError(null)
-              void (async () => {
-                const { storage } = await ensureUserAccountsFirebase()
-                const blob = await resizeToJpeg(file)
-                const path = `avatars/${profile.uid}/profile.jpg`
-                const storageRef = ref(storage, path)
-                await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' })
-                const url = await getDownloadURL(storageRef)
-                const next = { ...profile, avatarURL: url }
-                await saveProfileFields(next)
-                await publishLeaderboardIfNeeded({ profile: next, catalogue: [], force: true })
-                setInfo('Profile photo updated.')
-                noteDiaryChanged()
-              })()
-                .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-                .finally(() => setBusy(false))
+      <div className="account-page">
+        <div
+          className="account-layout station-details-layout"
+          style={{ ['--station-details-min-section-count' as string]: 8 }}
+        >
+          <AccountSectionNav
+            sections={sections}
+            activeSectionId={topic}
+            onSelect={(sectionId) => {
+              const next = TOPICS.find((t) => t.id === sectionId)
+              if (!next || next.id === topic) return
+              requestLeave({ type: 'topic', id: next.id })
             }}
+            ariaLabel="Account settings"
           />
-          {profile.avatarURL ? (
-            <BUTWideButton
-              type="button"
-              width="fill"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true)
-                void (async () => {
-                  const { storage } = await ensureUserAccountsFirebase()
-                  try {
-                    await deleteObject(ref(storage, `avatars/${profile.uid}/profile.jpg`))
-                  } catch {
-                    /* may already be gone */
-                  }
-                  const next = { ...profile, avatarURL: null }
-                  await saveProfileFields(next)
-                  setInfo('Profile photo removed.')
-                })()
-                  .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-                  .finally(() => setBusy(false))
-              }}
-            >
-              Remove photo
-            </BUTWideButton>
-          ) : null}
-        </div>
-      ) : null}
 
-      {topic === 'name' ? (
-        <div className="rs-account-form-stack">
-          <TXTINPWideButton
-            placeholder="Display name"
-            value={displayName}
-            onChange={setDisplayName}
-            colorVariant="secondary"
-          />
-          <TXTINPWideButton
-            placeholder="Username"
-            value={username}
-            onChange={setUsername}
-            colorVariant="secondary"
-          />
-          <BUTWideButton
-            type="button"
-            width="fill"
-            colorVariant="accent"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true)
-              setError(null)
-              void updateNameUsername(displayName, username)
-                .then(() => setInfo('Saved.'))
-                .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-                .finally(() => setBusy(false))
-            }}
-          >
-            Save
-          </BUTWideButton>
-        </div>
-      ) : null}
+          <main className="account-main station-details-main">
+            <div className="account-card">
+              <section className="rs-account-section" aria-labelledby="account-settings-topic-title">
+                <h2 id="account-settings-topic-title" className="rs-account-section__title">
+                  {activeTopic.title}
+                </h2>
+                <div className="rs-account-section__body">
+                  <p className="rs-account-section__copy">{activeTopic.sub}</p>
+                  {error ? <p className="rs-account-error">{error}</p> : null}
+                  {info ? <p className="rs-account-info">{info}</p> : null}
 
-      {topic === 'password' ? (
-        <div className="rs-account-form-stack">
-          <TXTINPWideButton
-            placeholder="Current password"
-            type="password"
-            value={currentPassword}
-            onChange={setCurrentPassword}
-            colorVariant="secondary"
-          />
-          <TXTINPWideButton
-            placeholder="New password (8+)"
-            type="password"
-            value={newPassword}
-            onChange={setNewPassword}
-            colorVariant="secondary"
-          />
-          <BUTWideButton
-            type="button"
-            width="fill"
-            colorVariant="accent"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true)
-              setError(null)
-              void changePassword(currentPassword, newPassword)
-                .then(() => {
-                  setInfo('Password updated.')
-                  setCurrentPassword('')
-                  setNewPassword('')
-                })
-                .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-                .finally(() => setBusy(false))
-            }}
-          >
-            Update password
-          </BUTWideButton>
-        </div>
-      ) : null}
-
-      {topic === 'twoFactor' ? (
-        <div>
-          <p className="rs-account-info">Status: {hasTotp ? 'Enabled' : 'Not set up'}</p>
-          <p className="rs-account-info">
-            2-Factor Auth is required for Rail Statistics accounts. To replace your authenticator,
-            re-enrol from a signed-in session on mobile, or contact support if you are locked out.
-          </p>
-          <Link href="/account/mfa">Re-open setup (if not enrolled)</Link>
-        </div>
-      ) : null}
-
-      {topic === 'email' ? (
-        <div className="rs-account-form-stack">
-          <p className="rs-account-info">Current: {profile.email}</p>
-          <TXTINPWideButton
-            placeholder="Password"
-            type="password"
-            value={currentPassword}
-            onChange={setCurrentPassword}
-            colorVariant="secondary"
-          />
-          <TXTINPWideButton
-            placeholder="New email"
-            type="email"
-            value={newEmail}
-            onChange={setNewEmail}
-            colorVariant="secondary"
-          />
-          <BUTWideButton
-            type="button"
-            width="fill"
-            colorVariant="accent"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true)
-              setError(null)
-              void requestEmailChange(currentPassword, newEmail)
-                .then(() => setInfo('Check your new inbox to confirm the email change.'))
-                .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-                .finally(() => setBusy(false))
-            }}
-          >
-            Send confirmation
-          </BUTWideButton>
-        </div>
-      ) : null}
-
-      {topic === 'leaderboards' ? (
-        <div className="rs-account-form-stack">
-          <label className="rs-account-check">
-            <input
-              type="checkbox"
-              checked={profile.leaderboardsOptIn}
-              onChange={(e) => {
-                const optedIn = e.target.checked
-                void updateBoardPrefs({
-                  leaderboardsOptIn: optedIn,
-                  leaderboardsShowOnAllNetworks: optedIn ? true : false,
-                  leaderboardsEnabledNetworkIDs: optedIn ? [] : profile.leaderboardsEnabledNetworkIDs,
-                  leaderboardsShowDisplayName: profile.leaderboardsShowDisplayName,
-                }).then(() => setInfo('Leaderboard preferences updated.'))
-              }}
-            />
-            <span>Opt in to leaderboards</span>
-          </label>
-          {profile.leaderboardsOptIn ? (
-            <>
-              <label className="rs-account-check">
-                <input
-                  type="checkbox"
-                  checked={profile.leaderboardsShowOnAllNetworks}
-                  onChange={(e) => {
-                    void updateBoardPrefs({
-                      leaderboardsOptIn: true,
-                      leaderboardsShowOnAllNetworks: e.target.checked,
-                      leaderboardsEnabledNetworkIDs: profile.leaderboardsEnabledNetworkIDs,
-                      leaderboardsShowDisplayName: profile.leaderboardsShowDisplayName,
-                    })
-                  }}
-                />
-                <span>All networks</span>
-              </label>
-              {!profile.leaderboardsShowOnAllNetworks
-                ? LEADERBOARD_FAIR_NETWORK_IDS.map((id) => (
-                    <label key={id} className="rs-account-check">
+                  {topic === 'photo' ? (
+                    <div className="rs-account-form-stack">
+                      <div className="rs-account-photo-preview">
+                        {profile.avatarURL ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={profile.avatarURL}
+                            alt=""
+                            className="rs-account-avatar rs-account-avatar--lg"
+                            width={96}
+                            height={96}
+                          />
+                        ) : (
+                          <div
+                            className="rs-account-avatar rs-account-avatar--lg rs-account-avatar--placeholder"
+                            aria-hidden
+                          />
+                        )}
+                      </div>
                       <input
-                        type="checkbox"
-                        checked={profile.leaderboardsEnabledNetworkIDs.includes(id)}
+                        ref={libraryInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="rs-account-file-input"
                         onChange={(e) => {
-                          const set = new Set(profile.leaderboardsEnabledNetworkIDs)
-                          if (e.target.checked) set.add(id)
-                          else set.delete(id)
-                          void updateBoardPrefs({
-                            leaderboardsOptIn: true,
-                            leaderboardsShowOnAllNetworks: false,
-                            leaderboardsEnabledNetworkIDs: [...set],
-                            leaderboardsShowDisplayName: profile.leaderboardsShowDisplayName,
-                          })
+                          openCropFromFile(e.target.files?.[0])
+                          e.target.value = ''
                         }}
                       />
-                      <span>{id}</span>
-                    </label>
-                  ))
-                : null}
-              <label className="rs-account-check">
-                <input
-                  type="checkbox"
-                  checked={profile.leaderboardsShowDisplayName}
-                  onChange={(e) => {
-                    void updateBoardPrefs({
-                      leaderboardsOptIn: true,
-                      leaderboardsShowOnAllNetworks: profile.leaderboardsShowOnAllNetworks,
-                      leaderboardsEnabledNetworkIDs: profile.leaderboardsEnabledNetworkIDs,
-                      leaderboardsShowDisplayName: e.target.checked,
-                    })
-                  }}
-                />
-                <span>Show display name (username always shown)</span>
-              </label>
-            </>
-          ) : null}
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="rs-account-file-input"
+                        onChange={(e) => {
+                          openCropFromFile(e.target.files?.[0])
+                          e.target.value = ''
+                        }}
+                      />
+                      <BUTWideButton
+                        type="button"
+                        width="fill"
+                        colorVariant="accent"
+                        disabled={busy}
+                        onClick={() => setShowPhotoSource(true)}
+                      >
+                        {busy ? 'Uploading…' : 'Change photo'}
+                      </BUTWideButton>
+                      {profile.avatarURL ? (
+                        <BUTWideButton
+                          type="button"
+                          width="fill"
+                          colorVariant="red-action"
+                          disabled={busy}
+                          onClick={() => {
+                            setBusy(true)
+                            void (async () => {
+                              const { storage } = await ensureUserAccountsFirebase()
+                              try {
+                                await deleteObject(ref(storage, `avatars/${profile.uid}/profile.jpg`))
+                              } catch {
+                                /* may already be gone */
+                              }
+                              const next = { ...profile, avatarURL: null }
+                              await saveProfileFields(next)
+                              setInfo('Profile photo removed.')
+                            })()
+                              .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+                              .finally(() => setBusy(false))
+                          }}
+                        >
+                          Remove photo
+                        </BUTWideButton>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {topic === 'name' ? (
+                    <div className="rs-account-form-stack">
+                      <TXTINPBUTWideButton
+                        placeholder="Display name"
+                        value={displayName}
+                        onChange={setDisplayName}
+                        colorVariant="primary"
+                      />
+                      <TXTINPBUTWideButton
+                        placeholder="Username"
+                        value={username}
+                        onChange={setUsername}
+                        colorVariant="primary"
+                      />
+                      <BUTWideButton
+                        type="button"
+                        width="fill"
+                        colorVariant="accent"
+                        disabled={!canSaveName}
+                        onClick={() => {
+                          setBusy(true)
+                          setError(null)
+                          void updateNameUsername(trimmedDisplayName, normalizeUsername(trimmedUsername))
+                            .then(() => setInfo('Saved.'))
+                            .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                            .finally(() => setBusy(false))
+                        }}
+                      >
+                        {busy ? 'Saving…' : 'Save'}
+                      </BUTWideButton>
+                    </div>
+                  ) : null}
+
+                  {topic === 'password' ? (
+                    <div className="rs-account-form-stack">
+                      <TXTINPBUTWideButton
+                        placeholder="Current password"
+                        type="password"
+                        value={currentPassword}
+                        onChange={setCurrentPassword}
+                        colorVariant="primary"
+                      />
+                      <TXTINPBUTWideButton
+                        placeholder="New password (8+)"
+                        type="password"
+                        value={newPassword}
+                        onChange={setNewPassword}
+                        colorVariant="primary"
+                      />
+                      <TXTINPBUTWideButton
+                        placeholder="Confirm new password"
+                        type="password"
+                        value={confirmPassword}
+                        onChange={setConfirmPassword}
+                        colorVariant="primary"
+                      />
+                      {newPassword && confirmPassword && newPassword !== confirmPassword ? (
+                        <p className="rs-account-error">New passwords don’t match.</p>
+                      ) : null}
+                      <BUTWideButton
+                        type="button"
+                        width="fill"
+                        colorVariant="accent"
+                        disabled={!canSavePassword}
+                        onClick={() => {
+                          setBusy(true)
+                          setError(null)
+                          void changePassword(currentPassword, newPassword)
+                            .then(() => {
+                              setInfo('Password updated.')
+                              setCurrentPassword('')
+                              setNewPassword('')
+                              setConfirmPassword('')
+                            })
+                            .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                            .finally(() => setBusy(false))
+                        }}
+                      >
+                        {busy ? 'Updating…' : 'Update password'}
+                      </BUTWideButton>
+                    </div>
+                  ) : null}
+
+                  {topic === 'twoFactor' ? (
+                    <div className="rs-account-section__copy-stack">
+                      <p className="rs-account-section__meta">
+                        Status: {hasTotp ? 'Enabled' : 'Not set up'}
+                      </p>
+                      <p className="rs-account-section__copy">
+                        2-Factor Auth is required for Rail Statistics accounts. To replace your
+                        authenticator, re-enrol from a signed-in session on mobile, or contact support
+                        if you are locked out.
+                      </p>
+                      <p className="rs-account-section__meta">
+                        <Link href="/account/mfa">Re-open setup (if not enrolled)</Link>
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {topic === 'email' ? (
+                    <div className="rs-account-form-stack">
+                      <p className="rs-account-section__meta">Current: {profile.email}</p>
+                      <p className="rs-account-section__meta">
+                        Status: {needsEmailVerify ? 'Not verified' : 'Verified'}
+                      </p>
+                      {needsEmailVerify ? (
+                        <div className="rs-account-section__actions">
+                          <BUTWideButton
+                            type="button"
+                            width="fill"
+                            colorVariant="accent"
+                            disabled={busy}
+                            onClick={() => {
+                              setBusy(true)
+                              setError(null)
+                              void resendVerification()
+                                .then(() => setInfo('Verification email sent.'))
+                                .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                                .finally(() => setBusy(false))
+                            }}
+                          >
+                            Resend verification
+                          </BUTWideButton>
+                          <BUTWideButton
+                            type="button"
+                            width="fill"
+                            disabled={busy}
+                            onClick={() => {
+                              setBusy(true)
+                              setError(null)
+                              void refreshUser()
+                                .then(() => setInfo('Email status refreshed.'))
+                                .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                                .finally(() => setBusy(false))
+                            }}
+                          >
+                            Refresh status
+                          </BUTWideButton>
+                        </div>
+                      ) : null}
+                      <TXTINPBUTWideButton
+                        placeholder="Password"
+                        type="password"
+                        value={emailPassword}
+                        onChange={setEmailPassword}
+                        colorVariant="primary"
+                      />
+                      <TXTINPBUTWideButton
+                        placeholder="New email"
+                        type="email"
+                        value={newEmail}
+                        onChange={setNewEmail}
+                        colorVariant="primary"
+                      />
+                      <BUTWideButton
+                        type="button"
+                        width="fill"
+                        colorVariant="accent"
+                        disabled={!canRequestEmailChange}
+                        onClick={() => {
+                          setBusy(true)
+                          setError(null)
+                          void requestEmailChange(emailPassword, trimmedNewEmail)
+                            .then(() => {
+                              setInfo('Check your new inbox to confirm the email change.')
+                              setEmailPassword('')
+                            })
+                            .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                            .finally(() => setBusy(false))
+                        }}
+                      >
+                        {busy ? 'Sending…' : 'Send confirmation'}
+                      </BUTWideButton>
+                    </div>
+                  ) : null}
+
+                  {topic === 'leaderboards' ? (
+                    <div className="rs-account-form-stack">
+                      <label className="rs-account-check">
+                        <input
+                          type="checkbox"
+                          checked={profile.leaderboardsOptIn}
+                          onChange={(e) => {
+                            const optedIn = e.target.checked
+                            void updateBoardPrefs({
+                              leaderboardsOptIn: optedIn,
+                              leaderboardsShowOnAllNetworks: optedIn ? true : false,
+                              leaderboardsEnabledNetworkIDs: optedIn
+                                ? []
+                                : profile.leaderboardsEnabledNetworkIDs,
+                              leaderboardsShowDisplayName: profile.leaderboardsShowDisplayName,
+                            }).then(() => setInfo('Leaderboard preferences updated.'))
+                          }}
+                        />
+                        <span>Opt in to leaderboards</span>
+                      </label>
+                      {profile.leaderboardsOptIn ? (
+                        <>
+                          <label className="rs-account-check">
+                            <input
+                              type="checkbox"
+                              checked={profile.leaderboardsShowOnAllNetworks}
+                              onChange={(e) => {
+                                void updateBoardPrefs({
+                                  leaderboardsOptIn: true,
+                                  leaderboardsShowOnAllNetworks: e.target.checked,
+                                  leaderboardsEnabledNetworkIDs: profile.leaderboardsEnabledNetworkIDs,
+                                  leaderboardsShowDisplayName: profile.leaderboardsShowDisplayName,
+                                })
+                              }}
+                            />
+                            <span>All networks</span>
+                          </label>
+                          {!profile.leaderboardsShowOnAllNetworks
+                            ? LEADERBOARD_FAIR_NETWORK_IDS.map((id) => (
+                                <label key={id} className="rs-account-check">
+                                  <input
+                                    type="checkbox"
+                                    checked={profile.leaderboardsEnabledNetworkIDs.includes(id)}
+                                    onChange={(e) => {
+                                      const set = new Set(profile.leaderboardsEnabledNetworkIDs)
+                                      if (e.target.checked) set.add(id)
+                                      else set.delete(id)
+                                      void updateBoardPrefs({
+                                        leaderboardsOptIn: true,
+                                        leaderboardsShowOnAllNetworks: false,
+                                        leaderboardsEnabledNetworkIDs: [...set],
+                                        leaderboardsShowDisplayName:
+                                          profile.leaderboardsShowDisplayName,
+                                      })
+                                    }}
+                                  />
+                                  <span>{leaderboardNetworkDisplayName(id)}</span>
+                                </label>
+                              ))
+                            : null}
+                          <label className="rs-account-check">
+                            <input
+                              type="checkbox"
+                              checked={profile.leaderboardsShowDisplayName}
+                              onChange={(e) => {
+                                void updateBoardPrefs({
+                                  leaderboardsOptIn: true,
+                                  leaderboardsShowOnAllNetworks: profile.leaderboardsShowOnAllNetworks,
+                                  leaderboardsEnabledNetworkIDs: profile.leaderboardsEnabledNetworkIDs,
+                                  leaderboardsShowDisplayName: e.target.checked,
+                                })
+                              }}
+                            />
+                            <span>Show display name (username always shown)</span>
+                          </label>
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {topic === 'cloudSync' ? (
+                    vaultUnlocked ? (
+                      <div className="rs-account-section__copy-stack">
+                        <p className="rs-account-section__copy">
+                          Cloud sync is active on this device.
+                          {lastSynced ? ` Last synced ${lastSynced}.` : ''}
+                          {vaultRememberedOnDevice
+                            ? ' This browser unlocks sync automatically after sign-in.'
+                            : ''}
+                        </p>
+                        <div className="rs-account-section__actions">
+                          <BUTWideButton
+                            type="button"
+                            width="fill"
+                            colorVariant="accent"
+                            disabled={syncStatus.isSyncing}
+                            onClick={() => void syncNow()}
+                          >
+                            Sync Now
+                          </BUTWideButton>
+                          {vaultRememberedOnDevice ? (
+                            <BUTWideButton
+                              type="button"
+                              width="fill"
+                              onClick={() => {
+                                forgetDeviceVault()
+                                setInfo('This browser will no longer unlock cloud sync automatically.')
+                              }}
+                            >
+                              Forget this device
+                            </BUTWideButton>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rs-account-form-stack">
+                        <p className="rs-account-section__copy">
+                          Enter your recovery key to enable cloud sync on this device.
+                        </p>
+                        <TXTINPBUTWideButton
+                          placeholder="Recovery key"
+                          value={recovery}
+                          onChange={setRecovery}
+                          autoComplete="off"
+                          spellCheck={false}
+                          colorVariant="primary"
+                        />
+                        <label className="rs-account-check">
+                          <input
+                            type="checkbox"
+                            checked={rememberDevice}
+                            onChange={(e) => setRememberDevice(e.target.checked)}
+                          />
+                          <span>
+                            Remember this device — keep cloud sync unlocked on this browser after
+                            sign-in
+                          </span>
+                        </label>
+                        <BUTWideButton
+                          type="button"
+                          width="fill"
+                          colorVariant="accent"
+                          disabled={!canEnableCloudSync}
+                          onClick={() => {
+                            setBusy(true)
+                            void unlockVault(recovery, { rememberDevice })
+                              .then(() => {
+                                setInfo('Cloud sync enabled.')
+                                setRecovery('')
+                              })
+                              .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                              .finally(() => setBusy(false))
+                          }}
+                        >
+                          {busy ? 'Working…' : 'Enable cloud sync'}
+                        </BUTWideButton>
+                      </div>
+                    )
+                  ) : null}
+
+                  {topic === 'subscription' ? (
+                    <div className="rs-account-section__copy-stack">
+                      {subscriptionLoading ? (
+                        <p className="rs-account-section__meta">Loading subscription…</p>
+                      ) : null}
+                      {!subscriptionLoading && subscription && !subscription.configured ? (
+                        <p className="rs-account-section__copy">
+                          Subscription status is unavailable on this deployment. If you subscribe in
+                          the iOS or Android app, manage that plan in the App Store or Google Play.
+                        </p>
+                      ) : null}
+                      {!subscriptionLoading &&
+                      subscription?.configured &&
+                      !subscription.hasActiveSubscription ? (
+                        <p className="rs-account-section__copy">
+                          No active subscription is linked to this account.
+                        </p>
+                      ) : null}
+                      {!subscriptionLoading && subscription?.hasActiveSubscription ? (
+                        <>
+                          <p className="rs-account-section__meta">
+                            Plan: {subscription.planName ?? 'Active plan'}
+                          </p>
+                          <p className="rs-account-section__meta">
+                            Purchased via: {subscription.storeLabel ?? 'Unknown store'}
+                          </p>
+                          {subscription.manageMessage ? (
+                            <p className="rs-account-section__copy">{subscription.manageMessage}</p>
+                          ) : null}
+                          {subscription.manageUrl && subscription.manageCtaLabel ? (
+                            <div className="rs-account-section__actions">
+                              <BUTWideButton
+                                type="button"
+                                width="fill"
+                                colorVariant="accent"
+                                onClick={() => {
+                                  window.open(subscription.manageUrl!, '_blank', 'noopener,noreferrer')
+                                }}
+                              >
+                                {subscription.manageCtaLabel}
+                              </BUTWideButton>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : null}
+                      {!subscriptionLoading && subscriptionDevOverrideNote ? (
+                        <p className="rs-account-section__copy">{subscriptionDevOverrideNote}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+            </div>
+          </main>
         </div>
+      </div>
+
+      <ProfilePhotoSourceSheet
+        open={showPhotoSource}
+        cameraAvailable={cameraAvailable}
+        onClose={() => setShowPhotoSource(false)}
+        onChooseLibrary={() => libraryInputRef.current?.click()}
+        onTakePicture={() => setShowCamera(true)}
+        onChooseFile={() => fileInputRef.current?.click()}
+      />
+
+      <CameraCaptureModal
+        open={showCamera}
+        onCancel={() => setShowCamera(false)}
+        onCapture={(objectUrl) => {
+          setShowCamera(false)
+          setCropImageUrl((prev) => {
+            if (prev) URL.revokeObjectURL(prev)
+            return objectUrl
+          })
+        }}
+      />
+
+      {cropImageUrl ? (
+        <ProfilePhotoCropModal
+          open
+          imageUrl={cropImageUrl}
+          busy={busy}
+          onCancel={closeCropModal}
+          onConfirm={(blob) => void uploadCroppedAvatar(blob)}
+        />
       ) : null}
 
-      {topic === 'cloudSync' ? (
-        <div className="rs-account-form-stack">
-          {vaultUnlocked ? (
-            <>
-              <p className="rs-account-info">
-                Cloud sync ready on this device.
-                {lastSynced ? ` Last synced ${lastSynced}.` : ''}
-                {vaultRememberedOnDevice
-                  ? ' This browser will unlock cloud sync after you sign in again.'
-                  : ''}
-              </p>
-              <BUTWideButton
-                type="button"
-                width="fill"
-                colorVariant="accent"
-                disabled={syncStatus.isSyncing}
-                onClick={() => void syncNow()}
-              >
-                Sync Now
-              </BUTWideButton>
-              {vaultRememberedOnDevice ? (
-                <BUTWideButton
-                  type="button"
-                  width="fill"
-                  onClick={() => {
-                    forgetDeviceVault()
-                    setInfo('This browser will no longer unlock cloud sync automatically.')
-                  }}
-                >
-                  Forget this device
-                </BUTWideButton>
-              ) : null}
-            </>
-          ) : (
-            <div className="rs-account-form-stack">
-              <p className="rs-account-info">Enter your recovery key to enable cloud sync on this device.</p>
-              <TXTINPWideButton
-                placeholder="Recovery key"
-                value={recovery}
-                onChange={setRecovery}
-                autoComplete="off"
-                spellCheck={false}
-                colorVariant="secondary"
-              />
-              <label className="rs-account-check">
-                <input
-                  type="checkbox"
-                  checked={rememberDevice}
-                  onChange={(e) => setRememberDevice(e.target.checked)}
-                />
-                <span>Remember this device — keep cloud sync unlocked on this browser after sign-in</span>
-              </label>
-              <BUTWideButton
-                type="button"
-                width="fill"
-                colorVariant="accent"
-                disabled={busy}
-                onClick={() => {
-                  setBusy(true)
-                  void unlockVault(recovery, { rememberDevice })
-                    .then(() => setInfo('Cloud sync enabled.'))
-                    .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-                    .finally(() => setBusy(false))
-                }}
-              >
-                Enable cloud sync
-              </BUTWideButton>
-            </div>
-          )}
-        </div>
-      ) : null}
+      <AccountConfirmModal
+        open={pendingLeave != null}
+        title="Unsaved Changes"
+        message="Your changes will be lost."
+        cancelLabel="Cancel"
+        confirmLabel="Discard"
+        confirmVariant="red-action"
+        onCancel={() => setPendingLeave(null)}
+        onConfirm={confirmDiscard}
+      />
     </AccountContentShell>
   )
 }

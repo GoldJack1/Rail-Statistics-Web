@@ -5,7 +5,8 @@
   gap: 0;
   position: relative;
   overflow: visible;
-  padding-bottom: 4px;
+  /* Room for `--button-drop-shadow` (0 3px 8px) */
+  padding-bottom: 8px;
 }
 
 .rs-button-bar__item {

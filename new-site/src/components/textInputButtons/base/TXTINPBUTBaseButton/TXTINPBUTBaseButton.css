@@ -44,6 +44,62 @@ label.rs-button.rs-input {
   cursor: not-allowed;
 }
 
+/* Hide browser autofill / password-manager badges inside the field. */
+.rs-input__field::-webkit-credentials-auto-fill-button,
+.rs-input__field::-webkit-contacts-auto-fill-button,
+.rs-input__field::-webkit-strong-password-auto-fill-button,
+.rs-input__field::-webkit-caps-lock-indicator {
+  visibility: hidden;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+.rs-input__field::-ms-reveal,
+.rs-input__field::-ms-clear {
+  display: none;
+}
+
+/*
+ * Kill the browser autofill wash (yellow / grey rect). Clip the autofill paint
+ * to the text glyphs so the field itself has no fill and the button chrome shows.
+ */
+.rs-input__field:-webkit-autofill,
+.rs-input__field:-webkit-autofill:hover,
+.rs-input__field:-webkit-autofill:focus,
+.rs-input__field:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--button-text-active, var(--text-primary)) !important;
+  caret-color: var(--button-text-active, var(--text-primary));
+  background-color: transparent !important;
+  background-image: none !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-box-shadow: none !important;
+  box-shadow: none !important;
+  /* Prevent WebKit from re-applying the autofill tint after our override */
+  transition: background-color 99999s ease-out, color 99999s ease-out;
+}
+
+.rs-input.rs-button--active:focus-within .rs-input__field:-webkit-autofill,
+.rs-input.rs-button--active:focus-within .rs-input__field:-webkit-autofill:hover,
+.rs-input.rs-button--active:focus-within .rs-input__field:-webkit-autofill:focus,
+.rs-input--force-focused.rs-button--active .rs-input__field:-webkit-autofill,
+.rs-input.rs-button--pressed .rs-input__field:-webkit-autofill,
+.rs-input.rs-button--disabled .rs-input__field:-webkit-autofill {
+  -webkit-text-fill-color: var(--button-text-inactive, var(--text-primary)) !important;
+  caret-color: var(--button-text-inactive, var(--text-primary));
+  background-color: transparent !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-box-shadow: none !important;
+  box-shadow: none !important;
+}
+
 .rs-input__field[type='date']::-webkit-calendar-picker-indicator {
   cursor: pointer;
   opacity: 0.75;
@@ -148,9 +204,7 @@ label.rs-button.rs-input.rs-input--select {
   pointer-events: none;
 }
 
-/* Focus-flatten: when the user is interacting with the input (or we
-   force the focused appearance for showcase/demos), mirror the
-   rs-button--pressed look (no outer drop shadow, inactive bg). */
+/* Focus / force-focused → pressed; blur returns to active. */
 .rs-input.rs-button--active:focus-within,
 .rs-input--force-focused.rs-button--active {
   background-color: var(--button-bg-inactive);
@@ -177,32 +231,38 @@ label.rs-button.rs-input.rs-input--select {
 }
 
 /* TXTINP variant:
-   - transparent background
-   - no outer drop shadow
-   - active inner shadow uses active color
-   - pressed/focused/disabled inner shadow uses pressed color */
+   - Resting = colour variant's active button look
+   - Focused = pressed look (reverts to active on blur)
+   - Disabled = pressed look */
 .rs-input--txtinp.rs-button,
 .rs-input--txtinp-squared.rs-button {
-  background-color: transparent;
-  box-shadow: none;
-  color: var(--text-primary);
-  border: 1px solid var(--button-bg-active);
+  border: 1px solid transparent;
 }
 
 .rs-input--txtinp.rs-button--active,
-.rs-input--txtinp.rs-button--pressed,
-.rs-input--txtinp.rs-button--disabled,
-.rs-input--txtinp-squared.rs-button--active,
-.rs-input--txtinp-squared.rs-button--pressed,
-.rs-input--txtinp-squared.rs-button--disabled {
-  background-color: transparent;
-  box-shadow: none;
-  color: var(--text-primary);
+.rs-input--txtinp-squared.rs-button--active {
+  background-color: var(--button-bg-active);
+  color: var(--button-text-active);
+  box-shadow: var(--button-drop-shadow);
 }
 
-.rs-input--txtinp .rs-button__inner-shadow,
-.rs-input--txtinp-squared .rs-button__inner-shadow {
-  box-shadow: inset 0 0 4.5px var(--button-bg-active);
+.rs-input--txtinp.rs-button--active .rs-button__inner-shadow,
+.rs-input--txtinp-squared.rs-button--active .rs-button__inner-shadow {
+  box-shadow: var(--button-inner-shadow-active);
+}
+
+/* Pressed on focus (click), demos, or disabled — blur restores active above. */
+.rs-input--txtinp.rs-button--pressed,
+.rs-input--txtinp.rs-button--active:focus-within,
+.rs-input--txtinp.rs-input--force-focused.rs-button--active,
+.rs-input--txtinp.rs-button--disabled,
+.rs-input--txtinp-squared.rs-button--pressed,
+.rs-input--txtinp-squared.rs-button--active:focus-within,
+.rs-input--txtinp-squared.rs-input--force-focused.rs-button--active,
+.rs-input--txtinp-squared.rs-button--disabled {
+  background-color: var(--button-bg-inactive);
+  color: var(--button-text-inactive);
+  box-shadow: none;
 }
 
 .rs-input--txtinp.rs-button--pressed .rs-button__inner-shadow,
@@ -213,17 +273,12 @@ label.rs-button.rs-input.rs-input--select {
 .rs-input--txtinp-squared.rs-button--active:focus-within .rs-button__inner-shadow,
 .rs-input--txtinp-squared.rs-input--force-focused.rs-button--active .rs-button__inner-shadow,
 .rs-input--txtinp-squared.rs-button--disabled .rs-button__inner-shadow {
-  box-shadow: inset 0 0 4.5px var(--button-bg-inactive);
+  box-shadow: var(--button-inner-shadow-pressed);
 }
 
-.rs-input--txtinp.rs-button--active:focus-within,
-.rs-input--txtinp.rs-input--force-focused.rs-button--active,
 .rs-input--txtinp.rs-button--disabled,
-.rs-input--txtinp-squared.rs-button--active:focus-within,
-.rs-input--txtinp-squared.rs-input--force-focused.rs-button--active,
 .rs-input--txtinp-squared.rs-button--disabled {
-  background-color: color-mix(in srgb, var(--button-bg-inactive) 20%, transparent);
-  color: var(--text-primary);
+  color: var(--button-text-disabled, var(--text-disabled));
 }
 
 /* Tighten the responsive font-size override that rs-button--wide applies on

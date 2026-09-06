@@ -33,6 +33,7 @@ export function AccountAuthShell({
 /**
  * Hub / settings / leaderboards — full-bleed PageTopHeader, then content.
  * `panel` wraps children in the rounded account card (dashboard style).
+ * `detailsLayout` uses the station-details left-panel chrome (no padded body stack).
  */
 export function AccountContentShell({
   title,
@@ -41,6 +42,7 @@ export function AccountContentShell({
   children,
   narrow = true,
   panel = false,
+  detailsLayout = false,
 }: {
   title: ReactNode
   subtitle?: ReactNode
@@ -50,24 +52,37 @@ export function AccountContentShell({
   narrow?: boolean
   /** Rounded secondary card surface (account dashboard). */
   panel?: boolean
+  /** Station-details-style full-bleed layout (left panel + main). */
+  detailsLayout?: boolean
 }) {
   return (
-    <div className="rs-account-page-shell">
+    <div
+      className={[
+        'rs-account-page-shell',
+        detailsLayout ? 'rs-account-page-shell--details' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       <PageTopHeader
         className="rs-account-page-header"
         title={title}
         subtitle={subtitle}
         actionButton={actionButton}
       />
-      <div className="rs-account-body">
-        <div
-          className={['rs-account-stack', narrow ? 'rs-account-stack--narrow' : '']
-            .filter(Boolean)
-            .join(' ')}
-        >
-          {panel ? <div className="rs-account-panel">{children}</div> : children}
+      {detailsLayout ? (
+        children
+      ) : (
+        <div className="rs-account-body">
+          <div
+            className={['rs-account-stack', narrow ? 'rs-account-stack--narrow' : '']
+              .filter(Boolean)
+              .join(' ')}
+          >
+            {panel ? <div className="rs-account-panel">{children}</div> : children}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

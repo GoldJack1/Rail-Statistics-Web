@@ -26,7 +26,7 @@ import { BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import { MFA_AUTOFILL, MFA_OTP_INPUT_NAME } from '@/constants/mfaAutofill'
 import './LoginPage.css'
-import TXTINPWideButton from '@/components/textInputs/plain/TXTINPWideButton'
+import TXTINPBUTWideButton from '@/components/textInputButtons/plain/TXTINPBUTWideButton'
 
 type LoginStep = 'credentials' | 'verify-email' | 'checking-session' | 'totp-signin' | 'totp-enroll'
 
@@ -370,7 +370,7 @@ export default function LoginPageClient() {
                 <label htmlFor="login-email" className="login-label login-label--credentials">
                   Email
                 </label>
-                <TXTINPWideButton
+                <TXTINPBUTWideButton
                   id="login-email"
                   type="email"
                   value={email}
@@ -378,14 +378,14 @@ export default function LoginPageClient() {
                   placeholder="you@example.com"
                   autoComplete="email"
                   required
-                  colorVariant="secondary"
+                  colorVariant="primary"
                 />
               </div>
               <div className="login-field">
                 <label htmlFor="login-password" className="login-label login-label--credentials">
                   Password
                 </label>
-                <TXTINPWideButton
+                <TXTINPBUTWideButton
                   id="login-password"
                   type="password"
                   value={password}
@@ -394,7 +394,7 @@ export default function LoginPageClient() {
                   autoComplete="current-password"
                   required
                   minLength={6}
-                  colorVariant="secondary"
+                  colorVariant="primary"
                 />
               </div>
               {error && (
@@ -446,7 +446,7 @@ export default function LoginPageClient() {
             <label htmlFor="login-totp-signin" className="login-label login-label--totp-signin">
               6-digit code
             </label>
-            <TXTINPWideButton
+            <TXTINPBUTWideButton
               id="login-totp-signin"
               name={MFA_OTP_INPUT_NAME}
               inputMode="numeric"
@@ -461,9 +461,8 @@ export default function LoginPageClient() {
               onInputChange={(e) => setTotpSignInCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
               placeholder="123456"
               disabled={submitting}
-            
-                colorVariant="secondary"
-              />
+              colorVariant="primary"
+            />
             <div className="login-phone-verify-actions login-phone-verify-actions--inline">
               <BUTWideButton
                 type="button"
@@ -539,7 +538,7 @@ export default function LoginPageClient() {
                   <label htmlFor="login-totp-enroll" className="login-label">
                     Enter code from the app
                   </label>
-                  <TXTINPWideButton
+                  <TXTINPBUTWideButton
                     id="login-totp-enroll"
                     name={MFA_OTP_INPUT_NAME}
                     inputMode="numeric"
@@ -554,9 +553,8 @@ export default function LoginPageClient() {
                     onInputChange={(e) => setTotpEnrollCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
                     placeholder="123456"
                     disabled={submitting}
-                  
-                colorVariant="secondary"
-              />
+                    colorVariant="primary"
+                  />
                   <BUTWideButton
                     type="submit"
                     width="fill"

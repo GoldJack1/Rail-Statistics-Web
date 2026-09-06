@@ -11,6 +11,18 @@ export const LEADERBOARD_FAIR_NETWORK_IDS = [
 
 export type LeaderboardFairNetworkId = (typeof LEADERBOARD_FAIR_NETWORK_IDS)[number]
 
+/** Match iOS `StationFirestoreCollections.networkDisplayNames` for fair board networks. */
+export const LEADERBOARD_NETWORK_DISPLAY_NAMES: Record<string, string> = {
+  GBNR: 'GB National Rail',
+  NITRANSLINK: 'NI Translink',
+  ROIIRERAIL: 'Irish Rail',
+  GBSHEFFSUPERTRAM: 'South Yorkshire Supertram',
+}
+
+export function leaderboardNetworkDisplayName(id: string): string {
+  return LEADERBOARD_NETWORK_DISPLAY_NAMES[id] ?? id
+}
+
 export function normalizeUsername(raw: string): string {
   return raw.trim().toLowerCase()
 }

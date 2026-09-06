@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { BUTWideButton } from '@/components/buttons'
 import { AccountAuthShell } from '@/components/misc/AccountPageShell/AccountPageShell'
-import TXTINPWideButton from '@/components/textInputs/plain/TXTINPWideButton'
+import TXTINPBUTWideButton from '@/components/textInputButtons/plain/TXTINPBUTWideButton'
 import { useConsumerAuth } from '@/contexts/ConsumerAuthContext'
 import '../account.css'
 
@@ -109,21 +109,21 @@ function ResetPasswordInner() {
             </>
           ) : (
             <>
-              <TXTINPWideButton
+              <TXTINPBUTWideButton
                 placeholder="New password (8+)"
                 value={newPassword}
                 onChange={setNewPassword}
                 type="password"
                 autoComplete="new-password"
-                colorVariant="secondary"
+                colorVariant="primary"
               />
-              <TXTINPWideButton
+              <TXTINPBUTWideButton
                 placeholder="Confirm new password"
                 value={confirm}
                 onChange={setConfirm}
                 type="password"
                 autoComplete="new-password"
-                colorVariant="secondary"
+                colorVariant="primary"
               />
               {error ? <p className="rs-account-error">{error}</p> : null}
               <BUTWideButton
@@ -162,13 +162,13 @@ function ResetPasswordInner() {
       subtitle="We’ll email you a link. Resetting your password restores login only — you still need your recovery key for cloud sync."
     >
       <div className="rs-account-form-stack">
-        <TXTINPWideButton
+        <TXTINPBUTWideButton
           placeholder="Email"
           value={email}
           onChange={setEmail}
           type="email"
           autoComplete="username"
-          colorVariant="secondary"
+          colorVariant="primary"
         />
         {error ? <p className="rs-account-error">{error}</p> : null}
         {info ? <p className="rs-account-info">{info}</p> : null}
