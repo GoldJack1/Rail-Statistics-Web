@@ -1,0 +1,32 @@
+.pricing-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 0 var(--space-lg) var(--space-4xl);
+}
+
+.pricing-page__intro {
+  max-width: 40rem;
+}
+
+.pricing-page__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-md);
+}
+
+@media (min-width: 720px) {
+  .pricing-page__grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.pricing-page__card {
+  height: 100%;
+}
+
+.pricing-page__cta {
+  max-width: 24rem;
+}

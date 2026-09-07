@@ -36,6 +36,18 @@
   line-height: 1.45;
 }
 
+.privacy-section ul {
+  margin: var(--space-md) 0 0;
+  padding-left: 1.25rem;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.privacy-section li + li {
+  margin-top: var(--space-sm);
+}
+
 .privacy-section a {
   color: var(--accent-color);
   text-decoration: none;

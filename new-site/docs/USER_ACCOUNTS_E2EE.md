@@ -81,6 +81,10 @@ Leaderboard visit stats publish at most **once per hour** (forced immediately wh
 
 Cloud sync uploads automatically (debounced) when stations or tickets change while signed in and unlocked.
 
+## Web Stripe subscriptions
+
+Website checkout (Stripe Billing via RevenueCat Web SDK) is documented in [`WEB_STRIPE_REVENUECAT.md`](WEB_STRIPE_REVENUECAT.md). Same Firebase UID → RevenueCat App User ID as mobile.
+
 ## Cross-platform plans
 
 - Android: [`ANDROID_USER_ACCOUNTS_IMPLEMENTATION_PLAN.md`](ANDROID_USER_ACCOUNTS_IMPLEMENTATION_PLAN.md)

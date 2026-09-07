@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { BUTWideButton } from '@/components/buttons'
 import { AccountAuthShell } from '@/components/misc/AccountPageShell/AccountPageShell'
 import TXTINPBUTWideButton from '@/components/textInputButtons/plain/TXTINPBUTWideButton'
@@ -9,8 +9,18 @@ import { useConsumerAuth } from '@/contexts/ConsumerAuthContext'
 import { MFA_AUTOFILL, MFA_OTP_INPUT_NAME } from '@/constants/mfaAutofill'
 import '../account.css'
 
+/** Only allow same-origin relative paths (block open redirects). */
+function safeInternalPath(raw: string | null): string | null {
+  if (!raw) return null
+  const value = raw.trim()
+  if (!value.startsWith('/') || value.startsWith('//') || value.includes('://')) return null
+  return value
+}
+
 export default function AccountSignInPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const returnTo = safeInternalPath(searchParams.get('from')) || '/account'
   const { signIn, completeMfa, pendingMfaResolver, user, loading } = useConsumerAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -21,9 +31,9 @@ export default function AccountSignInPage() {
 
   useEffect(() => {
     if (!loading && user && step === 'credentials') {
-      router.replace('/account')
+      router.replace(returnTo)
     }
-  }, [loading, user, step, router])
+  }, [loading, user, step, router, returnTo])
 
   return (
     <AccountAuthShell
@@ -64,7 +74,7 @@ export default function AccountSignInPage() {
               void signIn(email, password)
                 .then((result) => {
                   if (result === 'mfa') setStep('mfa')
-                  else router.replace('/account')
+                  else router.replace(returnTo)
                 })
                 .catch((e) => setError(e instanceof Error ? e.message : String(e)))
                 .finally(() => setBusy(false))
@@ -97,7 +107,7 @@ export default function AccountSignInPage() {
               setBusy(true)
               setError(null)
               void completeMfa(code)
-                .then(() => router.replace('/account'))
+                .then(() => router.replace(returnTo))
                 .catch((e) => setError(e instanceof Error ? e.message : String(e)))
                 .finally(() => setBusy(false))
             }}

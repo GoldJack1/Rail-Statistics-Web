@@ -91,6 +91,9 @@ const Footer: React.FC = () => {
             <BUTFooterLink to="/migration">
               Migration
             </BUTFooterLink>
+            <BUTFooterLink to="/pricing">
+              Pricing
+            </BUTFooterLink>
             <BUTFooterLink to="/privacy">
               Privacy
             </BUTFooterLink>

@@ -2,7 +2,7 @@
 
 import { ANDROID_APP_URL, IOS_APP_URL } from '@/utils/appDownload'
 
-export type SubscriptionPurchaseStore = 'app_store' | 'play_store' | 'other'
+export type SubscriptionPurchaseStore = 'app_store' | 'play_store' | 'stripe' | 'other'
 
 export type AccountSubscriptionStatus = {
   configured: boolean
@@ -15,6 +15,8 @@ export type AccountSubscriptionStatus = {
   manageMessage: string | null
   manageUrl: string | null
   manageCtaLabel: string | null
+  /** When true, client should POST /api/account/subscription/portal for a live Stripe session. */
+  manageViaPortalSession: boolean
 }
 
 export function storeLabelFor(store: SubscriptionPurchaseStore): string {
@@ -23,6 +25,8 @@ export function storeLabelFor(store: SubscriptionPurchaseStore): string {
       return 'App Store'
     case 'play_store':
       return 'Google Play'
+    case 'stripe':
+      return 'Website (Stripe)'
     default:
       return 'Another store'
   }
@@ -34,8 +38,10 @@ export function manageMessageFor(store: SubscriptionPurchaseStore): string {
       return 'This subscription was purchased on the App Store. Manage or cancel it in Apple ID subscription settings on an iPhone or iPad — not on this website.'
     case 'play_store':
       return 'This subscription was purchased on Google Play. Open the Play Store on an Android device to manage or cancel it — not on this website.'
+    case 'stripe':
+      return 'This subscription was purchased on the Rail Statistics website. Manage billing, invoices, or cancellation in the Stripe customer portal.'
     default:
-      return 'Manage or cancel this subscription in the store where it was originally purchased — not on this website.'
+      return 'Manage or cancel this subscription in the store where it was originally purchased.'
   }
 }
 
@@ -46,6 +52,8 @@ export function manageUrlFor(store: SubscriptionPurchaseStore): string | null {
       return 'https://apps.apple.com/account/subscriptions'
     case 'play_store':
       return 'https://play.google.com/store/account/subscriptions'
+    case 'stripe':
+      return null
     default:
       return null
   }
@@ -57,6 +65,8 @@ export function manageCtaLabelFor(store: SubscriptionPurchaseStore): string | nu
       return 'Open App Store'
     case 'play_store':
       return 'Open Play Store'
+    case 'stripe':
+      return 'Manage billing'
     default:
       return null
   }
@@ -73,7 +83,6 @@ export function storeListingUrlFor(store: SubscriptionPurchaseStore): string | n
       return null
   }
 }
-
 
 export type DevOverrideFlags = {
   overrideStandardPremium?: boolean
@@ -113,4 +122,21 @@ export async function fetchAccountSubscriptionStatus(
     throw new Error(message)
   }
   return body as AccountSubscriptionStatus
+}
+
+/** Opens a Stripe Customer Portal session (requires STRIPE_SECRET_KEY on the server). */
+export async function openStripeCustomerPortal(idToken: string): Promise<string> {
+  const res = await fetch('/api/account/subscription/portal', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      Accept: 'application/json',
+    },
+    cache: 'no-store',
+  })
+  const body = (await res.json().catch(() => null)) as { url?: string; error?: string } | null
+  if (!res.ok || !body?.url) {
+    throw new Error(body?.error || `Could not open billing portal (${res.status}).`)
+  }
+  return body.url
 }

@@ -1,8 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Camera,
   CloudArrowUp,
@@ -44,6 +44,7 @@ import {
   type AccountSubscriptionStatus,
 } from '@/services/subscriptionStatus'
 import { fetchCloudDevOverrideFlags } from '@/services/encryptedVaultSync'
+import SubscriptionSettingsPanel from '@/components/misc/SubscriptionSettingsPanel/SubscriptionSettingsPanel'
 import '../account.css'
 
 const TOPICS = [
@@ -92,7 +93,7 @@ const TOPICS = [
   {
     id: 'subscription',
     title: 'Subscription',
-    sub: 'See where your plan was purchased and how to manage it.',
+    sub: 'Subscribe on the web, or manage an existing App Store, Google Play, or Stripe plan.',
     icon: Storefront,
   },
 ] as const
@@ -100,12 +101,17 @@ const TOPICS = [
 type TopicId = (typeof TOPICS)[number]['id']
 type PendingLeave = { type: 'back' } | { type: 'topic'; id: TopicId }
 
+function isTopicId(value: string | null | undefined): value is TopicId {
+  return Boolean(value && TOPICS.some((t) => t.id === value))
+}
+
 function looksLikeEmail(value: string): boolean {
   return value.includes('@') && value.includes('.')
 }
 
 export default function AccountSettingsPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const {
     user,
     profile,
@@ -128,10 +134,14 @@ export default function AccountSettingsPage() {
     refreshUser,
   } = useConsumerAuth()
 
-  const [topic, setTopic] = useState<TopicId>('photo')
+  const topicFromUrl = searchParams.get('topic')
+  const [topic, setTopic] = useState<TopicId>(() =>
+    isTopicId(topicFromUrl) ? topicFromUrl : 'photo'
+  )
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null)
 
   const [displayName, setDisplayName] = useState(() => profile?.displayName ?? '')
   const [username, setUsername] = useState(() => profile?.username ?? '')
@@ -256,7 +266,22 @@ export default function AccountSettingsPage() {
     setError(null)
     setInfo(null)
     resetTopicDraft(nextId)
+    const params = new URLSearchParams(searchParams.toString())
+    if (nextId === 'photo') params.delete('topic')
+    else params.set('topic', nextId)
+    const qs = params.toString()
+    router.replace(qs ? `/account/settings?${qs}` : '/account/settings', { scroll: false })
   }
+
+  useEffect(() => {
+    if (!isTopicId(topicFromUrl) || topicFromUrl === topic) return
+    setTopic(topicFromUrl)
+    setError(null)
+    setInfo(null)
+    resetTopicDraft(topicFromUrl)
+    // URL is source of truth for deep links (e.g. pricing → subscription).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally exclude topic/reset helpers
+  }, [topicFromUrl])
 
   const requestLeave = (next: PendingLeave) => {
     if (hasUnsavedChanges) {
@@ -342,37 +367,73 @@ export default function AccountSettingsPage() {
 
   const activeTopic = TOPICS.find((t) => t.id === topic) ?? TOPICS[0]
 
+  const subscriptionLoadGen = useRef(0)
+
+  const refreshSubscriptionStatus = useCallback(async () => {
+    if (!user) return
+    const gen = ++subscriptionLoadGen.current
+    setSubscriptionLoading(true)
+    setSubscriptionError(null)
+    try {
+      const token = await user.getIdToken()
+      const status = await fetchAccountSubscriptionStatus(token)
+      if (gen !== subscriptionLoadGen.current) return
+      setSubscription(status)
+    } catch (err) {
+      if (gen !== subscriptionLoadGen.current) return
+      setSubscription(null)
+      setSubscriptionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (gen === subscriptionLoadGen.current) {
+        setSubscriptionLoading(false)
+      }
+    }
+    if (vaultUnlocked) {
+      try {
+        const flags = await fetchCloudDevOverrideFlags(user.uid)
+        if (gen === subscriptionLoadGen.current) {
+          setSubscriptionDevOverrideNote(devOverrideMessageFromPrefs(flags))
+        }
+      } catch {
+        if (gen === subscriptionLoadGen.current) setSubscriptionDevOverrideNote(null)
+      }
+    }
+  }, [user, vaultUnlocked])
+
+  const getSubscriptionIdToken = useCallback(() => user!.getIdToken(), [user])
+
   useEffect(() => {
     if (topic !== 'subscription' || !user) return
-    let cancelled = false
+    const gen = ++subscriptionLoadGen.current
     setSubscriptionLoading(true)
-    setError(null)
+    setSubscriptionError(null)
     setSubscriptionDevOverrideNote(null)
     void (async () => {
       try {
         const token = await user.getIdToken()
         const status = await fetchAccountSubscriptionStatus(token)
-        if (!cancelled) setSubscription(status)
+        if (gen !== subscriptionLoadGen.current) return
+        setSubscription(status)
       } catch (err) {
-        if (!cancelled) {
-          setSubscription(null)
-          setError(err instanceof Error ? err.message : String(err))
-        }
+        if (gen !== subscriptionLoadGen.current) return
+        setSubscription(null)
+        setSubscriptionError(err instanceof Error ? err.message : String(err))
       } finally {
-        if (!cancelled) setSubscriptionLoading(false)
+        if (gen === subscriptionLoadGen.current) {
+          setSubscriptionLoading(false)
+        }
       }
       if (vaultUnlocked) {
         try {
           const flags = await fetchCloudDevOverrideFlags(user.uid)
-          if (!cancelled) setSubscriptionDevOverrideNote(devOverrideMessageFromPrefs(flags))
+          if (gen === subscriptionLoadGen.current) {
+            setSubscriptionDevOverrideNote(devOverrideMessageFromPrefs(flags))
+          }
         } catch {
-          if (!cancelled) setSubscriptionDevOverrideNote(null)
+          if (gen === subscriptionLoadGen.current) setSubscriptionDevOverrideNote(null)
         }
       }
     })()
-    return () => {
-      cancelled = true
-    }
   }, [topic, user, vaultUnlocked])
 
   if (loading) {
@@ -850,54 +911,14 @@ export default function AccountSettingsPage() {
                   ) : null}
 
                   {topic === 'subscription' ? (
-                    <div className="rs-account-section__copy-stack">
-                      {subscriptionLoading ? (
-                        <p className="rs-account-section__meta">Loading subscription…</p>
-                      ) : null}
-                      {!subscriptionLoading && subscription && !subscription.configured ? (
-                        <p className="rs-account-section__copy">
-                          Subscription status is unavailable on this deployment. If you subscribe in
-                          the iOS or Android app, manage that plan in the App Store or Google Play.
-                        </p>
-                      ) : null}
-                      {!subscriptionLoading &&
-                      subscription?.configured &&
-                      !subscription.hasActiveSubscription ? (
-                        <p className="rs-account-section__copy">
-                          No active subscription is linked to this account.
-                        </p>
-                      ) : null}
-                      {!subscriptionLoading && subscription?.hasActiveSubscription ? (
-                        <>
-                          <p className="rs-account-section__meta">
-                            Plan: {subscription.planName ?? 'Active plan'}
-                          </p>
-                          <p className="rs-account-section__meta">
-                            Purchased via: {subscription.storeLabel ?? 'Unknown store'}
-                          </p>
-                          {subscription.manageMessage ? (
-                            <p className="rs-account-section__copy">{subscription.manageMessage}</p>
-                          ) : null}
-                          {subscription.manageUrl && subscription.manageCtaLabel ? (
-                            <div className="rs-account-section__actions">
-                              <BUTWideButton
-                                type="button"
-                                width="fill"
-                                colorVariant="accent"
-                                onClick={() => {
-                                  window.open(subscription.manageUrl!, '_blank', 'noopener,noreferrer')
-                                }}
-                              >
-                                {subscription.manageCtaLabel}
-                              </BUTWideButton>
-                            </div>
-                          ) : null}
-                        </>
-                      ) : null}
-                      {!subscriptionLoading && subscriptionDevOverrideNote ? (
-                        <p className="rs-account-section__copy">{subscriptionDevOverrideNote}</p>
-                      ) : null}
-                    </div>
+                    <SubscriptionSettingsPanel
+                      getIdToken={getSubscriptionIdToken}
+                      status={subscription}
+                      statusLoading={subscriptionLoading}
+                      statusError={subscriptionError}
+                      devOverrideNote={subscriptionDevOverrideNote}
+                      onStatusRefresh={refreshSubscriptionStatus}
+                    />
                   ) : null}
                 </div>
               </section>

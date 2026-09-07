@@ -12,7 +12,7 @@ import './PrivacyPolicyPage.css'
 
 const SECTIONS: LegalDocsSection[] = [
   { id: 'section-1', label: '1. Information Collection' },
-  { id: 'section-2', label: '2. Payments and In-App Purchases' },
+  { id: 'section-2', label: '2. Payments and Subscriptions' },
   { id: 'section-3', label: '3. Third-Party Services – Advertising' },
   { id: 'section-4', label: '4. Data Sharing' },
   { id: 'section-5', label: "5. Children's Privacy" },
@@ -92,10 +92,53 @@ const PrivacyPolicyPage: React.FC = () => {
 
               {activeSectionId === 'section-2' && (
                 <section id="section-2" className="privacy-section">
-                  <h2>2. Payments and In-App Purchases</h2>
+                  <h2>2. Payments and Subscriptions</h2>
                   <p>
-                    Rail Statistics offers in-app purchases managed exclusively by Apple. When you make an in-app purchase, payment transactions are processed directly by Apple. Rail Statistics does not collect, store, or have access to any of your payment details or billing information. Please refer to <BUTLink href="https://www.apple.com/legal/privacy/" target="_blank" rel="noopener noreferrer">Apple&apos;s Privacy Policy</BUTLink> for details about how your payment information is processed and secured.
+                    Rail Statistics offers paid subscriptions (Standard Premium and First Class).
+                    Depending on where you subscribe, payments are processed by different providers:
                   </p>
+                  <ul>
+                    <li>
+                      <strong>Apple App Store / iOS:</strong> In-app purchases are managed by Apple.
+                      Payment details are processed by Apple; Rail Statistics does not collect or
+                      store your card details. See{' '}
+                      <BUTLink
+                        href="https://www.apple.com/legal/privacy/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Apple&apos;s Privacy Policy
+                      </BUTLink>
+                      .
+                    </li>
+                    <li>
+                      <strong>Google Play / Android:</strong> In-app purchases are managed by Google.
+                      Payment details are processed by Google; Rail Statistics does not collect or
+                      store your card details. See{' '}
+                      <BUTLink
+                        href="https://policies.google.com/privacy"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Google&apos;s Privacy Policy
+                      </BUTLink>
+                      .
+                    </li>
+                    <li>
+                      <strong>Website (Stripe):</strong> Subscriptions purchased on the Rail
+                      Statistics website are processed by Stripe. Stripe collects and processes
+                      payment card details; Rail Statistics does not store full card numbers. See{' '}
+                      <BUTLink
+                        href="https://stripe.com/privacy"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Stripe&apos;s Privacy Policy
+                      </BUTLink>
+                      . Account identity for entitlements is linked through your Rail Statistics
+                      account (and RevenueCat as the entitlement service).
+                    </li>
+                  </ul>
                 </section>
               )}
 
