@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useId, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useAppHeaderOffset } from '@/hooks/useAppHeaderOffset'
+import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
 import { resolveAppDownloadAction } from '@/utils/appDownload'
 import { BUTBaseButton, BUTHeaderLink, BUTWideButton } from '../../buttons'
 import HomeDownloadPlatformModal from '../../models/HomeDownloadPlatformModal/HomeDownloadPlatformModal'
@@ -71,7 +72,9 @@ const Header: React.FC = () => {
     { to: '/stations', label: 'Stations', active: isStationsActive && !isMapActive },
     { to: '/d-payg-fares', label: 'D-PAYG Fares', active: isDpaygFaresActive },
     { to: '/stations/map', label: 'Maps', active: isMapActive },
-    { to: '/account', label: 'Account', active: isAccountActive },
+    ...(isAccountSystemEnabled
+      ? [{ to: '/account', label: 'Account', active: isAccountActive }]
+      : []),
   ]
 
   const onDownloadApp = useCallback(() => {

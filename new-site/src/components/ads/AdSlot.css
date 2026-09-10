@@ -65,8 +65,8 @@
 }
 
 /*
- * Fixed-height clip frame. Keep the unit in normal flow (not absolute) so
- * AdSense can measure availableWidth; overflow clips excess height.
+ * Fixed-height clip frame. AdSense may render taller horizontal creatives;
+ * JS scales the <ins> to fit so the creative is not cut off mid-glyph.
  */
 .rs-ad-slot__unit-frame {
   width: 100%;
@@ -79,21 +79,15 @@
 .rs-ad-slot__unit-frame .rs-ad-slot__ins,
 .rs-ad-slot__unit-frame .adsbygoogle {
   display: block;
-  width: 100% !important;
+  width: 100%;
   max-width: 100%;
-  height: 72px !important;
-  max-height: 72px !important;
-  min-height: 0 !important;
+  min-height: 72px;
   margin: 0 !important;
-  overflow: hidden !important;
   box-sizing: border-box;
 }
 
 .rs-ad-slot__unit-frame iframe {
-  width: 100% !important;
-  max-width: 100% !important;
-  height: 72px !important;
-  max-height: 72px !important;
+  max-width: 100%;
 }
 
 /* Desktop page banner — sits top-right in PageTopHeader */
@@ -116,4 +110,11 @@
 /* Full-width grid row between station cards */
 .rs-ad-slot--inFeed {
   width: 100%;
+}
+
+/* Map mobile/tablet — sit above the sticky network tabs, in document flow */
+.rs-ad-slot--map-section {
+  margin: 0;
+  padding: 0 var(--stations-map-chrome-inset, var(--space-2xl));
+  box-sizing: border-box;
 }

@@ -1,5 +1,6 @@
 import type { MetadataRoute } from 'next'
 import { SITE_URL } from '@/lib/site'
+import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const lastModified = new Date()
@@ -11,11 +12,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
     '/migration',
     '/departures',
     '/units',
-    '/account',
-    '/leaderboards',
     '/privacy',
     '/eula',
     '/buttons',
+    ...(isAccountSystemEnabled ? ['/account', '/leaderboards', '/pricing'] : []),
   ]
 
   return publicRoutes.map((path) => ({

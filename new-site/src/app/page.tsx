@@ -16,6 +16,7 @@ import HeroVisitsFavourites from './home/sections/HeroVisitsFavourites'
 import Hero7Subscription from './home/sections/Hero7Subscription'
 import Hero8ClosingDownload from './home/sections/Hero8ClosingDownload'
 import Hero9Migrate from './home/sections/Hero9Migrate'
+import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
 
 export default function HomePage() {
   const [downloadModalOpen, setDownloadModalOpen] = useState(false)
@@ -44,7 +45,7 @@ export default function HomePage() {
         <HeroMapHybrid onDownloadCta={onDownloadCta} />
         <Hero5SearchFilter />
         <HeroVisitsFavourites onDownloadCta={onDownloadCta} />
-        <Hero7Subscription />
+        {isAccountSystemEnabled ? <Hero7Subscription /> : null}
         <Hero8ClosingDownload onDownloadCta={onDownloadCta} />
         <Hero9Migrate />
       </div>

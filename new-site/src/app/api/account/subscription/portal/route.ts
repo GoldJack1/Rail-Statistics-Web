@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
+import { accountSystemDisabledResponse } from '@/app/api/account/_lib/accountSystemGuard'
 import { verifyUasFirebaseIdToken } from '@/app/api/account/_lib/verifyUasFirebaseIdToken'
 
 function json(status: number, body: unknown) {
@@ -16,6 +17,9 @@ function siteOrigin(request: NextRequest): string {
 }
 
 export async function POST(request: NextRequest) {
+  const disabled = accountSystemDisabledResponse()
+  if (disabled) return disabled
+
   const auth = request.headers.get('authorization') || ''
   const idToken = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
   if (!idToken) {

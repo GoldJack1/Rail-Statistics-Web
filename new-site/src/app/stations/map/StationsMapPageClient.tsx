@@ -441,11 +441,14 @@ const StationsMapPageClient: React.FC<StationsMapPageClientProps> = ({
       <PageTopHeader
         title="Map"
         subtitle={stationsLoading ? 'Loading stations…' : '\u00a0'}
+        trailingContent={
+          !isAdminMapRoute ? (
+            <AdSlot variant="banner" className="stations-map-ad-slot--banner" />
+          ) : null
+        }
       />
       {!isAdminMapRoute ? (
-        <div className="stations-map-page__header-ad">
-          <AdSlot variant="banner" className="stations-map-ad-slot--banner" />
-        </div>
+        <AdSlot variant="section" className="rs-ad-slot--map-section" />
       ) : null}
       <div className="stations-toolbar-band">
         <div className="stations-network-tabs-wrap stations-network-tabs-wrap--toolbar">

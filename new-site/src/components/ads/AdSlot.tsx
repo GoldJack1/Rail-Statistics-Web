@@ -12,8 +12,10 @@ import './AdSlot.css'
 
 export type AdSlotVariant = 'banner' | 'section' | 'inFeed'
 
+/** Reserved chrome height — keep layout stable; creatives are scaled to fit. */
 const AD_UNIT_HEIGHT_PX = 72
 const SECTION_MAX_WIDTH_MQ = '(max-width: 1023px)'
+const SCRIPT_WAIT_MS = 8000
 
 interface AdSlotProps {
   variant: AdSlotVariant
@@ -41,14 +43,36 @@ function isElementVisible(el: HTMLElement): boolean {
   return true
 }
 
-function lockAdHeight(el: HTMLElement) {
-  el.style.setProperty('height', `${AD_UNIT_HEIGHT_PX}px`, 'important')
-  el.style.setProperty('max-height', `${AD_UNIT_HEIGHT_PX}px`, 'important')
-  el.style.setProperty('min-height', '0px', 'important')
-  el.querySelectorAll('iframe').forEach((iframe) => {
-    iframe.style.setProperty('height', `${AD_UNIT_HEIGHT_PX}px`, 'important')
-    iframe.style.setProperty('max-height', `${AD_UNIT_HEIGHT_PX}px`, 'important')
-  })
+function isAdsbygoogleReady(): boolean {
+  return typeof window !== 'undefined' && Array.isArray(window.adsbygoogle)
+}
+
+/**
+ * Keep the 72px frame, but scale the filled unit so ~90px creatives are not clipped.
+ */
+function fitAdInFrame(el: HTMLElement) {
+  const frame = el.parentElement
+  if (!frame?.classList.contains('rs-ad-slot__unit-frame')) return
+
+  el.style.removeProperty('transform')
+  el.style.removeProperty('width')
+  el.style.removeProperty('max-width')
+  el.style.removeProperty('margin-left')
+
+  const iframe = el.querySelector('iframe')
+  const naturalHeight = Math.max(
+    iframe?.offsetHeight ?? 0,
+    el.offsetHeight,
+    AD_UNIT_HEIGHT_PX
+  )
+
+  if (naturalHeight <= AD_UNIT_HEIGHT_PX + 1) return
+
+  const scale = AD_UNIT_HEIGHT_PX / naturalHeight
+  el.style.transform = `scale(${scale})`
+  el.style.transformOrigin = 'top left'
+  el.style.width = `${100 / scale}%`
+  el.style.maxWidth = `${100 / scale}%`
 }
 
 function AdSenseUnit({ variant }: { variant: AdSlotVariant }) {
@@ -59,58 +83,103 @@ function AdSenseUnit({ variant }: { variant: AdSlotVariant }) {
     const el = insRef.current
     if (!el) return
 
+    let cancelled = false
+    let resizeObserver: ResizeObserver | null = null
+    let mutationObserver: MutationObserver | null = null
+    let scriptPollId = 0
+    const startedAt = Date.now()
+
+    const disconnectObservers = () => {
+      resizeObserver?.disconnect()
+      resizeObserver = null
+      mutationObserver?.disconnect()
+      mutationObserver = null
+      if (scriptPollId) {
+        window.clearInterval(scriptPollId)
+        scriptPollId = 0
+      }
+    }
+
     const tryPush = () => {
-      if (pushedRef.current) return true
+      if (cancelled || pushedRef.current) return true
       if (!isElementVisible(el)) return false
+      if (!isAdsbygoogleReady()) return false
+
       if (el.getAttribute('data-adsbygoogle-status')) {
         pushedRef.current = true
-        lockAdHeight(el)
+        fitAdInFrame(el)
         return true
       }
 
-      pushedRef.current = true
       try {
         ;(window.adsbygoogle = window.adsbygoogle || []).push({})
+        pushedRef.current = true
       } catch {
         // AdSense may throw if blocked, not ready, or still zero-width.
         pushedRef.current = false
         return false
       }
-      lockAdHeight(el)
+
+      // Fit after the iframe lands (AdSense mutates the <ins>).
+      requestAnimationFrame(() => {
+        if (!cancelled) fitAdInFrame(el)
+      })
       return true
     }
 
-    // Wait until the slot has a measurable width (avoids availableWidth=0).
-    if (!tryPush()) {
-      const resizeObserver = new ResizeObserver(() => {
-        if (tryPush()) resizeObserver.disconnect()
+    const armFitObserver = () => {
+      if (mutationObserver) return
+      mutationObserver = new MutationObserver(() => {
+        if (!cancelled) fitAdInFrame(el)
       })
-      resizeObserver.observe(el)
-      const frame = el.parentElement
-      if (frame) resizeObserver.observe(frame)
-
-      const mutationObserver = new MutationObserver(() => lockAdHeight(el))
       mutationObserver.observe(el, {
         attributes: true,
         attributeFilter: ['style', 'data-adsbygoogle-status'],
         childList: true,
         subtree: true,
       })
-
-      return () => {
-        resizeObserver.disconnect()
-        mutationObserver.disconnect()
-      }
     }
 
-    const mutationObserver = new MutationObserver(() => lockAdHeight(el))
-    mutationObserver.observe(el, {
-      attributes: true,
-      attributeFilter: ['style', 'data-adsbygoogle-status'],
-      childList: true,
-      subtree: true,
-    })
-    return () => mutationObserver.disconnect()
+    const armResizeObserver = () => {
+      if (resizeObserver) return
+      resizeObserver = new ResizeObserver(() => {
+        if (tryPush()) {
+          resizeObserver?.disconnect()
+          resizeObserver = null
+          armFitObserver()
+        }
+      })
+      resizeObserver.observe(el)
+      const frame = el.parentElement
+      if (frame) resizeObserver.observe(frame)
+    }
+
+    if (tryPush()) {
+      armFitObserver()
+    } else {
+      armResizeObserver()
+      armFitObserver()
+      // Script often loads after first paint — poll briefly instead of giving up.
+      scriptPollId = window.setInterval(() => {
+        if (cancelled) return
+        if (tryPush()) {
+          resizeObserver?.disconnect()
+          resizeObserver = null
+          window.clearInterval(scriptPollId)
+          scriptPollId = 0
+          return
+        }
+        if (Date.now() - startedAt > SCRIPT_WAIT_MS) {
+          window.clearInterval(scriptPollId)
+          scriptPollId = 0
+        }
+      }, 250)
+    }
+
+    return () => {
+      cancelled = true
+      disconnectObservers()
+    }
   }, [])
 
   if (variant === 'inFeed') {
@@ -133,10 +202,10 @@ function AdSenseUnit({ variant }: { variant: AdSlotVariant }) {
     <ins
       ref={insRef}
       className="adsbygoogle rs-ad-slot__ins"
-      style={{ display: 'block', width: '100%' }}
+      style={{ display: 'block', width: '100%', height: `${AD_UNIT_HEIGHT_PX}px` }}
       data-ad-client={ADSENSE_CLIENT}
       data-ad-slot={slot}
-      data-ad-format="auto"
+      data-ad-format="horizontal"
       data-full-width-responsive="true"
     />
   )

@@ -7,6 +7,7 @@ import { useAuth } from '../../../contexts/AuthContext'
 import { useStationAdminMode } from '../../../hooks/useStationAdminMode'
 import { useIsStationEditor } from '../../../hooks/useIsStationEditor'
 import { useTheme } from '../../../hooks/useTheme'
+import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
 import {
   isStationAdminSearchParam,
   writeStationAdminModeEnabled,
@@ -91,9 +92,11 @@ const Footer: React.FC = () => {
             <BUTFooterLink to="/migration">
               Migration
             </BUTFooterLink>
-            <BUTFooterLink to="/pricing">
-              Pricing
-            </BUTFooterLink>
+            {isAccountSystemEnabled ? (
+              <BUTFooterLink to="/pricing">
+                Pricing
+              </BUTFooterLink>
+            ) : null}
             <BUTFooterLink to="/privacy">
               Privacy
             </BUTFooterLink>

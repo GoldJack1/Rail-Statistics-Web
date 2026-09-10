@@ -133,31 +133,14 @@
     z-index: auto;
 }
 
-/*
- * Desktop header ad — out of the flex column so map height matches the
- * committed layout. Must not sit between toolbar and .stations-content.
- */
-.stations-map-page__header-ad {
-    display: none;
+/* Desktop banner lives in PageTopHeader trailing — keep it below sticky tabs */
+.stations-map-page .rs-page-top-header__trailing {
+    z-index: 1;
 }
 
-@media (min-width: 1024px) {
-    .stations-map-page__header-ad {
-        display: block;
-        position: absolute;
-        top: calc(var(--space-lg) + 15px);
-        right: var(--stations-map-chrome-inset);
-        z-index: 940;
-        width: min(1000px, calc(100% - 2 * var(--stations-map-chrome-inset) - 8rem));
-        max-width: 1000px;
-        pointer-events: auto;
-    }
-
-    .stations-map-page .rs-page-top-header__copy {
-        /* Keep the title clear of the overlay ad */
-        padding-right: min(1040px, calc(100% - 2 * var(--stations-map-chrome-inset) - 6rem));
-        box-sizing: border-box;
-    }
+.stations-map-page .rs-ad-slot--map-section {
+    flex-shrink: 0;
+    margin-bottom: var(--space-sm);
 }
 
 /* Match +/- zoom to the Map title / network-tab inset when the panel is closed */

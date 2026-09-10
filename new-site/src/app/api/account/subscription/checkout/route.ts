@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
+import { accountSystemDisabledResponse } from '@/app/api/account/_lib/accountSystemGuard'
 import { verifyUasFirebaseIdToken } from '@/app/api/account/_lib/verifyUasFirebaseIdToken'
 import type { StripePlanCard } from '@/services/stripeWebCheckout'
 
@@ -23,6 +24,9 @@ type CheckoutBody = {
 
 /** Create a Stripe-hosted Checkout Session (subscription) and return its URL. */
 export async function POST(request: NextRequest) {
+  const disabled = accountSystemDisabledResponse()
+  if (disabled) return disabled
+
   const auth = request.headers.get('authorization') || ''
   const idToken = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
   if (!idToken) {

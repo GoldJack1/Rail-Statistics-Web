@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { useConsumerAuth } from '@/contexts/ConsumerAuthContext'
+import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
 import { getDiaryVisitedCount } from '@/services/stationDiaryStore'
 
 /**
@@ -14,6 +15,7 @@ export default function StationsCloudSyncCue() {
   const pulledOnceRef = useRef(false)
 
   useEffect(() => {
+    if (!isAccountSystemEnabled) return
     if (loading || !user || !vaultUnlocked) {
       pulledOnceRef.current = false
       return
@@ -25,6 +27,7 @@ export default function StationsCloudSyncCue() {
 
   const visited = useMemo(() => getDiaryVisitedCount(), [diaryRevision])
 
+  if (!isAccountSystemEnabled) return null
   if (loading) return null
 
   let body: React.ReactNode

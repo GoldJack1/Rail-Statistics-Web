@@ -23,7 +23,7 @@ Consent: Consent Mode v2 defaults run in root layout `<head>` (`consentModeDefau
 - [x] Public stations browse: header banner, section top, in-feed every N cards
 - [x] Admin stations: ads gated off (`surface === 'public'` only)
 - [x] Station details: header banner + section placements
-- [x] Public map: desktop header overlay banner; admin map off
+- [x] Public map: desktop header trailing banner + tablet/mobile section; admin map off
 - [x] `PageTopHeader` `trailingContent` slot
 - [x] Env-based on/off (`NEXT_PUBLIC_ADSENSE_ENABLED`)
 - [x] Privacy policy updated for website AdSense (+ AdMob app section retained)
@@ -53,7 +53,6 @@ Consent: Consent Mode v2 defaults run in root layout `<head>` (`consentModeDefau
 ### Product / polish (optional)
 
 - [ ] Thin station-details section density (`ModalSection` adds a unit per subsection on ≤1023px)
-- [ ] Map: tablet/mobile section ad (desktop banner only today)
 - [ ] Ads on other public pages (home, departures, units, services) — decide later
 - [ ] Gate `AdSenseScript` to public routes only (script currently loads app-wide when enabled)
 - [ ] Local `.env.local` note: leave unset or `false` while developing

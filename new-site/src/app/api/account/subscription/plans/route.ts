@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
+import { accountSystemDisabledResponse } from '@/app/api/account/_lib/accountSystemGuard'
 import type { StripeIntervalKey, StripePlanCard } from '@/services/stripeWebCheckout'
 
 function json(status: number, body: unknown) {
@@ -90,6 +91,9 @@ const PLAN_TITLES: Record<'standard_premium' | 'first_class', string> = {
 
 /** List Standard Premium + First Class prices from Stripe (monthly, 3 months, yearly). */
 export async function GET() {
+  const disabled = accountSystemDisabledResponse()
+  if (disabled) return disabled
+
   const stripe = getStripe()
   if (!stripe) {
     return json(200, { configured: false, plans: [] as StripePlanCard[] })
