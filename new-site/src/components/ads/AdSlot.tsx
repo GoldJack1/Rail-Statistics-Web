@@ -12,8 +12,8 @@ import './AdSlot.css'
 
 export type AdSlotVariant = 'banner' | 'section' | 'inFeed'
 
-/** Reserved chrome height — keep layout stable; creatives are scaled to fit. */
-const AD_UNIT_HEIGHT_PX = 72
+/** Empty-slot floor — real creatives are 50–100px (horizontal) or taller (in-feed). */
+const AD_PLACEHOLDER_MIN_HEIGHT_PX = 90
 const SECTION_MAX_WIDTH_MQ = '(max-width: 1023px)'
 const SCRIPT_WAIT_MS = 8000
 
@@ -32,7 +32,8 @@ interface AdSlotProps {
 
 declare global {
   interface Window {
-    adsbygoogle?: unknown[]
+    /** Queue before script load; object with push() after adsbygoogle.js loads. */
+    adsbygoogle?: { push: (...args: unknown[]) => number; loaded?: boolean } | unknown[]
   }
 }
 
@@ -43,14 +44,22 @@ function isElementVisible(el: HTMLElement): boolean {
   return true
 }
 
+/**
+ * Ready once we can enqueue a unit. Before the script loads we create a queue
+ * array; after load `adsbygoogle` is a non-array object that still has push().
+ * Do not use Array.isArray alone — that fails after the script hydrates.
+ */
 function isAdsbygoogleReady(): boolean {
-  return typeof window !== 'undefined' && Array.isArray(window.adsbygoogle)
+  if (typeof window === 'undefined') return false
+  window.adsbygoogle = window.adsbygoogle || []
+  return typeof window.adsbygoogle.push === 'function'
 }
 
 /**
- * Keep the 72px frame, but scale the filled unit so ~90px creatives are not clipped.
+ * Grow the card to the creative. Do not scale or clip — AdSense treats that as a
+ * modified ad, and 72px is smaller than every standard display size.
  */
-function fitAdInFrame(el: HTMLElement) {
+function sizeCardToCreative(el: HTMLElement) {
   const frame = el.parentElement
   if (!frame?.classList.contains('rs-ad-slot__unit-frame')) return
 
@@ -60,19 +69,10 @@ function fitAdInFrame(el: HTMLElement) {
   el.style.removeProperty('margin-left')
 
   const iframe = el.querySelector('iframe')
-  const naturalHeight = Math.max(
-    iframe?.offsetHeight ?? 0,
-    el.offsetHeight,
-    AD_UNIT_HEIGHT_PX
-  )
+  const naturalHeight = Math.max(iframe?.offsetHeight ?? 0, el.offsetHeight)
+  if (naturalHeight <= 0) return
 
-  if (naturalHeight <= AD_UNIT_HEIGHT_PX + 1) return
-
-  const scale = AD_UNIT_HEIGHT_PX / naturalHeight
-  el.style.transform = `scale(${scale})`
-  el.style.transformOrigin = 'top left'
-  el.style.width = `${100 / scale}%`
-  el.style.maxWidth = `${100 / scale}%`
+  frame.style.height = `${naturalHeight}px`
 }
 
 function AdSenseUnit({ variant }: { variant: AdSlotVariant }) {
@@ -107,7 +107,7 @@ function AdSenseUnit({ variant }: { variant: AdSlotVariant }) {
 
       if (el.getAttribute('data-adsbygoogle-status')) {
         pushedRef.current = true
-        fitAdInFrame(el)
+        sizeCardToCreative(el)
         return true
       }
 
@@ -120,9 +120,8 @@ function AdSenseUnit({ variant }: { variant: AdSlotVariant }) {
         return false
       }
 
-      // Fit after the iframe lands (AdSense mutates the <ins>).
       requestAnimationFrame(() => {
-        if (!cancelled) fitAdInFrame(el)
+        if (!cancelled) sizeCardToCreative(el)
       })
       return true
     }
@@ -130,7 +129,7 @@ function AdSenseUnit({ variant }: { variant: AdSlotVariant }) {
     const armFitObserver = () => {
       if (mutationObserver) return
       mutationObserver = new MutationObserver(() => {
-        if (!cancelled) fitAdInFrame(el)
+        if (!cancelled) sizeCardToCreative(el)
       })
       mutationObserver.observe(el, {
         attributes: true,
@@ -202,7 +201,7 @@ function AdSenseUnit({ variant }: { variant: AdSlotVariant }) {
     <ins
       ref={insRef}
       className="adsbygoogle rs-ad-slot__ins"
-      style={{ display: 'block', width: '100%', height: `${AD_UNIT_HEIGHT_PX}px` }}
+      style={{ display: 'block', width: '100%', minHeight: AD_PLACEHOLDER_MIN_HEIGHT_PX }}
       data-ad-client={ADSENSE_CLIENT}
       data-ad-slot={slot}
       data-ad-format="horizontal"

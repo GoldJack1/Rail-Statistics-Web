@@ -53,10 +53,9 @@
 
 .rs-ad-slot__text-card .rs-text-card__description {
   display: block;
-  flex: 0 0 72px;
+  flex: 0 0 auto;
   width: 100%;
-  height: 72px;
-  max-height: 72px;
+  height: auto;
   min-width: 0;
   overflow: hidden;
   font-size: inherit;
@@ -65,15 +64,19 @@
 }
 
 /*
- * Fixed-height clip frame. AdSense may render taller horizontal creatives;
- * JS scales the <ins> to fit so the creative is not cut off mid-glyph.
+ * Card grows to the creative. Horizontal units are 50–100px; in-feed is fluid.
+ * 90px matches the 728×90 leaderboard so AdSense has enough height to fill.
  */
 .rs-ad-slot__unit-frame {
   width: 100%;
-  height: 72px;
-  max-height: 72px;
+  min-height: 90px;
+  height: auto;
   overflow: hidden;
   box-sizing: border-box;
+}
+
+.rs-ad-slot--inFeed .rs-ad-slot__unit-frame {
+  min-height: 100px;
 }
 
 .rs-ad-slot__unit-frame .rs-ad-slot__ins,
@@ -81,9 +84,14 @@
   display: block;
   width: 100%;
   max-width: 100%;
-  min-height: 72px;
+  min-height: 90px;
   margin: 0 !important;
   box-sizing: border-box;
+}
+
+.rs-ad-slot--inFeed .rs-ad-slot__unit-frame .rs-ad-slot__ins,
+.rs-ad-slot--inFeed .rs-ad-slot__unit-frame .adsbygoogle {
+  min-height: 100px;
 }
 
 .rs-ad-slot__unit-frame iframe {
