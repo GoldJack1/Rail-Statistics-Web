@@ -34,6 +34,8 @@ declare global {
   interface Window {
     /** Queue before script load; object with push() after adsbygoogle.js loads. */
     adsbygoogle?: { push: (...args: unknown[]) => number; loaded?: boolean } | unknown[]
+    /** Set when adsbygoogle.js fails to load (Safari content blocker, extensions). */
+    __RS_ADSENSE_BLOCKED?: boolean
   }
 }
 
@@ -53,6 +55,19 @@ function isAdsbygoogleReady(): boolean {
   if (typeof window === 'undefined') return false
   window.adsbygoogle = window.adsbygoogle || []
   return typeof window.adsbygoogle.push === 'function'
+}
+
+function isAdSenseScriptBlocked(): boolean {
+  if (typeof window === 'undefined') return false
+  if (window.__RS_ADSENSE_BLOCKED) return true
+  const loader = document.getElementById('adsense-loader')
+  return loader instanceof HTMLScriptElement && loader.dataset.blocked === '1'
+}
+
+/** True once adsbygoogle.js has replaced the queue array. */
+function isAdSenseLibraryPresent(): boolean {
+  const ads = window.adsbygoogle
+  return Boolean(ads) && !Array.isArray(ads)
 }
 
 /**
@@ -223,6 +238,7 @@ const AdSlot: React.FC<AdSlotProps> = ({
     if (typeof window === 'undefined') return false
     return window.matchMedia(SECTION_MAX_WIDTH_MQ).matches
   })
+  const [blocked, setBlocked] = useState(false)
 
   useEffect(() => {
     if (!isAdSenseEnabled || variant !== 'section') return
@@ -233,7 +249,28 @@ const AdSlot: React.FC<AdSlotProps> = ({
     return () => mq.removeEventListener('change', sync)
   }, [variant])
 
+  useEffect(() => {
+    if (!isAdSenseEnabled) return
+    const markBlocked = () => setBlocked(true)
+    if (isAdSenseScriptBlocked()) {
+      markBlocked()
+      return
+    }
+    window.addEventListener('rs-adsense-blocked', markBlocked)
+    const timeoutId = window.setTimeout(() => {
+      if (!isAdSenseLibraryPresent()) markBlocked()
+    }, SCRIPT_WAIT_MS)
+    return () => {
+      window.removeEventListener('rs-adsense-blocked', markBlocked)
+      window.clearTimeout(timeoutId)
+    }
+  }, [])
+
   if (!isAdSenseEnabled) {
+    return null
+  }
+
+  if (blocked) {
     return null
   }
 
