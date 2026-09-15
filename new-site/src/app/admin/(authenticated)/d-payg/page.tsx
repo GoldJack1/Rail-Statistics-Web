@@ -55,7 +55,7 @@ const DpaygSchemesListPage: React.FC = () => {
         ) : null}
         {loading ? <p className="dpayg-muted">Loading schemes…</p> : null}
         {!loading && rows.length === 0 && !error ? (
-          <p className="dpayg-muted">No D-PAYG schemes found in railstatisticstickets.</p>
+          <p className="dpayg-muted">No D-PAYG schemes found in the ticket catalogue.</p>
         ) : null}
 
         <div className="dpayg-scheme-list">

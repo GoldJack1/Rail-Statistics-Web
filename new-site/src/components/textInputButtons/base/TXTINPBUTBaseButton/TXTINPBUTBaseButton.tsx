@@ -3,6 +3,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { X } from '@phosphor-icons/react'
 import type { ButtonColorVariant, ButtonShape } from '../../../buttons/base/BUTBaseButton/BUTBaseButton'
+import { TextSkeletonLine } from '@/components/misc/Skeleton/TextSkeletonLine'
 import '../../../buttons/base/BUTBaseButton/BUTBaseButton.css'
 import './TXTINPBUTBaseButton.css'
 
@@ -47,6 +48,7 @@ export interface TXTINPBUTBaseButtonProps extends Omit<React.InputHTMLAttributes
   maxLength?: number
   style?: React.CSSProperties
   forceFocusedAppearance?: boolean
+  skeleton?: boolean
 }
 
 export interface TXTINPBUTBaseButtonHandle {
@@ -103,6 +105,7 @@ const TXTINPBUTBaseButton = forwardRef<TXTINPBUTBaseButtonHandle, TXTINPBUTBaseB
   type = 'text',
   style,
   forceFocusedAppearance = false,
+  skeleton = false,
   ...restInputProps
 }, ref) => {
   const isControlled = value !== undefined
@@ -179,6 +182,7 @@ const TXTINPBUTBaseButton = forwardRef<TXTINPBUTBaseButtonHandle, TXTINPBUTBaseB
     hasValue && 'rs-input--has-value',
     forceFocusedAppearance && 'rs-input--force-focused',
     disabled && 'rs-input--disabled',
+    skeleton && 'rs-input--skeleton',
     className,
   ].filter(Boolean).join(' ')
 
@@ -188,7 +192,11 @@ const TXTINPBUTBaseButton = forwardRef<TXTINPBUTBaseButtonHandle, TXTINPBUTBaseB
       return icon ? <span className="rs-input__prefix rs-input__prefix--icon" aria-hidden="true">{icon}</span> : null
     }
     if (prefixType === 'label') {
-      return label ? <span className="rs-input__prefix rs-input__prefix--label">{label}</span> : null
+      return label ? (
+        <span className="rs-input__prefix rs-input__prefix--label">
+          {skeleton ? <TextSkeletonLine>{label}</TextSkeletonLine> : label}
+        </span>
+      ) : null
     }
     if (prefixType === 'currency') {
       return <span className="rs-input__prefix rs-input__prefix--currency">{currencySymbol}</span>
@@ -210,31 +218,38 @@ const TXTINPBUTBaseButton = forwardRef<TXTINPBUTBaseButtonHandle, TXTINPBUTBaseB
   return (
     <label className={wrapperClasses} style={style}>
       {renderPrefix()}
-      <input
-        ref={inputRef}
-        id={inputId ?? id}
-        name={name}
-        type={type}
-        className={inputClasses}
-        value={currentValue}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        placeholder={placeholder}
-        disabled={disabled}
-        aria-label={ariaLabel}
-        autoComplete={autoComplete}
-        inputMode={numeric ? 'decimal' : inputMode}
-        pattern={pattern}
-        autoCapitalize={autoCapitalize}
-        autoCorrect={autoCorrect}
-        spellCheck={spellCheck}
-        enterKeyHint={enterKeyHint}
-        autoFocus={autoFocus}
-        maxLength={maxLength}
-        {...restInputProps}
-      />
+      <span className="rs-input__field-slot">
+        <input
+          ref={inputRef}
+          id={inputId ?? id}
+          name={name}
+          type={type}
+          className={inputClasses}
+          value={currentValue}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          placeholder={placeholder}
+          disabled={disabled}
+          aria-label={ariaLabel}
+          autoComplete={autoComplete}
+          inputMode={numeric ? 'decimal' : inputMode}
+          pattern={pattern}
+          autoCapitalize={autoCapitalize}
+          autoCorrect={autoCorrect}
+          spellCheck={spellCheck}
+          enterKeyHint={enterKeyHint}
+          autoFocus={autoFocus}
+          maxLength={maxLength}
+          {...restInputProps}
+        />
+        {skeleton ? (
+          <span className="rs-input__field-skeleton" aria-hidden="true">
+            <TextSkeletonLine>{currentValue || placeholder || 'Station'}</TextSkeletonLine>
+          </span>
+        ) : null}
+      </span>
       {showClear && (
         <button
           type="button"

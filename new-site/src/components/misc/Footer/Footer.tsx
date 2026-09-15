@@ -83,8 +83,8 @@ const Footer: React.FC = () => {
               <BUTFooterLink to="/stations">
                 Stations
               </BUTFooterLink>
-              <BUTFooterLink to="/d-payg-fares">
-                D-PAYG Fares
+              <BUTFooterLink to="/fares">
+                Fares
               </BUTFooterLink>
               <BUTFooterLink to="/stations/map">
                 Maps

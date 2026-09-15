@@ -1,5 +1,6 @@
 /**
- * Lightweight service worker — caches static shell assets and station CDN bundles.
+ * Lightweight service worker — caches static shell assets, station CDN bundles,
+ * and ticket catalogue files.
  * Document navigations are always network-first (Next.js SSR on Netlify).
  *
  * Generated from this template at build time — edit sw.template.js, not sw.js.
@@ -26,11 +27,10 @@ function isStaticAsset(pathname) {
   )
 }
 
-function isStationCdnRequest(url) {
-  return (
-    url.hostname.endsWith('firebasestorage.googleapis.com') &&
-    decodeURIComponent(url.pathname + url.search).includes('station-exports')
-  )
+function isPublicStorageCatalogRequest(url) {
+  if (!url.hostname.endsWith('firebasestorage.googleapis.com')) return false
+  const path = decodeURIComponent(url.pathname + url.search)
+  return path.includes('station-exports') || path.includes('ticket-catalogs')
 }
 
 async function networkFirstWithCache(cache, request) {
@@ -74,7 +74,7 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url)
 
-  if (isStationCdnRequest(url)) {
+  if (isPublicStorageCatalogRequest(url)) {
     event.respondWith(
       caches.open(STATION_CACHE_VERSION).then((cache) => networkFirstWithCache(cache, request))
     )

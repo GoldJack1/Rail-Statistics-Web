@@ -30,7 +30,10 @@ function getHeaderPageTitle(pathname: string): string {
   if (pathname === '/stations/map') return 'Maps'
   if (pathname.startsWith('/stations/')) return 'Station'
   if (pathname === '/stations') return 'Stations'
+  if (pathname === '/fares' || pathname.startsWith('/fares/')) return 'Fares'
   if (pathname.startsWith('/d-payg-fares') || pathname === '/tickets') return 'D-PAYG Fares'
+  if (pathname.startsWith('/contactless-fares')) return 'Contactless PAYG'
+  if (pathname.startsWith('/smartcard-fares')) return 'Smartcard PAYG'
   if (pathname.startsWith('/admin/design-system/colours')) return 'Colours'
   if (pathname.startsWith('/admin/design-system/typography')) return 'Typography'
   if (pathname.startsWith('/admin/design-system/buttons')) return 'Buttons'
@@ -60,7 +63,13 @@ const Header: React.FC = () => {
 
   const isHomeActive = pathname === '/' || pathname === '/home'
   const isStationsActive = pathname === '/stations' || pathname.startsWith('/admin/stations')
-  const isDpaygFaresActive = pathname.startsWith('/d-payg-fares') || pathname === '/tickets'
+  const isFaresActive =
+    pathname === '/fares' ||
+    pathname.startsWith('/fares/') ||
+    pathname.startsWith('/d-payg-fares') ||
+    pathname === '/tickets' ||
+    pathname.startsWith('/contactless-fares') ||
+    pathname.startsWith('/smartcard-fares')
   const isMapActive = pathname === '/stations/map' || pathname === '/admin/map'
 
   const isAccountActive = pathname.startsWith('/account') || pathname.startsWith('/leaderboards')
@@ -70,7 +79,7 @@ const Header: React.FC = () => {
   const navItems: MobileHeaderNavItem[] = [
     { to: '/', label: 'Home', active: isHomeActive },
     { to: '/stations', label: 'Stations', active: isStationsActive && !isMapActive },
-    { to: '/d-payg-fares', label: 'D-PAYG Fares', active: isDpaygFaresActive },
+    { to: '/fares', label: 'Fares', active: isFaresActive },
     { to: '/stations/map', label: 'Maps', active: isMapActive },
     ...(isAccountSystemEnabled
       ? [{ to: '/account', label: 'Account', active: isAccountActive }]

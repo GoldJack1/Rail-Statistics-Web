@@ -8,7 +8,12 @@ import { StationDetailsSubsection } from '@/components/models/StationDetails/Sta
 import { StationSectionTitle } from '@/components/models/StationDetails/StationSectionTitle'
 import type { DPAYGFare, DPAYGScheme, DPAYGStation } from '@/types/dpayg'
 import { formatDpaygPence } from '@/types/dpayg'
+import type { PaygZoneCapBand } from '@/services/paygMatrixCatalog'
+import { formatPaygZoneLabel, matchZoneCapBand } from '@/services/paygMatrixParse'
+import { stationPublicCode } from '@/utils/dpaygStationSearch'
+import { TextSkeletonLine } from '@/components/misc/Skeleton/TextSkeletonLine'
 import '@/components/models/StationModal/StationModal.css'
+import '@/components/cards/StationsTableView/StationsTableView.css'
 
 const ESTIMATE_DISCLAIMER =
   'Please note that the prices shown below are only estimates of what a journey may actually cost. This is because fares for some areas are not publicly available.'
@@ -28,9 +33,55 @@ type TicketFareResultsProps = {
   /** True while a fare document lookup is in flight — do not show “not found” yet. */
   loading?: boolean
   error?: string | null
+  areaKind?: 'trial' | 'payg'
+  emptyIntro?: string
+  showStationCodes?: boolean
+  /** Skip the details card chrome when nested in the lookup page card. */
+  framed?: boolean
+  skeleton?: boolean
 }
 
-function TicketFareCard({ children }: { children: React.ReactNode }) {
+function skelText(text: string, skeleton: boolean) {
+  return skeleton ? <TextSkeletonLine>{text}</TextSkeletonLine> : text
+}
+
+function StandardFareFields({
+  standardPence,
+  railcardPence,
+  showRailcard,
+  skeleton = false,
+}: {
+  standardPence: number
+  railcardPence: number
+  showRailcard: boolean
+  skeleton?: boolean
+}) {
+  return (
+    <div className="modal-details-grid tickets-fare-amounts">
+      <StationDetailField
+        label="Standard single"
+        value={formatDpaygPence(standardPence)}
+        skeleton={skeleton}
+      />
+      {showRailcard ? (
+        <StationDetailField
+          label="Railcard"
+          value={formatDpaygPence(railcardPence)}
+          skeleton={skeleton}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function TicketFareCard({
+  children,
+  framed = true,
+}: {
+  children: React.ReactNode
+  framed?: boolean
+}) {
+  if (!framed) return <>{children}</>
   return (
     <main className="stations-main station-details-main tickets-main">
       <section className="station-details-card modal-content">
@@ -40,23 +91,242 @@ function TicketFareCard({ children }: { children: React.ReactNode }) {
   )
 }
 
-function CapsSubsection({ scheme }: { scheme?: DPAYGScheme | null }) {
-  if (!scheme) return null
-
+function TicketsStationsTable({
+  columns,
+  rows,
+  skeleton = false,
+}: {
+  columns: string[]
+  rows: { key: string; cells: string[]; matched?: boolean }[]
+  skeleton?: boolean
+}) {
   return (
-    <StationDetailsSubsection title="Caps">
-      <div className="modal-details-grid modal-facilities-grid">
-        <StationDetailField
-          label="Daily"
-          value={formatDpaygPence(scheme.caps.dailyPence)}
-        />
-        <StationDetailField
-          label="Weekly"
-          value={formatDpaygPence(scheme.caps.weeklyPence)}
-        />
+    <div className="stations-table-panel tickets-fares-table-panel">
+      <div className="stations-table-wrap">
+        <table className="stations-table tickets-fares-table">
+          <thead>
+            <tr>
+              {columns.map((column) => (
+                <th key={column} scope="col">
+                  <span className="stations-table__sort-button">
+                    {skelText(column, skeleton)}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr
+                key={row.key}
+                className={[
+                  'stations-table__row',
+                  index % 2 === 1 ? 'stations-table__row--striped' : '',
+                  row.matched ? 'tickets-fares-table__row--match' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                {row.cells.map((cell, cellIndex) => (
+                  <td
+                    key={`${row.key}-${cellIndex}`}
+                    className={cellIndex === 0 ? undefined : 'stations-table__id'}
+                  >
+                    {skelText(cell, skeleton)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-    </StationDetailsSubsection>
+    </div>
   )
+}
+
+function capNoteAddsContext(label: string | undefined, pence: number): boolean {
+  const text = label?.trim()
+  if (!text) return false
+  const amount = formatDpaygPence(pence).toLowerCase()
+  const normalised = text.toLowerCase().replace(/\s+/g, '')
+  if (normalised.includes(amount.replace(/\s+/g, ''))) return false
+  if (pence > 0 && normalised.includes((pence / 100).toFixed(2))) return false
+  return true
+}
+
+function DailyWeeklyCapFields({
+  dailyPence,
+  weeklyPence,
+  dailyLabel,
+  weeklyLabel,
+  skeleton = false,
+}: {
+  dailyPence: number
+  weeklyPence: number
+  dailyLabel?: string
+  weeklyLabel?: string
+  skeleton?: boolean
+}) {
+  return (
+    <div className="tickets-caps-simple">
+      <div className="modal-details-grid tickets-fare-amounts">
+        {dailyPence > 0 ? (
+          <StationDetailField
+            label="Daily"
+            value={formatDpaygPence(dailyPence)}
+            skeleton={skeleton}
+          />
+        ) : null}
+        {weeklyPence > 0 ? (
+          <StationDetailField
+            label="Weekly"
+            value={formatDpaygPence(weeklyPence)}
+            skeleton={skeleton}
+          />
+        ) : null}
+      </div>
+      {capNoteAddsContext(dailyLabel, dailyPence) ? (
+        <p className="tickets-cap-note">{skelText(dailyLabel!, skeleton)}</p>
+      ) : null}
+      {capNoteAddsContext(weeklyLabel, weeklyPence) ? (
+        <p className="tickets-cap-note">{skelText(weeklyLabel!, skeleton)}</p>
+      ) : null}
+    </div>
+  )
+}
+
+function CapsSubsection({
+  scheme,
+  zoneCapBands,
+  originZone,
+  destZone,
+  journeyDailyCapPence,
+  journeyWeeklyCapPence,
+  emptyMessage,
+  sectionTitle,
+  skeleton = false,
+}: {
+  scheme?: DPAYGScheme | null
+  zoneCapBands?: PaygZoneCapBand[]
+  originZone?: string
+  destZone?: string
+  journeyDailyCapPence?: number
+  journeyWeeklyCapPence?: number
+  emptyMessage?: string
+  sectionTitle?: string
+  skeleton?: boolean
+}) {
+  const bands = zoneCapBands ?? []
+  const matchingBand =
+    bands.length > 0
+      ? matchZoneCapBand(
+          bands,
+          originZone,
+          destZone,
+          journeyDailyCapPence,
+          journeyWeeklyCapPence
+        )
+      : null
+  const hasJourneyCaps =
+    (journeyDailyCapPence != null && journeyDailyCapPence > 0) ||
+    (journeyWeeklyCapPence != null && journeyWeeklyCapPence > 0)
+  const journeyMatchesBand =
+    matchingBand != null &&
+    (journeyDailyCapPence == null ||
+      journeyDailyCapPence <= 0 ||
+      matchingBand.dailyCapPence === journeyDailyCapPence) &&
+    (journeyWeeklyCapPence == null ||
+      journeyWeeklyCapPence <= 0 ||
+      matchingBand.weeklyCapPence === journeyWeeklyCapPence)
+  const hasSchemeCaps =
+    !!scheme && (scheme.caps.dailyPence > 0 || scheme.caps.weeklyPence > 0)
+
+  if (bands.length === 0 && !hasJourneyCaps && !hasSchemeCaps) {
+    if (!emptyMessage) return null
+    const empty = <p className="tickets-results-muted">{skelText(emptyMessage, skeleton)}</p>
+    if (sectionTitle) {
+      return (
+        <StationDetailsSubsection title={sectionTitle} skeleton={skeleton}>
+          {empty}
+        </StationDetailsSubsection>
+      )
+    }
+    return empty
+  }
+
+  const extraJourneyRow = hasJourneyCaps && bands.length > 0 && !journeyMatchesBand
+  const useSimpleFields = !extraJourneyRow && bands.length <= 1
+
+  const body = useSimpleFields ? (
+    <DailyWeeklyCapFields
+      dailyPence={
+        hasJourneyCaps
+          ? journeyDailyCapPence ?? 0
+          : bands[0]
+            ? bands[0].dailyCapPence
+            : scheme?.caps.dailyPence ?? 0
+      }
+      weeklyPence={
+        hasJourneyCaps
+          ? journeyWeeklyCapPence ?? 0
+          : bands[0]
+            ? bands[0].weeklyCapPence
+            : scheme?.caps.weeklyPence ?? 0
+      }
+      dailyLabel={!hasJourneyCaps && bands.length === 0 ? scheme?.caps.dailyLabel : undefined}
+      weeklyLabel={!hasJourneyCaps && bands.length === 0 ? scheme?.caps.weeklyLabel : undefined}
+      skeleton={skeleton}
+    />
+  ) : (
+    <>
+      <TicketsStationsTable
+        columns={['Cap', 'Daily', 'Weekly']}
+        rows={[
+          ...(extraJourneyRow
+            ? [
+                {
+                  key: 'this-journey',
+                  matched: true,
+                  cells: [
+                    'This journey',
+                    journeyDailyCapPence && journeyDailyCapPence > 0
+                      ? formatDpaygPence(journeyDailyCapPence)
+                      : '—',
+                    journeyWeeklyCapPence && journeyWeeklyCapPence > 0
+                      ? formatDpaygPence(journeyWeeklyCapPence)
+                      : '—',
+                  ],
+                },
+              ]
+            : []),
+          ...bands.map((band) => ({
+            key: band.id,
+            matched: matchingBand?.id === band.id,
+            cells: [
+              band.title,
+              band.dailyCapPence > 0 ? formatDpaygPence(band.dailyCapPence) : '—',
+              band.weeklyCapPence > 0 ? formatDpaygPence(band.weeklyCapPence) : '—',
+            ],
+          })),
+        ]}
+        skeleton={skeleton}
+      />
+      {matchingBand && bands.length > 1 && hasJourneyCaps ? (
+        <p className="tickets-cap-note">
+          {skelText(`This journey is covered by the ${matchingBand.title} cap.`, skeleton)}
+        </p>
+      ) : null}
+    </>
+  )
+
+  if (sectionTitle) {
+    return (
+      <StationDetailsSubsection title={sectionTitle} skeleton={skeleton}>
+        {body}
+      </StationDetailsSubsection>
+    )
+  }
+  return body
 }
 
 function formatOperatorsList(names: string[]): string {
@@ -75,13 +345,42 @@ function operatorsValidOnLabel(scheme: DPAYGScheme): string {
   )
 }
 
-function OperatorsValidOn({ scheme }: { scheme?: DPAYGScheme | null }) {
+function OperatorsValidOn({
+  scheme,
+  skeleton = false,
+}: {
+  scheme?: DPAYGScheme | null
+  skeleton?: boolean
+}) {
   if (!scheme) return null
   const operatorsLabel = operatorsValidOnLabel(scheme)
   if (!operatorsLabel) return null
   return (
     <p className="tickets-trial-meta__operators">
-      Operators valid on: {operatorsLabel}
+      {skelText(`Operators valid on: ${operatorsLabel}`, skeleton)}
+    </p>
+  )
+}
+
+function JourneyZonesLine({
+  originZone,
+  destZone,
+  skeleton = false,
+}: {
+  originZone?: string
+  destZone?: string
+  skeleton?: boolean
+}) {
+  const originLabel = formatPaygZoneLabel(originZone)
+  const destLabel = formatPaygZoneLabel(destZone)
+  if (!originLabel && !destLabel) return null
+  return (
+    <p className="tickets-results-zones">
+      <span>{skelText(originLabel || 'Zone unknown', skeleton)}</span>
+      <span className="tickets-results-route__arrow" aria-hidden="true">
+        →
+      </span>
+      <span>{skelText(destLabel || 'Zone unknown', skeleton)}</span>
     </p>
   )
 }
@@ -90,27 +389,30 @@ function JourneyRouteHeading({
   scheme,
   origin,
   dest,
+  showStationCodes = true,
+  skeleton = false,
 }: {
   scheme: DPAYGScheme
   origin: DPAYGStation
   dest: DPAYGStation
+  showStationCodes?: boolean
+  skeleton?: boolean
 }) {
+  const originCode = stationPublicCode(origin, showStationCodes)
+  const destCode = stationPublicCode(dest, showStationCodes)
+  const originLabel = originCode ? `${origin.name} (${originCode})` : origin.name
+  const destLabel = destCode ? `${dest.name} (${destCode})` : dest.name
   return (
     <div className="tickets-journey-heading">
-      <OperatorsValidOn scheme={scheme} />
+      <OperatorsValidOn scheme={scheme} skeleton={skeleton} />
       <p className="tickets-results-route">
-        <span className="tickets-results-route__station">
-          {origin.name}{' '}
-          <span className="tickets-results-route__crs">({origin.crs})</span>
-        </span>
+        <span className="tickets-results-route__station">{skelText(originLabel, skeleton)}</span>
         <span className="tickets-results-route__arrow" aria-hidden="true">
           →
         </span>
-        <span className="tickets-results-route__station">
-          {dest.name}{' '}
-          <span className="tickets-results-route__crs">({dest.crs})</span>
-        </span>
+        <span className="tickets-results-route__station">{skelText(destLabel, skeleton)}</span>
       </p>
+      <JourneyZonesLine originZone={origin.zone} destZone={dest.zone} skeleton={skeleton} />
     </div>
   )
 }
@@ -119,38 +421,83 @@ function isMidlandsTrial(scheme: DPAYGScheme): boolean {
   return scheme.pricingModel === 'dynamic' || scheme.id === 'emr-midlands'
 }
 
-function FareDisclaimer({ scheme }: { scheme: DPAYGScheme }) {
+function FareDisclaimer({
+  scheme,
+  areaKind = 'trial',
+  skeleton = false,
+}: {
+  scheme: DPAYGScheme
+  areaKind?: 'trial' | 'payg'
+  skeleton?: boolean
+}) {
+  if (areaKind === 'payg') return null
   let text = ESTIMATE_DISCLAIMER
   if (isMidlandsTrial(scheme)) {
     text = EMR_DYNAMIC_DISCLAIMER
   } else if (scheme.id === 'northern-shf-don') {
     text = SHEFFIELD_DONCASTER_DISCLAIMER
   }
-  return <p className="tickets-results-disclaimer">{text}</p>
+  return <p className="tickets-results-disclaimer">{skelText(text, skeleton)}</p>
 }
 
 function TrialInfoSection({
   scheme,
   showOperators = false,
   showDisclaimer = true,
+  areaKind = 'trial',
+  skeleton = false,
 }: {
   scheme: DPAYGScheme
   showOperators?: boolean
   showDisclaimer?: boolean
+  areaKind?: 'trial' | 'payg'
+  skeleton?: boolean
 }) {
   return (
     <div className="tickets-trial-meta">
-      {showOperators ? <OperatorsValidOn scheme={scheme} /> : null}
-      {showDisclaimer ? <FareDisclaimer scheme={scheme} /> : null}
-      <CapsSubsection scheme={scheme} />
+      {showOperators ? <OperatorsValidOn scheme={scheme} skeleton={skeleton} /> : null}
+      {showDisclaimer ? (
+        <FareDisclaimer scheme={scheme} areaKind={areaKind} skeleton={skeleton} />
+      ) : null}
     </div>
   )
 }
 
-function trialAreaHeading(scheme: DPAYGScheme | null): string {
-  if (!scheme) return 'D-PAYG Trial Area'
+export function TicketFareCapsInline({
+  scheme,
+  zoneCapBands,
+  originZone,
+  destZone,
+  journeyDailyCapPence,
+  journeyWeeklyCapPence,
+  skeleton = false,
+}: {
+  scheme: DPAYGScheme | null
+  zoneCapBands?: PaygZoneCapBand[]
+  originZone?: string
+  destZone?: string
+  journeyDailyCapPence?: number
+  journeyWeeklyCapPence?: number
+  skeleton?: boolean
+}) {
+  return (
+    <CapsSubsection
+      scheme={scheme}
+      zoneCapBands={zoneCapBands}
+      originZone={originZone}
+      destZone={destZone}
+      journeyDailyCapPence={journeyDailyCapPence}
+      journeyWeeklyCapPence={journeyWeeklyCapPence}
+      sectionTitle="Fare Caps"
+      skeleton={skeleton}
+    />
+  )
+}
+
+function trialAreaHeading(scheme: DPAYGScheme | null, areaKind: 'trial' | 'payg'): string {
+  if (!scheme) return areaKind === 'payg' ? 'PAYG Area' : 'D-PAYG Trial Area'
   const areaName = scheme.shortName || scheme.name
-  return `${areaName} Trial Area`
+  return areaKind === 'payg' ? `${areaName} PAYG Area` : `${areaName} Trial Area`
 }
 
 const TicketFareResults: React.FC<TicketFareResultsProps> = ({
@@ -159,18 +506,35 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
   dest,
   fare,
   searched,
-  loading = false,
+  loading: _loading = false,
   error,
+  areaKind = 'trial',
+  emptyIntro,
+  showStationCodes = true,
+  framed = true,
+  skeleton = false,
 }) => {
-  const pageTitle = trialAreaHeading(scheme)
+  const pageTitle = trialAreaHeading(scheme, areaKind)
+  const intro =
+    emptyIntro ??
+    'Enter origin and destination, then tap Find fares to see published single fares for that journey.'
+  const missingCorridorCopy =
+    areaKind === 'payg'
+      ? 'Check the station name or CRS code matches a stop in this PAYG area.'
+      : 'Check the station name or CRS code matches a stop in this trial corridor.'
+  const noFareCopy = origin && dest
+    ? areaKind === 'payg'
+      ? `No published fare for ${origin.crs} → ${dest.crs} in this area.`
+      : `No published fare for ${origin.crs} → ${dest.crs} in this trial.`
+    : ''
 
   if (error && !searched) {
     return (
-      <TicketFareCard>
+      <TicketFareCard framed={framed}>
         <div className="modal-section">
-          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading />
+          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading skeleton={skeleton} />
           <p className="tickets-results-error" role="alert">
-            {error}
+            {skelText(error, skeleton)}
           </p>
         </div>
       </TicketFareCard>
@@ -179,18 +543,20 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
 
   if (!searched) {
     return (
-      <TicketFareCard>
+      <TicketFareCard framed={framed}>
         <div className="modal-section tickets-empty-state">
-          <p className="tickets-results-muted tickets-empty-state__intro">
-            Choose a trial area, enter origin and destination, then tap Find fares to see
-            published single fares for that journey.
-          </p>
-          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading />
+          {framed ? (
+            <p className="tickets-results-muted tickets-empty-state__intro">
+              {skelText(intro, skeleton)}
+            </p>
+          ) : null}
+          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading skeleton={skeleton} />
           {scheme ? (
             <div className="tickets-empty-state__meta">
-              <OperatorsValidOn scheme={scheme} />
-              {isMidlandsTrial(scheme) ? <FareDisclaimer scheme={scheme} /> : null}
-              <CapsSubsection scheme={scheme} />
+              <OperatorsValidOn scheme={scheme} skeleton={skeleton} />
+              {isMidlandsTrial(scheme) ? (
+                <FareDisclaimer scheme={scheme} areaKind={areaKind} skeleton={skeleton} />
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -200,13 +566,15 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
 
   if (error) {
     return (
-      <TicketFareCard>
+      <TicketFareCard framed={framed}>
         <div className="modal-section">
-          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading />
+          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading skeleton={skeleton} />
           <p className="tickets-results-error" role="alert">
-            {error}
+            {skelText(error, skeleton)}
           </p>
-          {scheme ? <TrialInfoSection scheme={scheme} /> : null}
+          {scheme ? (
+            <TrialInfoSection scheme={scheme} areaKind={areaKind} skeleton={skeleton} />
+          ) : null}
         </div>
       </TicketFareCard>
     )
@@ -214,29 +582,13 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
 
   if (!scheme || !origin || !dest) {
     return (
-      <TicketFareCard>
+      <TicketFareCard framed={framed}>
         <div className="modal-section">
-          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading />
-          <p className="tickets-results-muted">
-            Check the station name or CRS code matches a stop in this trial corridor.
-          </p>
-          {scheme ? <TrialInfoSection scheme={scheme} /> : null}
-        </div>
-      </TicketFareCard>
-    )
-  }
-
-  if (loading && !fare) {
-    return (
-      <TicketFareCard>
-        <div className="modal-section">
-          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading />
-          <div className="tickets-results-header">
-            <JourneyRouteHeading scheme={scheme} origin={origin} dest={dest} />
-            <p className="tickets-results-muted" aria-live="polite">
-              Looking up fare…
-            </p>
-          </div>
+          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading skeleton={skeleton} />
+          <p className="tickets-results-muted">{skelText(missingCorridorCopy, skeleton)}</p>
+          {scheme ? (
+            <TrialInfoSection scheme={scheme} areaKind={areaKind} skeleton={skeleton} />
+          ) : null}
         </div>
       </TicketFareCard>
     )
@@ -244,13 +596,19 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
 
   if (isMidlandsTrial(scheme) && !fare) {
     return (
-      <TicketFareCard>
+      <TicketFareCard framed={framed}>
         <div className="modal-section">
-          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading />
+          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading skeleton={skeleton} />
           <div className="tickets-results-header">
-            <JourneyRouteHeading scheme={scheme} origin={origin} dest={dest} />
+            <JourneyRouteHeading
+              scheme={scheme}
+              origin={origin}
+              dest={dest}
+              showStationCodes={showStationCodes}
+              skeleton={skeleton}
+            />
           </div>
-          <TrialInfoSection scheme={scheme} />
+          <TrialInfoSection scheme={scheme} areaKind={areaKind} skeleton={skeleton} />
         </div>
       </TicketFareCard>
     )
@@ -258,60 +616,71 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
 
   if (!fare) {
     return (
-      <TicketFareCard>
+      <TicketFareCard framed={framed}>
         <div className="modal-section">
-          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading />
+          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading skeleton={skeleton} />
           <div className="tickets-results-header">
-            <JourneyRouteHeading scheme={scheme} origin={origin} dest={dest} />
-            <p className="tickets-results-muted">
-              No published fare for {origin.crs} → {dest.crs} in this trial.
-            </p>
+            <JourneyRouteHeading
+              scheme={scheme}
+              origin={origin}
+              dest={dest}
+              showStationCodes={showStationCodes}
+              skeleton={skeleton}
+            />
+            <p className="tickets-results-muted">{skelText(noFareCopy, skeleton)}</p>
           </div>
-          <TrialInfoSection scheme={scheme} />
+          <TrialInfoSection scheme={scheme} areaKind={areaKind} skeleton={skeleton} />
         </div>
       </TicketFareCard>
     )
   }
 
   return (
-    <TicketFareCard>
+    <TicketFareCard framed={framed}>
       <div className="modal-section">
-        <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading />
+          <StationSectionTitle title={pageTitle} icon={Ticket} pageHeading skeleton={skeleton} />
         <div className="tickets-results-header">
-          <JourneyRouteHeading scheme={scheme} origin={origin} dest={dest} />
+          <JourneyRouteHeading
+            scheme={scheme}
+            origin={origin}
+            dest={dest}
+            showStationCodes={showStationCodes}
+            skeleton={skeleton}
+          />
         </div>
 
-        <StationDetailsSubsection title="Peak">
-          <div className="modal-details-grid modal-facilities-grid">
-            <StationDetailField
-              label="Standard single"
-              value={formatDpaygPence(fare.fares.peakStandardPence)}
+        {fare.hasOffPeak === false ? (
+          <StationDetailsSubsection title="Standard" skeleton={skeleton}>
+            <StandardFareFields
+              standardPence={fare.fares.peakStandardPence}
+              railcardPence={fare.fares.peakRailcardEstPence}
+              showRailcard={scheme.railcardEstimates}
+              skeleton={skeleton}
             />
-            {scheme.railcardEstimates ? (
-              <StationDetailField
-                label="Railcard"
-                value={formatDpaygPence(fare.fares.peakRailcardEstPence)}
+          </StationDetailsSubsection>
+        ) : (
+          <>
+            <StationDetailsSubsection title="Peak" skeleton={skeleton}>
+              <StandardFareFields
+                standardPence={fare.fares.peakStandardPence}
+                railcardPence={fare.fares.peakRailcardEstPence}
+                showRailcard={scheme.railcardEstimates}
+                skeleton={skeleton}
               />
-            ) : null}
-          </div>
-        </StationDetailsSubsection>
+            </StationDetailsSubsection>
 
-        <StationDetailsSubsection title="Off-Peak">
-          <div className="modal-details-grid modal-facilities-grid">
-            <StationDetailField
-              label="Standard single"
-              value={formatDpaygPence(fare.fares.offPeakStandardPence)}
-            />
-            {scheme.railcardEstimates ? (
-              <StationDetailField
-                label="Railcard"
-                value={formatDpaygPence(fare.fares.offPeakRailcardEstPence)}
+            <StationDetailsSubsection title="Off-Peak" skeleton={skeleton}>
+              <StandardFareFields
+                standardPence={fare.fares.offPeakStandardPence}
+                railcardPence={fare.fares.offPeakRailcardEstPence}
+                showRailcard={scheme.railcardEstimates}
+                skeleton={skeleton}
               />
-            ) : null}
-          </div>
-        </StationDetailsSubsection>
+            </StationDetailsSubsection>
+          </>
+        )}
 
-        <TrialInfoSection scheme={scheme} />
+        <TrialInfoSection scheme={scheme} areaKind={areaKind} skeleton={skeleton} />
       </div>
     </TicketFareCard>
   )

@@ -9,6 +9,10 @@ export type DPAYGOperatorSelection = 'fixed' | 'single_choice'
 export type DPAYGStation = {
   crs: string
   name: string
+  /** PAYG fare zone when the catalogue provides one (TfW, London, Oyster). */
+  zone?: string
+  /** National Rail CRS when the matrix key is a Naptan / ATCO id. */
+  displayCrs?: string
 }
 
 export type DPAYGCap = {
@@ -55,6 +59,8 @@ export type DPAYGFare = {
   originName: string
   destName: string
   fares: DPAYGFareAmounts
+  /** False when the catalogue only publishes a single (not peak/off-peak). */
+  hasOffPeak?: boolean
 }
 
 /** Firestore write payload for a scheme (no document id). */

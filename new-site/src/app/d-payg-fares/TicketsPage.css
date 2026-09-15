@@ -82,6 +82,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+.tickets-station-suggestion__zone {
+  flex: 0 0 auto;
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
 .tickets-toolbar-error {
   margin: 0;
   color: var(--text-primary);
@@ -133,10 +139,53 @@
 }
 
 .tickets-empty-state__meta .modal-details-grid,
-.tickets-trial-meta .modal-details-grid {
-  grid-template-columns: repeat(2, minmax(0, 10rem));
-  gap: var(--space-lg);
-  max-width: 22rem;
+.tickets-trial-meta .modal-details-grid,
+.tickets-page .station-details-subsection .tickets-fare-amounts.modal-details-grid {
+  grid-template-columns: repeat(2, max-content);
+  column-gap: var(--space-2xl);
+  row-gap: var(--space-md);
+  width: max-content;
+  max-width: 100%;
+}
+
+.tickets-fares-table-panel {
+  max-width: 40rem;
+}
+
+.tickets-page .tickets-fares-table .stations-table__row,
+.tickets-page .tickets-fares-table .stations-table__sort-button {
+  cursor: default;
+}
+
+.tickets-page .tickets-fares-table .stations-table__sort-button:hover {
+  color: inherit;
+  box-shadow: none;
+}
+
+.tickets-fares-table__row--match > td {
+  box-shadow: inset 3px 0 0 var(--accent-base);
+}
+
+@media (hover: hover) {
+  .tickets-page .tickets-fares-table tbody .tickets-fares-table__row--match:hover > td,
+  .tickets-page .tickets-fares-table tbody .tickets-fares-table__row--match:focus-within > td {
+    box-shadow: inset 3px 0 0 var(--accent-base), inset 0 0 0 9999px var(--bg-hover);
+  }
+}
+
+.tickets-cap-note {
+  margin: 0.5rem 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.tickets-results-zones {
+  margin: 0.15rem 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .tickets-main .station-section-title--page-heading {
@@ -332,8 +381,96 @@
     width: calc(100% + 8px);
     box-sizing: border-box;
   }
+}
 
-  .tickets-page .station-details-main .station-details-card.modal-content {
-    min-height: 100%;
+.tickets-lookup-page .tickets-lookup-card {
+  flex: 1 1 auto;
+  min-height: 100%;
+}
+
+.tickets-lookup-search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  min-width: 0;
+}
+
+.tickets-lookup-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  min-width: 0;
+  align-items: stretch;
+}
+
+.tickets-lookup-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  min-width: 0;
+}
+
+.tickets-lookup-fares,
+.tickets-lookup-caps {
+  min-width: 0;
+}
+
+.tickets-lookup-caps:empty {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .tickets-lookup-body {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: var(--space-4xl, 3rem);
   }
+
+  .tickets-lookup-main,
+  .tickets-lookup-fares {
+    flex: 0 1 28rem;
+    max-width: 28rem;
+    width: 100%;
+  }
+
+  .tickets-lookup-caps {
+    flex: 0 1 32rem;
+    max-width: 32rem;
+    width: 100%;
+  }
+}
+
+.tickets-search-form {
+  max-width: 28rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.tickets-lookup-oyster-tabs {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.tickets-caps-panel {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.tickets-caps-simple {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.tickets-lookup-card .tickets-fares-table-panel {
+  margin-top: 0;
+}
+
+.tickets-lookup-card .modal-section + .modal-section,
+.tickets-lookup-search .modal-section {
+  margin: 0;
 }

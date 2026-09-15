@@ -2,7 +2,9 @@ import { getFirestore, type Firestore } from 'firebase/firestore'
 
 import { ensureFirebaseAppCheck, getFirebaseApp, initializeFirebase } from './firebase'
 
-/** Named Firestore database used by D-PAYG schemes/fares (and iOS tickets). */
+/** Named Firestore database historically used by D-PAYG and iOS tickets.
+ * Public reads now come from Storage (`ticket-catalogs/`); writes still use this DB.
+ */
 export const TICKETS_FIRESTORE_DATABASE_ID = 'railstatisticstickets'
 
 let ticketsDb: Firestore | null = null

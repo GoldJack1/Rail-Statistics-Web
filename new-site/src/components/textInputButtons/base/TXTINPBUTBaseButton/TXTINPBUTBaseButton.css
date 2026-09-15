@@ -35,6 +35,40 @@ label.rs-button.rs-input {
   appearance: none;
 }
 
+.rs-input__field-slot {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.rs-input__field-slot .rs-input__field {
+  width: 100%;
+}
+
+.rs-input--skeleton .rs-input__field {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.rs-input--skeleton .rs-input__field::placeholder {
+  color: transparent;
+  opacity: 0;
+}
+
+.rs-input__field-skeleton {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  overflow: hidden;
+}
+
 .rs-input__field::placeholder {
   color: currentColor;
   opacity: 0.55;

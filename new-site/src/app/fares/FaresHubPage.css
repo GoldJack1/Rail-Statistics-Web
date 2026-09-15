@@ -1,0 +1,24 @@
+.fares-hub-page .fares-hub-section {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.fares-hub-page .account-card.fares-hub-main {
+  flex: 1 1 auto;
+  min-height: 100%;
+}
+
+.fares-hub-network-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 350px), 1fr));
+  gap: var(--space-lg);
+  width: 100%;
+  min-width: 0;
+  align-content: start;
+  align-items: start;
+}
+
+.fares-hub-network-grid .rs-text-card {
+  width: 100%;
+  min-width: 0;
+}

@@ -7,7 +7,7 @@ rules_version = '2';
  * - Public read
  * - Writes only for station editors (`rs_station_editor` claim or master email)
  *
- * D-PAYG: `dpayg_schemes`, `dpayg_fares`
+ * D-PAYG: `dpayg_schemes`, `dpayg_fares` (admin writes; public site reads Storage)
  *
  * Keep `defaultOwnerEmail()` in sync with
  * src/utils/masterPublishPolicy.ts DEFAULT_MASTER_PUBLISH_EMAIL

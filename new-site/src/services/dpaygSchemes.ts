@@ -1,12 +1,7 @@
 import {
-  collection,
   deleteDoc,
   doc,
-  getDoc,
-  getDocs,
-  query,
   setDoc,
-  where,
   writeBatch,
   type DocumentData,
   type Firestore
@@ -26,6 +21,7 @@ import {
   type DPAYGStation
 } from '@/types/dpayg'
 
+import { fetchTicketCatalogNdjson, invalidateTicketCatalogCache } from './ticketCatalogCdn'
 import { getTicketsFirestore } from './ticketFirestore'
 
 const BATCH_SIZE = 400
@@ -197,8 +193,8 @@ export type DPAYGSchemeListItem = DPAYGScheme & { fareCount: number }
 
 export type ListSchemesOptions = {
   /**
-   * When true, also download every `dpayg_fares` doc to compute per-scheme counts.
-   * Admin list needs this; the public fare lookup does not (and it dominates cold load time).
+   * When true, also load every `dpayg_fares` row to compute per-scheme counts.
+   * Admin list needs this; the public fare lookup does not.
    */
   includeFareCounts?: boolean
 }
@@ -206,10 +202,52 @@ export type ListSchemesOptions = {
 /** Session cache for the lightweight schemes list (no fare scan). */
 let schemesListCache: DPAYGSchemeListItem[] | null = null
 let schemesListInflight: Promise<DPAYGSchemeListItem[]> | null = null
+let faresCatalogCache: DPAYGFare[] | null = null
+let faresCatalogInflight: Promise<DPAYGFare[]> | null = null
+
+const sortFares = (fares: DPAYGFare[]): DPAYGFare[] => {
+  fares.sort((a, b) => {
+    const originCmp =
+      a.originCrs.localeCompare(b.originCrs) || a.originName.localeCompare(b.originName)
+    if (originCmp !== 0) return originCmp
+    return a.destCrs.localeCompare(b.destCrs) || a.destName.localeCompare(b.destName)
+  })
+  return fares
+}
+
+const loadSchemesFromCatalog = async (): Promise<DPAYGScheme[]> => {
+  const docs = await fetchTicketCatalogNdjson(DPAYG_SCHEMES_COLLECTION)
+  return docs
+    .map((row) => mapSchemeDoc(row.id, row.data))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.shortName.localeCompare(b.shortName))
+}
+
+const loadFaresFromCatalog = async (): Promise<DPAYGFare[]> => {
+  if (faresCatalogCache) return faresCatalogCache
+  if (faresCatalogInflight) return faresCatalogInflight
+
+  faresCatalogInflight = (async () => {
+    const docs = await fetchTicketCatalogNdjson(DPAYG_FARES_COLLECTION)
+    const fares = docs
+      .map((row) => mapFareDoc(row.id, row.data))
+      .filter((f): f is DPAYGFare => f != null)
+    faresCatalogCache = sortFares(fares)
+    return faresCatalogCache
+  })()
+
+  try {
+    return await faresCatalogInflight
+  } finally {
+    faresCatalogInflight = null
+  }
+}
 
 export const invalidateSchemesListCache = (): void => {
   schemesListCache = null
   schemesListInflight = null
+  faresCatalogCache = null
+  faresCatalogInflight = null
+  invalidateTicketCatalogCache()
 }
 
 export const listSchemes = async (
@@ -223,26 +261,21 @@ export const listSchemes = async (
   }
 
   const load = (async (): Promise<DPAYGSchemeListItem[]> => {
-    const db = await ensureTicketsDb()
-    const schemesSnap = await getDocs(collection(db, DPAYG_SCHEMES_COLLECTION))
+    const schemes = await loadSchemesFromCatalog()
 
     let fareCounts = new Map<string, number>()
     if (includeFareCounts) {
-      const faresSnap = await getDocs(collection(db, DPAYG_FARES_COLLECTION))
+      const fares = await loadFaresFromCatalog()
       fareCounts = new Map<string, number>()
-      for (const fareDoc of faresSnap.docs) {
-        const schemeId = asString(fareDoc.data().schemeId).trim()
-        if (!schemeId) continue
-        fareCounts.set(schemeId, (fareCounts.get(schemeId) ?? 0) + 1)
+      for (const fare of fares) {
+        fareCounts.set(fare.schemeId, (fareCounts.get(fare.schemeId) ?? 0) + 1)
       }
     }
 
-    return schemesSnap.docs
-      .map((snap) => {
-        const scheme = mapSchemeDoc(snap.id, snap.data())
-        return { ...scheme, fareCount: fareCounts.get(scheme.id) ?? 0 }
-      })
-      .sort((a, b) => a.sortOrder - b.sortOrder || a.shortName.localeCompare(b.shortName))
+    return schemes.map((scheme) => ({
+      ...scheme,
+      fareCount: fareCounts.get(scheme.id) ?? 0,
+    }))
   })()
 
   if (!includeFareCounts) {
@@ -260,10 +293,8 @@ export const listSchemes = async (
 }
 
 export const getScheme = async (schemeId: string): Promise<DPAYGScheme | null> => {
-  const db = await ensureTicketsDb()
-  const snap = await getDoc(doc(db, DPAYG_SCHEMES_COLLECTION, schemeId))
-  if (!snap.exists()) return null
-  return mapSchemeDoc(snap.id, snap.data())
+  const schemes = await loadSchemesFromCatalog()
+  return schemes.find((scheme) => scheme.id === schemeId) ?? null
 }
 
 export const getFareForOd = async (
@@ -271,44 +302,23 @@ export const getFareForOd = async (
   originCrs: string,
   destCrs: string
 ): Promise<DPAYGFare | null> => {
-  const db = await ensureTicketsDb()
   const origin = originCrs.trim().toUpperCase()
   const dest = destCrs.trim().toUpperCase()
   const fareId = dpaygFareDocId(schemeId, origin, dest)
-  const snap = await getDoc(doc(db, DPAYG_FARES_COLLECTION, fareId))
-  if (snap.exists()) return mapFareDoc(snap.id, snap.data())
-
-  // Fallback if a row was stored under a non-canonical doc id but matching fields.
-  try {
-    const q = query(
-      collection(db, DPAYG_FARES_COLLECTION),
-      where('schemeId', '==', schemeId),
-      where('originCrs', '==', origin),
-      where('destCrs', '==', dest)
-    )
-    const byFields = await getDocs(q)
-    const first = byFields.docs[0]
-    if (!first) return null
-    return mapFareDoc(first.id, first.data())
-  } catch {
-    return null
-  }
+  const fares = await loadFaresFromCatalog()
+  return (
+    fares.find((fare) => fare.id === fareId) ??
+    fares.find(
+      (fare) =>
+        fare.schemeId === schemeId && fare.originCrs === origin && fare.destCrs === dest
+    ) ??
+    null
+  )
 }
 
 export const listFares = async (schemeId: string): Promise<DPAYGFare[]> => {
-  const db = await ensureTicketsDb()
-  const q = query(collection(db, DPAYG_FARES_COLLECTION), where('schemeId', '==', schemeId))
-  const snap = await getDocs(q)
-  const fares = snap.docs
-    .map((d) => mapFareDoc(d.id, d.data()))
-    .filter((f): f is DPAYGFare => f != null)
-
-  fares.sort((a, b) => {
-    const originCmp = a.originCrs.localeCompare(b.originCrs) || a.originName.localeCompare(b.originName)
-    if (originCmp !== 0) return originCmp
-    return a.destCrs.localeCompare(b.destCrs) || a.destName.localeCompare(b.destName)
-  })
-  return fares
+  const fares = await loadFaresFromCatalog()
+  return fares.filter((fare) => fare.schemeId === schemeId)
 }
 
 export type PublishSchemeAndFaresInput = {

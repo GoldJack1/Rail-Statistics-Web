@@ -3,6 +3,9 @@
 import React from 'react'
 import type { Icon } from '@phosphor-icons/react'
 
+import { Skeleton } from '@/components/misc/Skeleton/Skeleton'
+import { TextSkeletonLine } from '@/components/misc/Skeleton/TextSkeletonLine'
+
 interface StationSectionTitleProps {
   title: string
   icon?: Icon | null
@@ -12,6 +15,7 @@ interface StationSectionTitleProps {
    * already shows the selected page title.
    */
   pageHeading?: boolean
+  skeleton?: boolean
 }
 
 export function StationSectionTitle({
@@ -19,6 +23,7 @@ export function StationSectionTitle({
   icon: IconComponent,
   className,
   pageHeading = false,
+  skeleton = false,
 }: StationSectionTitleProps) {
   return (
     <h3
@@ -32,9 +37,15 @@ export function StationSectionTitle({
         .join(' ')}
     >
       {IconComponent ? (
-        <IconComponent className="station-section-title__icon" size={20} weight="regular" aria-hidden />
+        skeleton ? (
+          <Skeleton className="station-details-nav-skeleton-icon" style={{ width: 20, height: 20 }} />
+        ) : (
+          <IconComponent className="station-section-title__icon" size={20} weight="regular" aria-hidden />
+        )
       ) : null}
-      <span className="station-section-title__text">{title}</span>
+      <span className="station-section-title__text">
+        {skeleton ? <TextSkeletonLine>{title}</TextSkeletonLine> : title}
+      </span>
     </h3>
   )
 }

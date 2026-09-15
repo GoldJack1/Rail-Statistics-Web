@@ -14,6 +14,12 @@ export default function AppMain({ children }: { children: React.ReactNode }) {
     pathname.startsWith('/stations/') ||
     pathname === '/d-payg-fares' ||
     pathname.startsWith('/d-payg-fares/') ||
+    pathname === '/fares' ||
+    pathname.startsWith('/fares/') ||
+    pathname === '/contactless-fares' ||
+    pathname.startsWith('/contactless-fares/') ||
+    pathname === '/smartcard-fares' ||
+    pathname.startsWith('/smartcard-fares/') ||
     pathname === '/account' ||
     pathname.startsWith('/account/') ||
     pathname === '/leaderboards' ||
