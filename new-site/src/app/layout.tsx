@@ -12,6 +12,7 @@ import AppMain from '@/components/misc/AppMain'
 import ServiceWorkerRegistration from '@/components/misc/ServiceWorkerRegistration'
 import FirebaseAnalytics from '@/components/misc/FirebaseAnalytics'
 import AdSenseScript from '@/components/ads/AdSenseScript'
+import { ADSENSE_CLIENT } from '@/components/ads/adsenseConfig'
 import { CONSENT_MODE_DEFAULTS_SCRIPT } from '@/components/ads/consentModeDefaults'
 import { SITE_DESCRIPTION, SITE_KEYWORDS, SITE_NAME, SITE_URL } from '@/lib/site'
 import './globals.css'
@@ -70,6 +71,7 @@ export const metadata: Metadata = {
   },
   other: {
     'mobile-web-app-capable': 'yes',
+    'google-adsense-account': ADSENSE_CLIENT,
   },
 }
 
@@ -123,6 +125,8 @@ export default function RootLayout({
         {/* Consent Mode v2 defaults before AdSense / Analytics tags */}
         {/* eslint-disable-next-line @next/next/no-sync-scripts */}
         <script dangerouslySetInnerHTML={{ __html: CONSENT_MODE_DEFAULTS_SCRIPT }} />
+        {/* Native head tag so Safari does not treat AdSense as a late-injected tracker */}
+        <AdSenseScript />
       </head>
       <body suppressHydrationWarning>
         <ThemeProvider>
@@ -131,7 +135,6 @@ export default function RootLayout({
             <ConsumerAuthProvider>
               <StationCollectionProvider>
                 <ServiceWorkerRegistration />
-                <AdSenseScript />
                 <div className="app">
                   <Header />
                   <AppMain>

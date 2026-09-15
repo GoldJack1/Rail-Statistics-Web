@@ -1,23 +1,21 @@
-'use client'
-
-import Script from 'next/script'
 import { ADSENSE_CLIENT, isAdSenseEnabled } from './adsenseConfig'
 
 /**
- * Loads the AdSense library once for the app.
- * Individual units call `(adsbygoogle = window.adsbygoogle || []).push({})`.
- * No-op unless `NEXT_PUBLIC_ADSENSE_ENABLED=true`.
+ * Parser-inserted AdSense loader for the document head.
+ *
+ * Must stay a server component with a native <script> — `next/script` injects
+ * after hydration and adds `data-nscript`, which Safari’s tracker blocking
+ * treats as a late third-party tracker instead of the publisher tag.
+ * Consent Mode defaults in layout must remain above this tag.
  */
 export default function AdSenseScript() {
   if (!isAdSenseEnabled) return null
 
   return (
-    <Script
-      id="adsense-loader"
+    <script
       async
       src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`}
       crossOrigin="anonymous"
-      strategy="afterInteractive"
     />
   )
 }
