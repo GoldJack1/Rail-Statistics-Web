@@ -3,6 +3,12 @@
   border-top: 0;
 }
 
+.fares-hub-page .account-main.station-details-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .fares-hub-page .account-card.fares-hub-main {
   flex: 1 1 auto;
   min-height: 100%;

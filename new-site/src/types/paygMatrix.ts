@@ -16,6 +16,8 @@ export type PaygMatrixAreaDef = {
   zoneCapsCollectionId?: string
   hideStationCodes?: boolean
   oysterFareTypes?: OysterFareTypeDef[]
+  /** Hidden from public hub cards and lookup URLs until footer Admin is on. */
+  adminOnly?: boolean
 }
 
 export const CONTACTLESS_PAYG_AREAS: PaygMatrixAreaDef[] = [
@@ -45,6 +47,7 @@ export const CONTACTLESS_PAYG_AREAS: PaygMatrixAreaDef[] = [
     operatorBrand: 'Transport for London',
     collectionId: 'contactless_LDN+SE',
     hideStationCodes: true,
+    adminOnly: true,
   },
 ]
 
@@ -73,6 +76,7 @@ export const SMARTCARD_PAYG_AREAS: PaygMatrixAreaDef[] = [
     operatorBrand: 'Transport for London',
     collectionId: 'Oyster1-9_TFL_Adult',
     hideStationCodes: true,
+    adminOnly: true,
     oysterFareTypes: [
       { id: 'adult', label: 'Adult', collectionId: 'Oyster1-9_TFL_Adult' },
       { id: 'age-5-10', label: '5–10', collectionId: 'Oyster1-9_TFL_Age5To10' },
@@ -95,8 +99,26 @@ export function paygAreasForFamily(family: PaygMatrixFamily): PaygMatrixAreaDef[
   return family === 'contactless' ? CONTACTLESS_PAYG_AREAS : SMARTCARD_PAYG_AREAS
 }
 
+export function isAdminOnlyPaygArea(area: Pick<PaygMatrixAreaDef, 'id' | 'adminOnly'>): boolean {
+  return area.adminOnly === true
+}
+
+export function visiblePaygAreas(
+  areas: readonly PaygMatrixAreaDef[],
+  isAdminMode: boolean
+): PaygMatrixAreaDef[] {
+  if (isAdminMode) return [...areas]
+  return areas.filter((area) => !isAdminOnlyPaygArea(area))
+}
+
 export function findPaygAreaDef(areaId: string): PaygMatrixAreaDef | undefined {
   return [...CONTACTLESS_PAYG_AREAS, ...SMARTCARD_PAYG_AREAS].find((area) => area.id === areaId)
+}
+
+export function findPaygAreaDefBySlug(slug: string): PaygMatrixAreaDef | undefined {
+  const needle = slug.trim().toLowerCase()
+  if (!needle) return undefined
+  return [...CONTACTLESS_PAYG_AREAS, ...SMARTCARD_PAYG_AREAS].find((area) => area.slug === needle)
 }
 
 export function isAllowedPaygCollectionId(collectionId: string): boolean {

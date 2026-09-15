@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { CreditCard, IdentificationCard, Train } from '@phosphor-icons/react'
 
 import { TextCard } from '@/components/cards'
+import AdSlot from '@/components/ads/AdSlot'
 import {
   AccountContentShell,
 } from '@/components/misc/AccountPageShell/AccountPageShell'
@@ -13,7 +14,8 @@ import {
   type AccountSection,
 } from '@/components/misc/AccountSectionNav/AccountSectionNav'
 import { listSchemes, type DPAYGSchemeListItem } from '@/services/dpaygSchemes'
-import { CONTACTLESS_PAYG_AREAS, SMARTCARD_PAYG_AREAS } from '@/types/paygMatrix'
+import { CONTACTLESS_PAYG_AREAS, SMARTCARD_PAYG_AREAS, visiblePaygAreas } from '@/types/paygMatrix'
+import { useStationAdminMode } from '@/hooks/useStationAdminMode'
 import { paramAsString } from '@/utils/nextParams'
 import {
   buildFaresHubPath,
@@ -50,7 +52,7 @@ const SECTION_META: Record<
   smartcards: {
     label: 'Smartcards',
     title: 'Smartcard networks',
-    copy: 'Choose a smartcard PAYG area, including Oyster 1–9.',
+    copy: 'Choose a smartcard PAYG area to look up singles and caps.',
     icon: IdentificationCard,
   },
   'd-payg': {
@@ -61,19 +63,17 @@ const SECTION_META: Record<
   },
 }
 
-const CONTACTLESS_CARDS: HubNetworkCard[] = CONTACTLESS_PAYG_AREAS.map((area) => ({
-  id: area.id,
-  title: area.shortName,
-  description: area.name,
-  href: `/contactless-fares/${area.slug}`,
-}))
-
-const SMARTCARD_CARDS: HubNetworkCard[] = SMARTCARD_PAYG_AREAS.map((area) => ({
-  id: area.id,
-  title: area.shortName,
-  description: area.name,
-  href: `/smartcard-fares/${area.slug}`,
-}))
+function hubCardsForAreas(
+  areas: ReturnType<typeof visiblePaygAreas>,
+  basePath: '/contactless-fares' | '/smartcard-fares'
+): HubNetworkCard[] {
+  return areas.map((area) => ({
+    id: area.id,
+    title: area.shortName,
+    description: area.name,
+    href: `${basePath}/${area.slug}`,
+  }))
+}
 
 function dpaygCards(rows: DPAYGSchemeListItem[]): HubNetworkCard[] {
   return rows.map((scheme) => {
@@ -94,6 +94,7 @@ function dpaygCards(rows: DPAYGSchemeListItem[]): HubNetworkCard[] {
 
 const FaresHubPageClient: React.FC = () => {
   const router = useRouter()
+  const isAdminMode = useStationAdminMode()
   const sectionParam = paramAsString(useParams().section)
   const section: FaresHubSectionId = isFaresHubSectionId(sectionParam)
     ? sectionParam
@@ -143,13 +144,21 @@ const FaresHubPageClient: React.FC = () => {
   )
 
   const cards = useMemo(() => {
-    if (section === 'contactless') return CONTACTLESS_CARDS
-    if (section === 'smartcards') return SMARTCARD_CARDS
+    if (section === 'contactless') {
+      return hubCardsForAreas(visiblePaygAreas(CONTACTLESS_PAYG_AREAS, isAdminMode), '/contactless-fares')
+    }
+    if (section === 'smartcards') {
+      return hubCardsForAreas(visiblePaygAreas(SMARTCARD_PAYG_AREAS, isAdminMode), '/smartcard-fares')
+    }
     return dpaygCards(dpaygRows)
-  }, [dpaygRows, section])
+  }, [dpaygRows, isAdminMode, section])
 
   return (
-    <AccountContentShell title="Fares" detailsLayout>
+    <AccountContentShell
+      title="Fares"
+      detailsLayout
+      trailingContent={<AdSlot variant="banner" />}
+    >
       <div className="account-page fares-hub-page">
         <div
           className="account-layout station-details-layout"
@@ -166,6 +175,7 @@ const FaresHubPageClient: React.FC = () => {
           />
 
           <main className="account-main station-details-main">
+            <AdSlot variant="section" className="station-details-ad-slot--section" />
             <div className="account-card fares-hub-main">
               <section className="rs-account-section fares-hub-section" aria-labelledby="fares-hub-title">
                 <h2 id="fares-hub-title" className="rs-account-section__title">

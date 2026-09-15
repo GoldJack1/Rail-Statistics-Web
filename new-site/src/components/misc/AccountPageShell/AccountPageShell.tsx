@@ -39,6 +39,7 @@ export function AccountContentShell({
   title,
   subtitle,
   actionButton,
+  trailingContent,
   children,
   narrow = true,
   panel = false,
@@ -47,6 +48,8 @@ export function AccountContentShell({
   title: ReactNode
   subtitle?: ReactNode
   actionButton?: ActionButton
+  /** Top-right slot (e.g. desktop banner ad). */
+  trailingContent?: ReactNode
   children: ReactNode
   /** Constrain body to a readable column (default). */
   narrow?: boolean
@@ -69,6 +72,7 @@ export function AccountContentShell({
         title={title}
         subtitle={subtitle}
         actionButton={actionButton}
+        trailingContent={trailingContent}
       />
       {detailsLayout ? (
         children

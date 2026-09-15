@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, usePathname, useRouter } from 'next/navigation'
 import { MagnifyingGlass, MapTrifold } from '@phosphor-icons/react'
 
+import AdSlot from '@/components/ads/AdSlot'
 import DpaygTrialTabGroup from '@/components/tickets/DpaygTrialTabGroup'
 import PaygAreaStationsMap from '@/components/tickets/PaygAreaStationsMap'
 import TicketFareResults, { TicketFareCapsInline } from '@/components/tickets/TicketFareResults'
@@ -19,6 +20,8 @@ import {
 import type { DPAYGFare, DPAYGScheme, DPAYGStation } from '@/types/dpayg'
 import type { PaygZoneCapBand } from '@/services/paygMatrixCatalog'
 import type { OysterFareTypeDef } from '@/types/paygMatrix'
+import { findPaygAreaDefBySlug } from '@/types/paygMatrix'
+import { useStationAdminMode } from '@/hooks/useStationAdminMode'
 import {
   buildDpaygOdSlug,
   buildPaygFaresPath,
@@ -108,6 +111,7 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
   const router = useRouter()
   const pathname = usePathname() ?? basePath
   const resolvedHubPath = hubPath ?? hubPathForSearchBase(basePath)
+  const isAdminMode = useStationAdminMode()
   const params = useParams()
   const slugParts = useMemo(() => {
     const raw = params.slug
@@ -116,6 +120,8 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
     return [] as string[]
   }, [params.slug])
   const areaSlug = slugParts[0] ?? ''
+  const publicBlockedArea =
+    !isAdminMode && findPaygAreaDefBySlug(areaSlug)?.adminOnly === true
   const secondSlug = slugParts[1] ?? ''
   const fareTypeSlug =
     secondSlug && !parseDpaygOdSlug(secondSlug) ? secondSlug : ''
@@ -185,6 +191,11 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
     setSearchError(null)
     setLoadingFare(false)
   }, [])
+
+  useEffect(() => {
+    if (!publicBlockedArea) return
+    router.replace(resolvedHubPath)
+  }, [publicBlockedArea, resolvedHubPath, router])
 
   useEffect(() => {
     void (async () => {
@@ -497,6 +508,8 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
     []
   )
 
+  if (publicBlockedArea) return null
+
   if (!loadingSchemes && schemes.length > 0 && !findSchemeByAreaSlug(schemes, areaSlug)) {
     return null
   }
@@ -536,6 +549,7 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
         subtitle
       )}
       actionButton={{ to: resolvedHubPath, label: 'Back' }}
+      trailingContent={<AdSlot variant="banner" />}
       detailsLayout
     >
       <div className="account-page tickets-page tickets-lookup-page">
@@ -555,6 +569,7 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
           />
 
           <main className="account-main station-details-main">
+            <AdSlot variant="section" className="station-details-ad-slot--section" />
             <div
               className={[
                 'account-card tickets-lookup-card',

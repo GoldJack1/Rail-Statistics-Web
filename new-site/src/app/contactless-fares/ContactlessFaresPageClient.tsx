@@ -3,16 +3,21 @@
 import React, { useCallback } from 'react'
 
 import PaygFareLookupClient from '@/components/tickets/PaygFareLookupClient'
+import { useStationAdminMode } from '@/hooks/useStationAdminMode'
 import {
   getPaygMatrixFare,
   hydratePaygMatrixArea,
   listPaygMatrixAreas,
 } from '@/services/paygMatrixCatalog'
-import { CONTACTLESS_PAYG_AREAS } from '@/types/paygMatrix'
-
-const loadAreas = async () => listPaygMatrixAreas(CONTACTLESS_PAYG_AREAS)
+import { CONTACTLESS_PAYG_AREAS, visiblePaygAreas } from '@/types/paygMatrix'
 
 const ContactlessFaresPageClient: React.FC = () => {
+  const isAdminMode = useStationAdminMode()
+  const loadAreas = useCallback(
+    () => listPaygMatrixAreas(visiblePaygAreas(CONTACTLESS_PAYG_AREAS, isAdminMode)),
+    [isAdminMode]
+  )
+
   const hydrateArea = useCallback(
     async (area: { id: string }, collectionId?: string) => {
       const def = CONTACTLESS_PAYG_AREAS.find((row) => row.id === area.id)
