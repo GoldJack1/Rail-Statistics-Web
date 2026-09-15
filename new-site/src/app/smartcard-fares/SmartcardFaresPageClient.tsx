@@ -14,7 +14,7 @@ import { SMARTCARD_PAYG_AREAS, visiblePaygAreas } from '@/types/paygMatrix'
 const SmartcardFaresPageClient: React.FC = () => {
   const isAdminMode = useStationAdminMode()
   const loadAreas = useCallback(
-    () => listPaygMatrixAreas(visiblePaygAreas(SMARTCARD_PAYG_AREAS, isAdminMode)),
+    async () => listPaygMatrixAreas(visiblePaygAreas(SMARTCARD_PAYG_AREAS, isAdminMode)),
     [isAdminMode]
   )
 

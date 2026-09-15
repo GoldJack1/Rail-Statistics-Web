@@ -407,6 +407,10 @@ function isMobileMapViewport(): boolean {
   return typeof window !== 'undefined' && window.matchMedia(MOBILE_MAP_MEDIA).matches
 }
 
+function bringLayerToFront(layer: L.CircleMarker | L.Marker) {
+  if (layer instanceof L.Path) layer.bringToFront()
+}
+
 function getMarkerRadii(isSelected: boolean, mobile: boolean) {
   return {
     visual: getMarkerVisualRadius(isSelected, mobile),
@@ -1173,9 +1177,9 @@ export function StationsOsmMap({
             }
           }
           if (isSelected && isLayerOnMap(existing.visual)) {
-            existing.visual.bringToFront()
+            bringLayerToFront(existing.visual)
             if (existing.hit !== existing.visual && isLayerOnMap(existing.hit)) {
-              existing.hit.bringToFront()
+              bringLayerToFront(existing.hit)
             }
             if (existing.kind === 'supertram-logo') {
               existing.visual.setZIndexOffset(1000)
@@ -1195,9 +1199,9 @@ export function StationsOsmMap({
       emphasizedStationIds.forEach((key) => {
         const marker = markersByIdRef.current.get(key)
         if (!marker || !isLayerOnMap(marker.visual)) return
-        marker.visual.bringToFront()
+        bringLayerToFront(marker.visual)
         if (marker.hit !== marker.visual && isLayerOnMap(marker.hit)) {
-          marker.hit.bringToFront()
+          bringLayerToFront(marker.hit)
         }
         if (marker.kind === 'supertram-logo') {
           marker.visual.setZIndexOffset(1000)

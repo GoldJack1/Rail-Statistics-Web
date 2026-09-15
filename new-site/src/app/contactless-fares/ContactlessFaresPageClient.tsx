@@ -14,7 +14,7 @@ import { CONTACTLESS_PAYG_AREAS, visiblePaygAreas } from '@/types/paygMatrix'
 const ContactlessFaresPageClient: React.FC = () => {
   const isAdminMode = useStationAdminMode()
   const loadAreas = useCallback(
-    () => listPaygMatrixAreas(visiblePaygAreas(CONTACTLESS_PAYG_AREAS, isAdminMode)),
+    async () => listPaygMatrixAreas(visiblePaygAreas(CONTACTLESS_PAYG_AREAS, isAdminMode)),
     [isAdminMode]
   )
 
