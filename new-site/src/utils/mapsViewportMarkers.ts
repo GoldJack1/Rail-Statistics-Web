@@ -38,6 +38,7 @@ export function getStationsForViewportMarkers(
   bounds: MapViewportBounds,
   options: {
     selectedStationId: string | null
+    keepStationIds?: ReadonlyArray<string | null | undefined>
     maxMarkers: number
     pad?: number
   }
@@ -48,15 +49,15 @@ export function getStationsForViewportMarkers(
     queryBounds.contains([station.latitude, station.longitude])
   )
 
-  if (options.selectedStationId) {
-    const selected = stations.find(
-      (station) => getStationMapKey(station) === options.selectedStationId
-    )
-    if (
-      selected &&
-      !inView.some((station) => getStationMapKey(station) === options.selectedStationId)
-    ) {
-      inView.unshift(selected)
+  const keepIds = [
+    options.selectedStationId,
+    ...(options.keepStationIds ?? []),
+  ].filter((id): id is string => Boolean(id))
+
+  for (const keepId of keepIds) {
+    const keep = stations.find((station) => getStationMapKey(station) === keepId)
+    if (keep && !inView.some((station) => getStationMapKey(station) === keepId)) {
+      inView.unshift(keep)
     }
   }
 

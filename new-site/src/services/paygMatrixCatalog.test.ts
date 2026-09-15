@@ -3,6 +3,7 @@ import {
   formatPaygZoneLabel,
   matchZoneCapBand,
   parseMatrixDestination,
+  parseZoneCapBands,
 } from '@/services/paygMatrixParse'
 
 describe('paygMatrixCatalog', () => {
@@ -71,6 +72,16 @@ describe('paygMatrixCatalog', () => {
     ]
     expect(matchZoneCapBand(bands, '7', '1', 920, 2760)?.id).toBe('zone-1-7')
     expect(matchZoneCapBand(bands, '7', '5')?.id).toBe('zone-2-7')
+    expect(matchZoneCapBand(bands, '6', '3')?.id).toBe('zone-2-7')
+  })
+
+  it('reads TfW cap rows from titles when minZone is missing', () => {
+    const parsed = parseZoneCapBands([
+      { type: 'Zone 1 - 7', dailyCapPence: 920, weeklyCapPence: 2760 },
+      { type: 'Zone 2 - 7', dailyCapPence: 850, weeklyCapPence: 2120 },
+    ])
+    expect(parsed[0]).toMatchObject({ minZone: 1, maxZone: 7 })
+    expect(parsed[1]).toMatchObject({ minZone: 2, maxZone: 7 })
   })
 })
 

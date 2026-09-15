@@ -2,11 +2,13 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, usePathname, useRouter } from 'next/navigation'
-import { MagnifyingGlass } from '@phosphor-icons/react'
+import { MagnifyingGlass, MapTrifold } from '@phosphor-icons/react'
 
 import DpaygTrialTabGroup from '@/components/tickets/DpaygTrialTabGroup'
+import PaygAreaStationsMap from '@/components/tickets/PaygAreaStationsMap'
 import TicketFareResults, { TicketFareCapsInline } from '@/components/tickets/TicketFareResults'
 import TicketsFareSearchForm from '@/components/tickets/TicketsFareSearchForm'
+import StationsDataBoundary from '@/contexts/StationsDataBoundary'
 import {
   AccountContentShell,
 } from '@/components/misc/AccountPageShell/AccountPageShell'
@@ -138,6 +140,7 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
   const [journeyDailyCapPence, setJourneyDailyCapPence] = useState<number | undefined>()
   const [journeyWeeklyCapPence, setJourneyWeeklyCapPence] = useState<number | undefined>()
   const [searched, setSearched] = useState(false)
+  const [sectionId, setSectionId] = useState<'search' | 'area-map'>('search')
   const [display, setDisplay] = useState<LookupDisplay>({
     scheme: null,
     oysterTypeId: '',
@@ -151,6 +154,10 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
   const appliedOdPathRef = useRef<string | null>(null)
   const searchGenerationRef = useRef(0)
   const hydratedCollectionRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    void import('@/components/maps/StationsOsmMap')
+  }, [])
 
   const syncPath = useCallback(
     (
@@ -267,7 +274,7 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
       setScheme(fromList)
       setLoadingScheme(false)
       setLoadError(null)
-      hydratedCollectionRef.current = collectionId
+      hydratedCollectionRef.current = collectionId ?? null
       return
     }
 
@@ -277,7 +284,7 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
       try {
         const hydrated = await hydrateArea(fromList, collectionId)
         if (cancelled) return
-        hydratedCollectionRef.current = collectionId
+        hydratedCollectionRef.current = collectionId ?? null
         setScheme(hydrated)
         setLoadError(null)
         if (fromList.oysterFareTypes?.length && oysterTypeId) {
@@ -483,7 +490,10 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
   )
 
   const sections = useMemo(
-    (): AccountSection[] => [{ id: 'search', label: 'Search Fares', icon: MagnifyingGlass }],
+    (): AccountSection[] => [
+      { id: 'search', label: 'Search Fares', icon: MagnifyingGlass },
+      { id: 'area-map', label: 'Area Map', icon: MapTrifold },
+    ],
     []
   )
 
@@ -537,13 +547,43 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
         >
           <AccountSectionNav
             sections={sections}
-            activeSectionId="search"
-            onSelect={() => {}}
+            activeSectionId={sectionId}
+            onSelect={(nextId) => {
+              if (nextId === 'search' || nextId === 'area-map') setSectionId(nextId)
+            }}
             ariaLabel="Fare sections"
           />
 
           <main className="account-main station-details-main">
-            <div className="account-card tickets-lookup-card">
+            <div
+              className={[
+                'account-card tickets-lookup-card',
+                sectionId === 'area-map' ? 'tickets-lookup-card--map' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              {sectionId === 'area-map' ? (
+                <StationsDataBoundary>
+                  <PaygAreaStationsMap
+                    paygStations={
+                      (display.scheme ?? areaFromList ?? scheme)?.stations ?? []
+                    }
+                    areaName={
+                      (display.scheme ?? areaFromList ?? scheme)?.shortName ||
+                      (display.scheme ?? areaFromList ?? scheme)?.name ||
+                      title
+                    }
+                    areaId={
+                      (display.scheme ?? areaFromList ?? scheme)?.id ??
+                      (display.scheme ?? areaFromList ?? scheme)?.collectionId
+                    }
+                    origin={display.origin}
+                    dest={display.dest}
+                    searched={display.searched}
+                  />
+                </StationsDataBoundary>
+              ) : (
               <div
                 className="tickets-lookup-search"
                 aria-busy={panelBusy || undefined}
@@ -577,6 +617,11 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
                           showStationCodes={display.scheme?.hideStationCodes !== true}
                           framed={false}
                           skeleton={panelBusy}
+                          onViewRouteOnMap={
+                            display.searched && display.origin && display.dest
+                              ? () => setSectionId('area-map')
+                              : undefined
+                          }
                         />
                       </div>
                     </div>
@@ -584,8 +629,6 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
                       <TicketFareCapsInline
                         scheme={display.scheme}
                         zoneCapBands={display.scheme?.zoneCapBands}
-                        originZone={display.origin?.zone}
-                        destZone={display.dest?.zone}
                         journeyDailyCapPence={display.journeyDailyCapPence}
                         journeyWeeklyCapPence={display.journeyWeeklyCapPence}
                         skeleton={panelBusy}
@@ -593,6 +636,7 @@ const PaygFareLookupClient: React.FC<PaygFareLookupClientProps> = ({
                     </div>
                   </div>
               </div>
+              )}
             </div>
           </main>
         </div>

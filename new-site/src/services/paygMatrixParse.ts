@@ -78,8 +78,17 @@ export function parsePaygZoneNumbers(raw?: string | null): number[] {
   if (!text || text.toUpperCase() === 'NA') return []
   return text
     .split(/[+/,–—\-]/)
-    .map((part) => Number.parseInt(part.trim(), 10))
+    .map((part) => Number.parseInt(part.replace(/^[^\d-]*/, '').trim(), 10))
     .filter((n) => Number.isFinite(n) && n > 0)
+}
+
+export function zoneRangeFromCapLabel(raw?: string | null): { minZone: number; maxZone: number } | null {
+  const numbers = parsePaygZoneNumbers((raw ?? '').replace(/zones?/gi, ' '))
+  if (numbers.length === 0) return null
+  return {
+    minZone: Math.min(...numbers),
+    maxZone: Math.max(...numbers),
+  }
 }
 
 export function formatPaygZoneLabel(raw?: string | null): string {
@@ -130,9 +139,10 @@ export function parseZoneCapBands(value: unknown): PaygZoneCapBandLike[] {
     .map((item, index) => {
       if (!item || typeof item !== 'object') return null
       const row = item as Record<string, unknown>
-      const title = asString(row.type || row.title).trim()
-      const minZone = asInt(row.minZone) ?? 0
-      const maxZone = asInt(row.maxZone) ?? minZone
+      const title = asString(row.type || row.title || row.zoneRange).trim()
+      const fromTitle = zoneRangeFromCapLabel(title)
+      const minZone = asInt(row.minZone) ?? fromTitle?.minZone ?? 0
+      const maxZone = asInt(row.maxZone) ?? fromTitle?.maxZone ?? minZone
       const dailyCapPence = asPence(row.dailyCapPence)
       const weeklyCapPence = asPence(row.weeklyCapPence)
       if (!title) return null

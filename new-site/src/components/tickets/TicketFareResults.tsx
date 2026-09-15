@@ -1,7 +1,9 @@
 'use client'
 
 import React from 'react'
-import { Ticket } from '@phosphor-icons/react'
+import { MapTrifold, Ticket } from '@phosphor-icons/react'
+
+import { BUTWideButton } from '@/components/buttons'
 
 import { StationDetailField } from '@/components/models/StationDetails/StationDetailField'
 import { StationDetailsSubsection } from '@/components/models/StationDetails/StationDetailsSubsection'
@@ -9,7 +11,7 @@ import { StationSectionTitle } from '@/components/models/StationDetails/StationS
 import type { DPAYGFare, DPAYGScheme, DPAYGStation } from '@/types/dpayg'
 import { formatDpaygPence } from '@/types/dpayg'
 import type { PaygZoneCapBand } from '@/services/paygMatrixCatalog'
-import { formatPaygZoneLabel, matchZoneCapBand } from '@/services/paygMatrixParse'
+import { formatPaygZoneLabel } from '@/services/paygMatrixParse'
 import { stationPublicCode } from '@/utils/dpaygStationSearch'
 import { TextSkeletonLine } from '@/components/misc/Skeleton/TextSkeletonLine'
 import '@/components/models/StationModal/StationModal.css'
@@ -22,7 +24,7 @@ const SHEFFIELD_DONCASTER_DISCLAIMER =
   'Please note that railcard prices may not be exact, but the amounts shown are a rough guide to what a journey may cost.'
 
 const EMR_DYNAMIC_DISCLAIMER =
-  'Fares on the Derby/Nottingham to Leicester trial are dynamic and can change. After you tap Start Journey in the EMR app, check the live prices for the most accurate cost.'
+  'Please note fares shown above are only estimates of what the actual fare may be. This is due to the Derby/Nottingham to Leicester trial area using a dynamic pricing system and therefore fares can change. After you tap Start Journey in the EMR app, check the live prices for the most accurate cost.'
 
 type TicketFareResultsProps = {
   scheme: DPAYGScheme | null
@@ -39,6 +41,31 @@ type TicketFareResultsProps = {
   /** Skip the details card chrome when nested in the lookup page card. */
   framed?: boolean
   skeleton?: boolean
+  onViewRouteOnMap?: () => void
+}
+
+function ViewRouteOnMapButton({
+  onClick,
+  skeleton = false,
+}: {
+  onClick?: () => void
+  skeleton?: boolean
+}) {
+  if (!onClick) return null
+  return (
+    <BUTWideButton
+      type="button"
+      width="fill"
+      colorVariant="primary"
+      instantAction
+      disabled={skeleton}
+      className="tickets-view-route-button"
+      icon={<MapTrifold size={16} aria-hidden />}
+      onClick={onClick}
+    >
+      View route on map
+    </BUTWideButton>
+  )
 }
 
 function skelText(text: string, skeleton: boolean) {
@@ -198,8 +225,6 @@ function DailyWeeklyCapFields({
 function CapsSubsection({
   scheme,
   zoneCapBands,
-  originZone,
-  destZone,
   journeyDailyCapPence,
   journeyWeeklyCapPence,
   emptyMessage,
@@ -208,8 +233,6 @@ function CapsSubsection({
 }: {
   scheme?: DPAYGScheme | null
   zoneCapBands?: PaygZoneCapBand[]
-  originZone?: string
-  destZone?: string
   journeyDailyCapPence?: number
   journeyWeeklyCapPence?: number
   emptyMessage?: string
@@ -217,27 +240,9 @@ function CapsSubsection({
   skeleton?: boolean
 }) {
   const bands = zoneCapBands ?? []
-  const matchingBand =
-    bands.length > 0
-      ? matchZoneCapBand(
-          bands,
-          originZone,
-          destZone,
-          journeyDailyCapPence,
-          journeyWeeklyCapPence
-        )
-      : null
   const hasJourneyCaps =
     (journeyDailyCapPence != null && journeyDailyCapPence > 0) ||
     (journeyWeeklyCapPence != null && journeyWeeklyCapPence > 0)
-  const journeyMatchesBand =
-    matchingBand != null &&
-    (journeyDailyCapPence == null ||
-      journeyDailyCapPence <= 0 ||
-      matchingBand.dailyCapPence === journeyDailyCapPence) &&
-    (journeyWeeklyCapPence == null ||
-      journeyWeeklyCapPence <= 0 ||
-      matchingBand.weeklyCapPence === journeyWeeklyCapPence)
   const hasSchemeCaps =
     !!scheme && (scheme.caps.dailyPence > 0 || scheme.caps.weeklyPence > 0)
 
@@ -254,8 +259,8 @@ function CapsSubsection({
     return empty
   }
 
-  const extraJourneyRow = hasJourneyCaps && bands.length > 0 && !journeyMatchesBand
-  const useSimpleFields = !extraJourneyRow && bands.length <= 1
+  const showJourneyRow = hasJourneyCaps && bands.length > 0
+  const useSimpleFields = !showJourneyRow && bands.length <= 1
 
   const body = useSimpleFields ? (
     <DailyWeeklyCapFields
@@ -278,45 +283,38 @@ function CapsSubsection({
       skeleton={skeleton}
     />
   ) : (
-    <>
-      <TicketsStationsTable
-        columns={['Cap', 'Daily', 'Weekly']}
-        rows={[
-          ...(extraJourneyRow
-            ? [
-                {
-                  key: 'this-journey',
-                  matched: true,
-                  cells: [
-                    'This journey',
-                    journeyDailyCapPence && journeyDailyCapPence > 0
-                      ? formatDpaygPence(journeyDailyCapPence)
-                      : '—',
-                    journeyWeeklyCapPence && journeyWeeklyCapPence > 0
-                      ? formatDpaygPence(journeyWeeklyCapPence)
-                      : '—',
-                  ],
-                },
-              ]
-            : []),
-          ...bands.map((band) => ({
-            key: band.id,
-            matched: matchingBand?.id === band.id,
-            cells: [
-              band.title,
-              band.dailyCapPence > 0 ? formatDpaygPence(band.dailyCapPence) : '—',
-              band.weeklyCapPence > 0 ? formatDpaygPence(band.weeklyCapPence) : '—',
-            ],
-          })),
-        ]}
-        skeleton={skeleton}
-      />
-      {matchingBand && bands.length > 1 && hasJourneyCaps ? (
-        <p className="tickets-cap-note">
-          {skelText(`This journey is covered by the ${matchingBand.title} cap.`, skeleton)}
-        </p>
-      ) : null}
-    </>
+    <TicketsStationsTable
+      columns={['Cap', 'Daily', 'Weekly']}
+      rows={[
+        ...(showJourneyRow
+          ? [
+              {
+                key: 'this-journey',
+                matched: true,
+                cells: [
+                  'This journey',
+                  journeyDailyCapPence && journeyDailyCapPence > 0
+                    ? formatDpaygPence(journeyDailyCapPence)
+                    : '—',
+                  journeyWeeklyCapPence && journeyWeeklyCapPence > 0
+                    ? formatDpaygPence(journeyWeeklyCapPence)
+                    : '—',
+                ],
+              },
+            ]
+          : []),
+        ...bands.map((band) => ({
+          key: band.id,
+          matched: false,
+          cells: [
+            band.title,
+            band.dailyCapPence > 0 ? formatDpaygPence(band.dailyCapPence) : '—',
+            band.weeklyCapPence > 0 ? formatDpaygPence(band.weeklyCapPence) : '—',
+          ],
+        })),
+      ]}
+      skeleton={skeleton}
+    />
   )
 
   if (sectionTitle) {
@@ -466,16 +464,12 @@ function TrialInfoSection({
 export function TicketFareCapsInline({
   scheme,
   zoneCapBands,
-  originZone,
-  destZone,
   journeyDailyCapPence,
   journeyWeeklyCapPence,
   skeleton = false,
 }: {
   scheme: DPAYGScheme | null
   zoneCapBands?: PaygZoneCapBand[]
-  originZone?: string
-  destZone?: string
   journeyDailyCapPence?: number
   journeyWeeklyCapPence?: number
   skeleton?: boolean
@@ -484,8 +478,6 @@ export function TicketFareCapsInline({
     <CapsSubsection
       scheme={scheme}
       zoneCapBands={zoneCapBands}
-      originZone={originZone}
-      destZone={destZone}
       journeyDailyCapPence={journeyDailyCapPence}
       journeyWeeklyCapPence={journeyWeeklyCapPence}
       sectionTitle="Fare Caps"
@@ -513,6 +505,7 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
   showStationCodes = true,
   framed = true,
   skeleton = false,
+  onViewRouteOnMap,
 }) => {
   const pageTitle = trialAreaHeading(scheme, areaKind)
   const intro =
@@ -608,6 +601,7 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
               skeleton={skeleton}
             />
           </div>
+          <ViewRouteOnMapButton onClick={onViewRouteOnMap} skeleton={skeleton} />
           <TrialInfoSection scheme={scheme} areaKind={areaKind} skeleton={skeleton} />
         </div>
       </TicketFareCard>
@@ -629,6 +623,7 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
             />
             <p className="tickets-results-muted">{skelText(noFareCopy, skeleton)}</p>
           </div>
+          <ViewRouteOnMapButton onClick={onViewRouteOnMap} skeleton={skeleton} />
           <TrialInfoSection scheme={scheme} areaKind={areaKind} skeleton={skeleton} />
         </div>
       </TicketFareCard>
@@ -680,6 +675,7 @@ const TicketFareResults: React.FC<TicketFareResultsProps> = ({
           </>
         )}
 
+        <ViewRouteOnMapButton onClick={onViewRouteOnMap} skeleton={skeleton} />
         <TrialInfoSection scheme={scheme} areaKind={areaKind} skeleton={skeleton} />
       </div>
     </TicketFareCard>

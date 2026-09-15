@@ -25,6 +25,12 @@
   width: 100%;
 }
 
+.tickets-view-route-button {
+  margin-top: var(--space-lg);
+  width: 100%;
+  max-width: 40rem;
+}
+
 .tickets-station-suggestions-panel {
   overflow: hidden;
   opacity: 0;
@@ -162,15 +168,8 @@
   box-shadow: none;
 }
 
-.tickets-fares-table__row--match > td {
-  box-shadow: inset 3px 0 0 var(--accent-base);
-}
-
-@media (hover: hover) {
-  .tickets-page .tickets-fares-table tbody .tickets-fares-table__row--match:hover > td,
-  .tickets-page .tickets-fares-table tbody .tickets-fares-table__row--match:focus-within > td {
-    box-shadow: inset 3px 0 0 var(--accent-base), inset 0 0 0 9999px var(--bg-hover);
-  }
+.tickets-fares-table tbody .stations-table__row.tickets-fares-table__row--match {
+  --stations-table-row-bg: rgb(from var(--accent-darkest) r g b / 70%);
 }
 
 .tickets-cap-note {
@@ -388,6 +387,118 @@
   min-height: 100%;
 }
 
+.tickets-lookup-page .account-main.station-details-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tickets-lookup-page .tickets-lookup-card--map {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.tickets-area-map {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tickets-area-map__status {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.tickets-area-map__canvas-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: min(70vh, 28rem);
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.tickets-area-map__canvas-wrap--loading {
+  --skeleton-surface: color-mix(in srgb, var(--bg-tertiary) 82%, var(--bg-secondary));
+  --skeleton-shimmer: color-mix(in srgb, var(--bg-primary) 55%, transparent);
+  background: var(--skeleton-surface);
+}
+
+.tickets-area-map__canvas-wrap--loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: inherit;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--skeleton-shimmer),
+    transparent
+  );
+  animation: tickets-area-map-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes tickets-area-map-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.tickets-area-map__canvas-wrap .stations-osm-map,
+.tickets-area-map__canvas-wrap .stations-osm-map--loading {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.tickets-area-map__loading {
+  z-index: 2;
+  display: block;
+  overflow: hidden;
+  background: transparent;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.18s ease;
+}
+
+.tickets-area-map__loading--fading {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tickets-area-map__loading {
+    transition: none;
+  }
+
+  .tickets-area-map__canvas-wrap--loading::after {
+    animation: none;
+    transform: none;
+    opacity: 0.35;
+  }
+}
+
+.tickets-area-map__skeleton-pin {
+  position: absolute;
+  z-index: 4;
+  width: 0.7rem;
+  height: 0.7rem;
+  transform: translate(-50%, -50%);
+  --skeleton-surface: color-mix(in srgb, var(--text-secondary) 28%, var(--bg-secondary));
+  --skeleton-shimmer: color-mix(in srgb, var(--bg-primary) 55%, transparent);
+}
+
 .tickets-lookup-search {
   display: flex;
   flex-direction: column;
@@ -446,6 +557,21 @@
   max-width: 28rem;
   width: 100%;
   min-width: 0;
+}
+
+@media (max-width: 1023px) {
+  .tickets-search-form,
+  .tickets-od-stack,
+  .tickets-search-form .tickets-search-button {
+    max-width: none;
+    width: 100%;
+  }
+
+  .tickets-od-stack .rs-input,
+  .tickets-od-stack .tickets-od-input {
+    width: 100%;
+    max-width: none;
+  }
 }
 
 .tickets-lookup-oyster-tabs {

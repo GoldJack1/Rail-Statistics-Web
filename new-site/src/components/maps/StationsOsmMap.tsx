@@ -15,6 +15,7 @@ import {
   NETWORK_MAP_COLORS,
   NETWORK_MAP_FALLBACK_COLOR,
   PENDING_NEW_STATION_MAP_COLOR,
+  SELECTED_MARKER_BORDER_COLOR,
 } from '../../constants/stationNetworkMapColors'
 import { useTheme, readThemeFromDocument } from '../../hooks/useTheme'
 import { getStationNetworkCollectionId, getStationMapKey } from '../../utils/stationAreaSlug'
@@ -25,6 +26,7 @@ import {
 } from '../../utils/superTramMapMarker'
 import { getMarkerHitRadius, getMarkerVisualRadius, MARKER_STROKE } from '../../utils/mapMarkerSizing'
 import { addThemeTileLayersToMap, swapThemeTileLayers, type MapTileLayerRefs } from '../../utils/mapTileLayers'
+import { guardLeafletCanvasRenderer } from '../../utils/leafletCanvasRendererGuard'
 import {
   isStationVisibleInTimelineStep,
   type SuperTramTimelineCutoff,
@@ -74,7 +76,18 @@ import { MapZoomControls } from './MapZoomControls'
 import './StationsOsmMap.css'
 import './leafletDarkTiles.css'
 
+guardLeafletCanvasRenderer(L)
+
 const MOBILE_MAP_MEDIA = '(max-width: 639px)'
+/** Above ORM rails (overlay 400), below station circle blobs. */
+const JOURNEY_LINE_PANE = 'stationsJourney'
+const JOURNEY_LINE_PANE_Z = '450'
+/** Circle pins sit above the journey overlay. */
+const STATION_CIRCLE_PANE = 'stationCircles'
+const STATION_CIRCLE_PANE_Z = '550'
+/** Origin / destination pins sit above other station blobs. */
+const STATION_HIGHLIGHT_PANE = 'stationHighlightCircles'
+const STATION_HIGHLIGHT_PANE_Z = '580'
 const VIEWPORT_MOVEEND_DEBOUNCE_MS = 150
 const PROGRAMMATIC_MOVE_MS = 300
 /** Close-up on the stop that just appeared. */
@@ -437,8 +450,27 @@ interface StationsOsmMapProps {
    * Parent should pass empty station lists until ready so pins appear together.
    */
   dataReady?: boolean
+  /**
+   * When false, skip the main map’s saved camera and do not write session view.
+   * Used for embedded maps (PAYG area map).
+   */
+  persistCamera?: boolean
+  /** Extra pins to draw in the selected style (e.g. fare origin and destination). */
+  highlightedStationIds?: readonly string[]
+  /** OSM railway-following line to overlay (OpenRailwayMap-style journey). */
+  journeyPath?: Array<[number, number]> | null
+  /** Multiple journey overlays (e.g. Queen Street and City Line into Cardiff). */
+  journeyPaths?: Array<Array<[number, number]>> | null
   /** Overlay content positioned over the map stage (not the attribution bar). */
   children?: ReactNode
+  /** Fires once the camera has fitted and visible tiles have loaded (or timed out). */
+  onReady?: () => void
+  /** When false, onReady fires after camera fit without waiting for OSM tiles. */
+  waitForTiles?: boolean
+}
+
+function isLayerOnMap(layer: L.Layer): boolean {
+  return Boolean((layer as L.Layer & { _map?: L.Map | null })._map)
 }
 
 function getStationLegendCollectionId(
@@ -594,7 +626,13 @@ export function StationsOsmMap({
   liteMode = false,
   fitNonce = 0,
   dataReady = true,
+  persistCamera = true,
+  highlightedStationIds = [],
+  journeyPath = null,
+  journeyPaths = null,
   children,
+  onReady,
+  waitForTiles = true,
 }: StationsOsmMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null)
   const mapStageRef = useRef<HTMLDivElement | null>(null)
@@ -602,6 +640,10 @@ export function StationsOsmMap({
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null)
   const tileLayersRef = useRef<MapTileLayerRefs | null>(null)
   const markersLayerRef = useRef<L.LayerGroup | null>(null)
+  const journeyLayerRef = useRef<L.LayerGroup | null>(null)
+  const stationCircleRendererRef = useRef<L.SVG | null>(null)
+  const stationHighlightRendererRef = useRef<L.SVG | null>(null)
+  const journeyRendererRef = useRef<L.SVG | null>(null)
   const markersByIdRef = useRef<Map<string, StationMarkerPair>>(new Map())
   const onStationSelectRef = useRef(onStationSelect)
   const onStationClearRef = useRef(onStationClear)
@@ -645,8 +687,22 @@ export function StationsOsmMap({
   /** Last stop the follow camera settled on — used to route along tracks. */
   const followLastFocusRef = useRef<LatLngTuple | null>(null)
   const followTrackCancelRef = useRef<(() => void) | null>(null)
+  const persistCameraRef = useRef(persistCamera)
+  const journeyPathRef = useRef<Array<[number, number]> | null>(null)
+  const onReadyRef = useRef(onReady)
+  const waitForTilesRef = useRef(waitForTiles)
+  const readyNotifiedRef = useRef(false)
+  const readyTimeoutRef = useRef<number | null>(null)
   const { theme } = useTheme()
   const themeKey = theme === 'dark' ? 'dark' : 'light'
+
+  const resolvedJourneyPaths = useMemo(() => {
+    if (journeyPaths && journeyPaths.some((path) => path.length >= 2)) {
+      return journeyPaths.filter((path) => path.length >= 2)
+    }
+    if (journeyPath && journeyPath.length >= 2) return [journeyPath]
+    return [] as Array<Array<[number, number]>>
+  }, [journeyPath, journeyPaths])
 
   onStationSelectRef.current = onStationSelect
   onStationClearRef.current = onStationClear
@@ -658,6 +714,10 @@ export function StationsOsmMap({
   mobileMarkersRef.current = mobileMarkers
   publishedStationsRef.current = publishedStations
   dataReadyRef.current = dataReady
+  persistCameraRef.current = persistCamera
+  journeyPathRef.current = resolvedJourneyPaths.flat()
+  onReadyRef.current = onReady
+  waitForTilesRef.current = waitForTiles
 
   useEffect(() => {
     setActiveStationsMapNetwork(networkView)
@@ -684,6 +744,12 @@ export function StationsOsmMap({
   const mapStationsRef = useRef(mapStations)
   mapStationsRef.current = mapStations
 
+  const emphasizedStationIds = useMemo(() => {
+    const ids = new Set(highlightedStationIds)
+    if (selectedStationId) ids.add(selectedStationId)
+    return ids
+  }, [highlightedStationIds, selectedStationId])
+
   const cullViewport = shouldCullStationsMapMarkers(mapStations.length, networkView, liteMode)
 
   const markerStations = useMemo(() => {
@@ -692,9 +758,10 @@ export function StationsOsmMap({
     if (!viewportBounds) return []
     return getStationsForViewportMarkers(mapStations, viewportBounds, {
       selectedStationId,
+      keepStationIds: highlightedStationIds,
       maxMarkers: getMapViewportMarkerLimit(liteMode),
     })
-  }, [cullViewport, liteMode, mapStations, viewportBounds, selectedStationId])
+  }, [cullViewport, liteMode, mapStations, viewportBounds, selectedStationId, highlightedStationIds])
 
   stationsByKeyRef.current = new Map(
     mapStations.map((station) => [getStationMapKey(station), station])
@@ -824,6 +891,36 @@ export function StationsOsmMap({
     return true
   }, [])
 
+  const notifyViewportReady = useCallback((map: L.Map) => {
+    if (readyNotifiedRef.current || !onReadyRef.current) return
+
+    const finish = () => {
+      if (readyNotifiedRef.current) return
+      readyNotifiedRef.current = true
+      if (readyTimeoutRef.current != null) {
+        window.clearTimeout(readyTimeoutRef.current)
+        readyTimeoutRef.current = null
+      }
+      map.off('load', finish)
+      onReadyRef.current?.()
+    }
+
+    let tilesLoading = false
+    if (waitForTilesRef.current) {
+      map.eachLayer((layer) => {
+        if (layer instanceof L.GridLayer && layer.isLoading()) tilesLoading = true
+      })
+    }
+
+    if (!tilesLoading) {
+      finish()
+      return
+    }
+
+    map.once('load', finish)
+    readyTimeoutRef.current = window.setTimeout(finish, 800)
+  }, [])
+
   /**
    * Restore pinned session camera or fit pins once the canvas has a real size.
    * Returns false when size is 0 so callers can retry (do not consume the one-shot).
@@ -847,7 +944,9 @@ export function StationsOsmMap({
       mobileMarkersRef.current,
       mapSize
     )
-    const saved = readMapsMapViewSessionState(networkViewRef.current)
+    const saved = persistCameraRef.current
+      ? readMapsMapViewSessionState(networkViewRef.current)
+      : null
     const stations = publishedStationsRef.current
 
     if (
@@ -896,9 +995,41 @@ export function StationsOsmMap({
     }
 
     withProgrammaticMove(() => {
-      const persistable = fitMapToStations(map, stations)
-      // Only persist auto-fits — never replace a leave-map pinned snapshot.
-      if (persistable && !readMapsMapViewSessionState(networkViewRef.current)?.pinned) {
+      const journey = journeyPathRef.current
+      if (journey && journey.length >= 2) {
+        const size = map.getSize()
+        const mapSize: MapPixelSize | undefined =
+          size.x > 0 && size.y > 0 ? { x: size.x, y: size.y } : undefined
+        const plan = planStationsMapFit(
+          journey.map(([latitude, longitude]) => ({ latitude, longitude })),
+          getMapFitPaddingOptions(networkViewRef.current, mobileMarkersRef.current, mapSize)
+        )
+        if (plan.kind === 'bounds') {
+          map.fitBounds(plan.bounds, {
+            ...fitPaddingToLeafletOptions(plan.padding),
+            maxZoom: plan.maxZoom,
+            animate: false,
+          })
+        } else if (plan.kind === 'single') {
+          map.setView([plan.lat, plan.lng], plan.zoom, { animate: false })
+        } else {
+          fitMapToStations(map, stations)
+        }
+      } else {
+        const persistable = fitMapToStations(map, stations)
+        if (
+          persistCameraRef.current &&
+          persistable &&
+          !readMapsMapViewSessionState(networkViewRef.current)?.pinned
+        ) {
+          persistCurrentMapView(map, networkViewRef.current)
+        }
+        return
+      }
+      if (
+        persistCameraRef.current &&
+        !readMapsMapViewSessionState(networkViewRef.current)?.pinned
+      ) {
         persistCurrentMapView(map, networkViewRef.current)
       }
     })
@@ -906,8 +1037,18 @@ export function StationsOsmMap({
     return true
   }, [withProgrammaticMove, fitMapToStations, persistCurrentMapView])
 
-  const tryApplyMapCameraRef = useRef(tryApplyMapCamera)
-  tryApplyMapCameraRef.current = tryApplyMapCamera
+  const tryApplyMapCameraAndNotify = useCallback((): boolean => {
+    const applied = tryApplyMapCamera()
+    const map = mapRef.current
+    if (!map) return applied
+    if (applied || (dataReadyRef.current && publishedStationsRef.current.length === 0)) {
+      notifyViewportReady(map)
+    }
+    return applied
+  }, [notifyViewportReady, tryApplyMapCamera])
+
+  const tryApplyMapCameraRef = useRef(tryApplyMapCameraAndNotify)
+  tryApplyMapCameraRef.current = tryApplyMapCameraAndNotify
 
   const removeMarkerPair = useCallback((layerGroup: L.LayerGroup, marker: StationMarkerPair) => {
     layerGroup.removeLayer(marker.hit)
@@ -946,12 +1087,18 @@ export function StationsOsmMap({
         }
       }
 
+      const circlePane = isSelected ? STATION_HIGHLIGHT_PANE : STATION_CIRCLE_PANE
+      const renderer = isSelected
+        ? stationHighlightRendererRef.current
+        : stationCircleRendererRef.current
       const hitMarker = L.circleMarker(latLng, {
         radius: hit,
         fillColor: '#000000',
         fillOpacity: 0.001,
         stroke: false,
         weight: 0,
+        pane: circlePane,
+        renderer: renderer ?? undefined,
         className: 'stations-osm-map__hit-target',
       })
 
@@ -962,6 +1109,8 @@ export function StationsOsmMap({
         weight: isSelected ? MARKER_STROKE.weight.selected : MARKER_STROKE.weight.normal,
         fillOpacity: 0.95,
         interactive: false,
+        pane: circlePane,
+        renderer: renderer ?? undefined,
         className: 'stations-osm-map__visual-target',
       })
 
@@ -979,6 +1128,7 @@ export function StationsOsmMap({
 
   const syncMarkers = useCallback(
     (map: L.Map) => {
+      if (!map.getContainer() || !map.getPane(STATION_CIRCLE_PANE)) return
       let layerGroup = markersLayerRef.current
       if (!layerGroup) {
         layerGroup = L.layerGroup().addTo(map)
@@ -1000,9 +1150,17 @@ export function StationsOsmMap({
         const existing = markersByIdRef.current.get(key)
         const useSuperTramLogo = isSuperTramMapStop(station, networkView)
         const desiredKind = useSuperTramLogo ? 'supertram-logo' : 'circle'
-        const isSelected = key === selectedStationId
+        const isSelected = emphasizedStationIds.has(key)
 
         if (existing && existing.kind === desiredKind) {
+          const desiredPane = isSelected ? STATION_HIGHLIGHT_PANE : STATION_CIRCLE_PANE
+          const currentPane = existing.visual.options.pane
+          if (existing.kind === 'circle' && currentPane !== desiredPane) {
+            removeMarkerPair(layerGroup!, existing)
+            markersByIdRef.current.delete(key)
+            markersByIdRef.current.set(key, createStationMarker(station, layerGroup!, isSelected))
+            return
+          }
           const current = existing.visual.getLatLng()
           if (
             Math.abs(current.lat - station.latitude) > 1e-9 ||
@@ -1012,6 +1170,15 @@ export function StationsOsmMap({
             existing.visual.setLatLng(latLng)
             if (existing.kind === 'circle' && existing.hit !== existing.visual) {
               existing.hit.setLatLng(latLng)
+            }
+          }
+          if (isSelected && isLayerOnMap(existing.visual)) {
+            existing.visual.bringToFront()
+            if (existing.hit !== existing.visual && isLayerOnMap(existing.hit)) {
+              existing.hit.bringToFront()
+            }
+            if (existing.kind === 'supertram-logo') {
+              existing.visual.setZIndexOffset(1000)
             }
           }
           return
@@ -1024,8 +1191,20 @@ export function StationsOsmMap({
 
         markersByIdRef.current.set(key, createStationMarker(station, layerGroup!, isSelected))
       })
+
+      emphasizedStationIds.forEach((key) => {
+        const marker = markersByIdRef.current.get(key)
+        if (!marker || !isLayerOnMap(marker.visual)) return
+        marker.visual.bringToFront()
+        if (marker.hit !== marker.visual && isLayerOnMap(marker.hit)) {
+          marker.hit.bringToFront()
+        }
+        if (marker.kind === 'supertram-logo') {
+          marker.visual.setZIndexOffset(1000)
+        }
+      })
     },
-    [markerStations, networkView, selectedStationId, createStationMarker, removeMarkerPair]
+    [markerStations, networkView, emphasizedStationIds, createStationMarker, removeMarkerPair]
   )
 
   // Mount map once — restore saved camera if possible; otherwise wait for dataReady fit.
@@ -1033,7 +1212,9 @@ export function StationsOsmMap({
     if (!mapContainerRef.current) return
 
     const initialNetwork = networkViewRef.current
-    const savedOnMount = readMapsMapViewSessionState(initialNetwork)
+    const savedOnMount = persistCameraRef.current
+      ? readMapsMapViewSessionState(initialNetwork)
+      : null
     const restoreOnMount =
       savedOnMount != null &&
       shouldRestoreSavedMapView(
@@ -1058,6 +1239,16 @@ export function StationsOsmMap({
         : STATIONS_MAP_EMPTY_CENTER,
       restoreOnMount ? savedOnMount.zoom : STATIONS_MAP_EMPTY_ZOOM
     )
+    const journeyPane = map.createPane(JOURNEY_LINE_PANE)
+    journeyPane.style.zIndex = JOURNEY_LINE_PANE_Z
+    journeyPane.style.pointerEvents = 'none'
+    const stationCirclePane = map.createPane(STATION_CIRCLE_PANE)
+    stationCirclePane.style.zIndex = STATION_CIRCLE_PANE_Z
+    const stationHighlightPane = map.createPane(STATION_HIGHLIGHT_PANE)
+    stationHighlightPane.style.zIndex = STATION_HIGHLIGHT_PANE_Z
+    stationCircleRendererRef.current = L.svg({ pane: STATION_CIRCLE_PANE }).addTo(map)
+    stationHighlightRendererRef.current = L.svg({ pane: STATION_HIGHLIGHT_PANE }).addTo(map)
+    journeyRendererRef.current = L.svg({ pane: JOURNEY_LINE_PANE }).addTo(map)
     tileLayersRef.current = addThemeTileLayersToMap(map, readThemeFromDocument())
     mapRef.current = map
     setMapInstance(map)
@@ -1133,7 +1324,9 @@ export function StationsOsmMap({
         return
       }
       userCameraRef.current = true
-      persistCurrentMapView(map, networkViewRef.current, { pinned: true })
+      if (persistCameraRef.current) {
+        persistCurrentMapView(map, networkViewRef.current, { pinned: true })
+      }
     }
 
     map.on('dragend', onUserCameraChange)
@@ -1184,20 +1377,69 @@ export function StationsOsmMap({
         window.clearTimeout(viewportMoveEndTimerRef.current)
         viewportMoveEndTimerRef.current = null
       }
+      if (readyTimeoutRef.current !== null) {
+        window.clearTimeout(readyTimeoutRef.current)
+        readyTimeoutRef.current = null
+      }
       observer?.disconnect()
       map.off('dragend', onUserCameraChange)
       map.off('zoomend', onUserCameraChange)
       if (markersLayerRef.current && mapRef.current) {
         mapRef.current.removeLayer(markersLayerRef.current)
       }
+      if (journeyLayerRef.current && mapRef.current) {
+        mapRef.current.removeLayer(journeyLayerRef.current)
+      }
       markersLayerRef.current = null
+      journeyLayerRef.current = null
       markersByIdRef.current.clear()
+      stationCircleRendererRef.current = null
+      stationHighlightRendererRef.current = null
+      journeyRendererRef.current = null
       setMapInstance(null)
       map.remove()
       mapRef.current = null
       tileLayersRef.current = null
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps -- mount only
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    let layer = journeyLayerRef.current
+    if (!layer) {
+      layer = L.layerGroup().addTo(map)
+      journeyLayerRef.current = layer
+    }
+    layer.clearLayers()
+    for (const path of resolvedJourneyPaths) {
+      const casing = L.polyline(path, {
+        color: '#ffffff',
+        weight: 8,
+        opacity: 0.9,
+        lineJoin: 'round',
+        lineCap: 'round',
+        interactive: false,
+        pane: JOURNEY_LINE_PANE,
+        renderer: journeyRendererRef.current ?? undefined,
+        className: 'stations-osm-map__journey-line-casing',
+      })
+      const line = L.polyline(path, {
+        color: SELECTED_MARKER_BORDER_COLOR,
+        weight: 5,
+        opacity: 0.95,
+        lineJoin: 'round',
+        lineCap: 'round',
+        interactive: false,
+        pane: JOURNEY_LINE_PANE,
+        renderer: journeyRendererRef.current ?? undefined,
+        className: 'stations-osm-map__journey-line',
+      })
+      casing.addTo(layer)
+      line.addTo(layer)
+    }
+  }, [mapInstance, resolvedJourneyPaths])
 
   useEffect(() => {
     const map = mapRef.current
@@ -1249,11 +1491,14 @@ export function StationsOsmMap({
     previousFitNonceRef.current = fitNonce
     if (fitNonce === 0) return
 
-    clearMapsMapViewSessionState(networkViewRef.current)
+    if (persistCameraRef.current) {
+      clearMapsMapViewSessionState(networkViewRef.current)
+    }
     userCameraRef.current = false
     didFitForReadyRef.current = false
-    tryApplyMapCamera()
-  }, [fitNonce, tryApplyMapCamera])
+    readyNotifiedRef.current = false
+    tryApplyMapCameraAndNotify()
+  }, [fitNonce, tryApplyMapCameraAndNotify])
 
   // Restore pinned camera ASAP; otherwise fit once pins are ready. Retries while size is 0.
   useEffect(() => {
@@ -1262,11 +1507,12 @@ export function StationsOsmMap({
       if (!userCameraRef.current) {
         didFitForReadyRef.current = false
       }
-      tryApplyMapCamera()
+      readyNotifiedRef.current = false
+      tryApplyMapCameraAndNotify()
       return
     }
-    tryApplyMapCamera()
-  }, [dataReady, publishedStations, networkView, fitNonce, tryApplyMapCamera])
+    tryApplyMapCameraAndNotify()
+  }, [dataReady, publishedStations, networkView, fitNonce, tryApplyMapCameraAndNotify])
 
   useEffect(() => {
     if (!timelineFollowAppearing) return
@@ -1393,7 +1639,7 @@ export function StationsOsmMap({
           station,
           networkView,
           pendingNewStationKeys,
-          stationKey === selectedStationId,
+          emphasizedStationIds.has(stationKey),
           mobileMarkers
         )
 
@@ -1536,6 +1782,7 @@ export function StationsOsmMap({
     }
   }, [
     selectedStationId,
+    emphasizedStationIds,
     networkView,
     mobileMarkers,
     pendingNewStationKeys,
