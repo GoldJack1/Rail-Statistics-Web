@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import Script from 'next/script'
 import { Suspense } from 'react'
 import { geologica, aronetiv, aronetivNormal } from './fonts'
 import { ThemeProvider } from '@/contexts/ThemeContext'
@@ -12,7 +13,7 @@ import AppMain from '@/components/misc/AppMain'
 import ServiceWorkerRegistration from '@/components/misc/ServiceWorkerRegistration'
 import FirebaseAnalytics from '@/components/misc/FirebaseAnalytics'
 import AdSenseScript from '@/components/ads/AdSenseScript'
-import { ADSENSE_CLIENT } from '@/components/ads/adsenseConfig'
+import { ADSENSE_CLIENT, isAdSenseHeadTagsEnabled } from '@/components/ads/adsenseConfig'
 import { CONSENT_MODE_DEFAULTS_SCRIPT } from '@/components/ads/consentModeDefaults'
 import { SITE_DESCRIPTION, SITE_KEYWORDS, SITE_NAME, SITE_URL } from '@/lib/site'
 import './globals.css'
@@ -71,7 +72,7 @@ export const metadata: Metadata = {
   },
   other: {
     'mobile-web-app-capable': 'yes',
-    'google-adsense-account': ADSENSE_CLIENT,
+    ...(isAdSenseHeadTagsEnabled ? { 'google-adsense-account': ADSENSE_CLIENT } : {}),
   },
 }
 
@@ -119,16 +120,15 @@ export default function RootLayout({
       className={`${geologica.variable} ${aronetiv.variable} ${aronetivNormal.variable}`}
       suppressHydrationWarning
     >
-      <head>
-        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
-        <script dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME_SCRIPT }} />
-        {/* Consent Mode v2 defaults before AdSense / Analytics tags */}
-        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
-        <script dangerouslySetInnerHTML={{ __html: CONSENT_MODE_DEFAULTS_SCRIPT }} />
-        {/* Native head tag so Safari does not treat AdSense as a late-injected tracker */}
-        <AdSenseScript />
-      </head>
       <body suppressHydrationWarning>
+        {/* beforeInteractive: in the initial HTML, not hydrated as React <head> children */}
+        <Script id="rs-no-flash-theme" strategy="beforeInteractive">
+          {NO_FLASH_THEME_SCRIPT}
+        </Script>
+        <Script id="rs-consent-defaults" strategy="beforeInteractive">
+          {CONSENT_MODE_DEFAULTS_SCRIPT}
+        </Script>
+        <AdSenseScript />
         <ThemeProvider>
           <PhosphorIconProvider>
           <AuthProvider>

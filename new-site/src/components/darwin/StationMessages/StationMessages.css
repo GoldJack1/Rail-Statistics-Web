@@ -1,129 +1,60 @@
-/* StationMessages — sticky-style banner stack for NRCC operational warnings.
- * Used on the departures page above the cards grid. Severity colours follow
- * the Darwin "OW" sev attribute: 0=info, 1=minor, 2=major, 3=severe. */
+/* StationMessages uses NetworkMessageAlertBanner TextCard chrome. */
 
-.dep-msg-stack {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
-  margin-bottom: var(--space-lg);
+.dep-station-messages .network-message-alert-banner__card .rs-text-card__title {
+  display: none;
 }
 
-.dep-msg {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: var(--space-md) var(--space-lg);
-  box-shadow: var(--shadow-sm);
+.dep-station-messages .network-message-alert-banner__card .rs-text-card__content {
+  padding-right: 24px;
+  gap: 0;
 }
 
-.dep-msg--sev0 {
-  border-color: color-mix(in srgb, hsl(214 70% 50%) 35%, var(--border-color));
-  background-color: color-mix(in srgb, hsl(214 70% 50%) 6%, var(--bg-secondary));
-}
-/* Minor = fav-action pressed state */
-.dep-msg--sev1 {
-  border-color: color-mix(in srgb, hsl(53 55% 50%) 45%, var(--border-color));
-  background-color: hsl(53 55% 50%);
-  color: hsl(0 0% 0%);
-}
-/* Major + severe = red-action pressed state */
-.dep-msg--sev2,
-.dep-msg--sev3 {
-  border-color: color-mix(in srgb, hsl(0 68% 48%) 45%, var(--border-color));
-  background-color: hsl(0 68% 48%);
-  color: hsl(0 0% 100%);
+/* Icon sits on the card padding (16 top / 20 right); 28px hit area is invisible. */
+.dep-station-messages .network-message-alert-banner__card .rs-text-card__chevron {
+  display: inline-flex;
+  top: var(--network-message-alert-padding, 16px);
+  right: 20px;
+  transform: none;
+  width: 16px;
+  height: 16px;
+  overflow: visible;
 }
 
-.dep-msg-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-xs);
-}
-
-.dep-msg-sev {
-  font-weight: 700;
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 2px var(--space-sm);
-  border-radius: var(--radius-sm);
-  background-color: rgba(255, 255, 255, 0.7);
-  color: var(--text-primary);
-}
-.dep-msg--sev3 .dep-msg-sev { background-color: var(--accent-base); color: #fff; }
-
-.dep-msg-cat {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.dep-msg-dismiss {
-  margin-left: auto;
-  width: 28px;
-  height: 28px;
+.dep-station-messages__dismiss {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  background-color: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  font-size: 18px;
-  line-height: 1;
-}
-.dep-msg-dismiss:hover { background-color: rgba(0, 0, 0, 0.05); color: var(--text-primary); }
-[data-theme="dark"] .dep-msg-dismiss:hover { background-color: rgba(255, 255, 255, 0.08); }
-
-.dep-msg-body {
   margin: 0;
-  font-size: var(--text-sm);
-  line-height: 1.45;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-}
-
-.dep-msg--sev1 .dep-msg-cat { color: color-mix(in srgb, #000 70%, transparent); }
-.dep-msg--sev1 .dep-msg-body { color: hsl(0 0% 0%); }
-.dep-msg--sev2 .dep-msg-cat,
-.dep-msg--sev3 .dep-msg-cat { color: rgba(255, 255, 255, 0.88); }
-.dep-msg--sev2 .dep-msg-body,
-.dep-msg--sev3 .dep-msg-body { color: hsl(0 0% 100%); }
-.dep-msg--sev1 .dep-msg-dismiss { color: rgba(0, 0, 0, 0.72); }
-.dep-msg--sev2 .dep-msg-dismiss,
-.dep-msg--sev3 .dep-msg-dismiss { color: rgba(255, 255, 255, 0.88); }
-.dep-msg--sev2 .dep-msg-dismiss:hover,
-.dep-msg--sev3 .dep-msg-dismiss:hover { background-color: rgba(255, 255, 255, 0.14); color: #fff; }
-
-.dep-msg-more {
-  align-self: flex-start;
-  background-color: transparent;
-  color: var(--accent-base);
-  border: 1px solid color-mix(in srgb, var(--accent-base) 30%, transparent);
-  padding: var(--space-xs) var(--space-md);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  min-width: 0;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
+  opacity: 0.8;
 }
-.dep-msg-more:hover { background-color: color-mix(in srgb, var(--accent-base) 10%, transparent); }
 
-[data-theme="dark"] .dep-msg-sev { background-color: rgba(255, 255, 255, 0.08); }
-[data-theme="dark"] .dep-msg--sev1 {
-  border-color: color-mix(in srgb, hsl(53 100% 12%) 55%, var(--border-color));
-  background-color: hsl(53 100% 12%);
-  color: hsl(0 0% 100%);
+.dep-station-messages__dismiss::after {
+  content: '';
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
 }
-[data-theme="dark"] .dep-msg--sev1 .dep-msg-cat,
-[data-theme="dark"] .dep-msg--sev1 .dep-msg-body,
-[data-theme="dark"] .dep-msg--sev1 .dep-msg-dismiss {
-  color: rgba(255, 255, 255, 0.9);
+
+.dep-station-messages__dismiss:hover {
+  opacity: 1;
+  background-color: transparent;
 }
-[data-theme="dark"] .dep-msg--sev2,
-[data-theme="dark"] .dep-msg--sev3 {
-  border-color: color-mix(in srgb, hsl(359 100% 17%) 55%, var(--border-color));
-  background-color: hsl(359 100% 17%);
+
+.dep-station-messages__dismiss:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }

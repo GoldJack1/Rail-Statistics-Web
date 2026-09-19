@@ -9,6 +9,7 @@ import {
   isMasterPublishEmailUser,
   STATION_EDITOR_DENIED_MESSAGE,
 } from '@/utils/masterPublishPolicy'
+import { isLocalDevLoginBypassEnabled } from '@/utils/localDevFlags'
 
 interface ProtectedRouteProps {
   children: React.ReactNode
@@ -27,9 +28,6 @@ type ProfileCheck =
   | 'need-totp-enroll'
   | 'need-editor'
 
-const isLocalDevLoginBypassEnabled =
-  process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_LOCAL_DEV_LOGIN_BYPASS === 'true'
-
 /**
  * Requires a signed-in catalogue user with verified email, TOTP MFA, and station-editor
  * authority (`rs_station_editor` claim or owner email).
@@ -44,7 +42,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   const [profileCheck, setProfileCheck] = useState<ProfileCheck>('idle')
 
   useEffect(() => {
-    if (isLocalDevLoginBypassEnabled) return
+    if (isLocalDevLoginBypassEnabled()) return
     if (loading) return
 
     if (!user) {
@@ -118,7 +116,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }, [user, loading])
 
   useEffect(() => {
-    if (isLocalDevLoginBypassEnabled) return
+    if (isLocalDevLoginBypassEnabled()) return
     if (loading || (user && profileCheck === 'checking')) return
 
     if (!user) {
@@ -142,7 +140,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     }
   }, [user, loading, profileCheck, pathname, router])
 
-  if (isLocalDevLoginBypassEnabled) {
+  if (isLocalDevLoginBypassEnabled()) {
     return <>{children}</>
   }
 

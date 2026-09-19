@@ -3,6 +3,7 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { isLocalDevLoginBypassEnabled } from '@/utils/localDevFlags'
 import {
   isStationAdminModeActive,
   STATION_ADMIN_MODE_CHANGED_EVENT,
@@ -13,6 +14,7 @@ export function useStationAdminMode(): boolean {
   const { user, loading } = useAuth()
   const searchParams = useSearchParams()
   const search = searchParams.toString() ? `?${searchParams}` : ''
+  const bypass = isLocalDevLoginBypassEnabled()
 
   const subscribe = useCallback((onStoreChange: () => void) => {
     window.addEventListener(STATION_ADMIN_MODE_CHANGED_EVENT, onStoreChange)
@@ -23,6 +25,6 @@ export function useStationAdminMode(): boolean {
 
   const adminActive = useSyncExternalStore(subscribe, getSnapshot, () => false)
 
-  if (loading || !user) return false
+  if (!bypass && (loading || !user)) return false
   return adminActive
 }

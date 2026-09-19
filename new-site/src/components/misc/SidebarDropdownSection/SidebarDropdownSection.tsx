@@ -15,6 +15,8 @@ interface SidebarDropdownSectionProps {
   onExpandedChange?: (expanded: boolean) => void
   className?: string
   headerAction?: React.ReactNode
+  /** Inline control rendered immediately after the section title. */
+  titleAddon?: React.ReactNode
   /** Redact title/chevron with text skeleton bars while parent content loads. */
   skeleton?: boolean
 }
@@ -27,6 +29,7 @@ const SidebarDropdownSection: React.FC<SidebarDropdownSectionProps> = ({
   onExpandedChange,
   className = '',
   headerAction,
+  titleAddon,
   skeleton = false,
 }) => {
   const [internalOpen, setInternalOpen] = useState(defaultExpanded)
@@ -55,26 +58,53 @@ const SidebarDropdownSection: React.FC<SidebarDropdownSectionProps> = ({
         .join(' ')}
     >
       <div className="sidebar-dropdown__header-row">
-        <button
-          type="button"
-          className="sidebar-dropdown__header"
-          aria-expanded={isOpen}
-          aria-controls={panelId}
-          disabled={skeleton}
-          onClick={() => {
-            if (skeleton) return
-            setIsOpen((current) => !current)
-          }}
-        >
-          <span className="sidebar-dropdown__title">
-            {skeleton ? <TextSkeletonLine>{title}</TextSkeletonLine> : title}
-          </span>
-          {skeleton ? (
-            <Skeleton className="station-details-nav-skeleton-icon" style={{ width: 16, height: 16 }} />
-          ) : (
-            <ChevronRightIcon className="sidebar-dropdown__chevron" aria-hidden />
-          )}
-        </button>
+        {titleAddon && !skeleton ? (
+          <>
+            <div className="sidebar-dropdown__title-cluster">
+              <button
+                type="button"
+                className="sidebar-dropdown__header sidebar-dropdown__header--title"
+                aria-expanded={isOpen}
+                aria-controls={panelId}
+                onClick={() => setIsOpen((current) => !current)}
+              >
+                <span className="sidebar-dropdown__title">{title}</span>
+              </button>
+              <div className="sidebar-dropdown__title-addon">{titleAddon}</div>
+            </div>
+            <button
+              type="button"
+              className="sidebar-dropdown__header sidebar-dropdown__header--chevron"
+              aria-expanded={isOpen}
+              aria-controls={panelId}
+              aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${title}`}
+              onClick={() => setIsOpen((current) => !current)}
+            >
+              <ChevronRightIcon className="sidebar-dropdown__chevron" aria-hidden />
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="sidebar-dropdown__header"
+            aria-expanded={isOpen}
+            aria-controls={panelId}
+            disabled={skeleton}
+            onClick={() => {
+              if (skeleton) return
+              setIsOpen((current) => !current)
+            }}
+          >
+            <span className="sidebar-dropdown__title">
+              {skeleton ? <TextSkeletonLine>{title}</TextSkeletonLine> : title}
+            </span>
+            {skeleton ? (
+              <Skeleton className="station-details-nav-skeleton-icon" style={{ width: 16, height: 16 }} />
+            ) : (
+              <ChevronRightIcon className="sidebar-dropdown__chevron" aria-hidden />
+            )}
+          </button>
+        )}
         {isOpen && headerAction ? (
           <div className="sidebar-dropdown__header-action" onClick={(event) => event.stopPropagation()}>
             {headerAction}

@@ -1,0 +1,140 @@
+.rs-service-card {
+  cursor: pointer;
+}
+
+.rs-service-card:focus-visible {
+  outline: 2px solid var(--accent-base, #2563eb);
+  outline-offset: 2px;
+}
+
+.rs-service-card .rs-station-text-card {
+  cursor: inherit;
+}
+
+.rs-service-card .rs-station-location {
+  font-weight: 400;
+}
+
+.rs-service-card .rs-service-card__formation-bar {
+  gap: 10px;
+  min-height: 40px;
+  cursor: inherit;
+  pointer-events: none;
+}
+
+.rs-service-card .rs-service-card__formation-bar:has(.rs-service-card__formation) {
+  padding-top: 15px;
+  min-height: 66px;
+}
+
+.rs-service-card__coaches {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 2px;
+  width: 100%;
+  height: 16px;
+}
+
+.rs-service-card__coaches--empty {
+  opacity: 0;
+}
+
+.rs-service-card__coach {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 16px;
+  background: currentColor;
+  border-radius: 3px;
+}
+
+.rs-service-card__coaches--fixed .rs-service-card__coach {
+  flex: 0 0 36.67px;
+  width: 36.67px;
+}
+
+.rs-service-card__coach--front {
+  border-radius: 26px 3px 3px 5px;
+}
+
+.rs-service-card__coach--rear {
+  border-radius: 3px 26px 5px 3px;
+}
+
+.rs-service-card__coach--solo {
+  border-radius: 26px 26px 5px 5px;
+}
+
+.rs-service-card__coach--load-ontime,
+.rs-service-card__coach--load-delayed,
+.rs-service-card__coach--load-cancelled {
+  background: var(--formation-load-bg, var(--button-bg-active));
+}
+
+[data-theme='dark'] .rs-service-card__coach--load-ontime {
+  --formation-load-bg: hsl(141 72% 42%);
+}
+
+[data-theme='dark'] .rs-service-card__coach--load-delayed {
+  --formation-load-bg: hsl(53 78% 52%);
+}
+
+[data-theme='dark'] .rs-service-card__coach--load-cancelled {
+  --formation-load-bg: hsl(0 72% 52%);
+}
+
+.rs-service-card__formation {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  padding: 0;
+  min-height: 13px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  color: inherit;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.rs-service-card .rs-station-card-action-bar {
+  pointer-events: none;
+}
+
+.rs-service-card__status.rs-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  height: 40px;
+  min-height: 40px;
+  flex: 1 1 0;
+  min-width: 0 !important;
+  padding: 0 18px 0 12px;
+  font-size: 13px;
+  cursor: inherit;
+}
+
+.rs-service-card__status-label,
+.rs-service-card__status-mode {
+  position: relative;
+  z-index: 1;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.rs-service-card__status-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  text-align: left;
+}
+
+.rs-service-card__status-mode {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: right;
+  white-space: nowrap;
+}

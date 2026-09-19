@@ -14,12 +14,19 @@ export function readStationAdminModeEnabled(): boolean {
 export function writeStationAdminModeEnabled(enabled: boolean): void {
   if (typeof window === 'undefined') return
   try {
-    if (enabled) {
-      localStorage.setItem(STATION_ADMIN_MODE_STORAGE_KEY, '1')
-    } else {
-      localStorage.removeItem(STATION_ADMIN_MODE_STORAGE_KEY)
-    }
+    localStorage.setItem(STATION_ADMIN_MODE_STORAGE_KEY, enabled ? '1' : '0')
     window.dispatchEvent(new Event(STATION_ADMIN_MODE_CHANGED_EVENT))
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+/** First local-dev visit: turn admin mode on unless the user already chose off. */
+export function ensureStationAdminModeDefaultOn(): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (localStorage.getItem(STATION_ADMIN_MODE_STORAGE_KEY) != null) return
+    writeStationAdminModeEnabled(true)
   } catch {
     /* quota / private mode */
   }

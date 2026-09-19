@@ -1,0 +1,66 @@
+/* Flatten Darwin nested cards so they sit in the station-details main pane. */
+
+.darwin-details-page .svc-summary-card,
+.darwin-details-page .svc-viewmode-card,
+.darwin-details-page .svc-pattern-card,
+.darwin-details-page .svc-formation-section,
+.darwin-details-page .svc-state-card,
+.darwin-details-page .unit-summary-card,
+.darwin-details-page .unit-list-card,
+.darwin-details-page .unit-date-filter-card,
+.darwin-details-page .unit-state-card {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.darwin-details-page .svc-viewmode-card {
+  margin-bottom: var(--space-lg);
+}
+
+.darwin-details-page .svc-pattern-card > .svc-pattern-title {
+  display: none;
+}
+
+.darwin-details-page .darwin-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+.darwin-details-page .svc-footer,
+.darwin-details-page .unit-muted.darwin-details-source {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.darwin-details-page .unit-date-filter-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  max-width: 22rem;
+}
+
+.darwin-details-page .unit-date-filter-card label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-disabled);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.darwin-details-page .unit-date-filter-card select {
+  font: inherit;
+  min-height: 40px;
+  padding: 0 var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}

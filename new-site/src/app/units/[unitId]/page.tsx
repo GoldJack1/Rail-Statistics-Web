@@ -2,19 +2,23 @@
 
 import { useRouter, usePathname, useSearchParams, useParams } from 'next/navigation'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { CalendarBlank, Info, Train, WarningCircle } from '@phosphor-icons/react'
 
-import { PageTopHeader } from '@/components/misc'
 import { BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import { TextCard } from '@/components/cards'
 import { CarriageMap } from '@/components/darwin/CarriageMap'
 import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
+import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
+import type { AccountSection } from '@/components/misc/AccountSectionNav/AccountSectionNav'
+import StationDetailField from '@/components/models/StationDetails/StationDetailField'
+import StationSectionTitle from '@/components/models/StationDetails/StationSectionTitle'
 import { useUnitDetail } from '@/hooks/useUnitDetail'
 import type { PtacVehicle, ServiceDetail } from '@/types/darwin'
 import { paramAsString } from '@/utils/nextParams'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import './UnitLookupPage.css'
-import './ServiceDetailPage.css'
+import '../../services/[rid]/ServiceDetailPage.css'
 
 type UnitGroup = {
   unitKey: string
@@ -28,6 +32,13 @@ type UnitGroup = {
 }
 
 type UnitDetailTab = 'overview' | 'service' | 'logs' | 'services'
+
+const UNIT_SECTIONS: AccountSection[] = [
+  { id: 'overview', label: 'Overview', icon: Info },
+  { id: 'service', label: 'Latest service', icon: Train },
+  { id: 'logs', label: 'Unit logs', icon: WarningCircle },
+  { id: 'services', label: 'Services', icon: CalendarBlank },
+]
 type UnitCatalogItem = {
   unitId: string
   endOfDayMileageByDate?: Record<string, number>
@@ -84,6 +95,23 @@ function formatMilesDelta(value: number | null): string {
   return `${sign}${rounded.toLocaleString('en-GB')} mi`
 }
 
+function darwinRidToIsoDate(rid: string | null | undefined): string | null {
+  const m = String(rid || '').match(/^(\d{4})(\d{2})(\d{2})/)
+  if (!m) return null
+  return `${m[1]}-${m[2]}-${m[3]}`
+}
+
+function serviceDetailErrorMessage(status: number, body: { error?: string } | null, date: string | null): string {
+  const api = body?.error?.trim()
+  if (status === 404 && api?.startsWith('no historical data')) {
+    return `No saved Darwin snapshot for ${date || 'that day'}. Only the live timetable is loaded, so older unit workings cannot show a calling pattern.`
+  }
+  if (status === 404 && (api?.startsWith('rid not found') || !api)) {
+    return 'This working is not in today’s live Darwin timetable (often a leftover from an older day).'
+  }
+  return api || `HTTP ${status}`
+}
+
 function getTodayUkDateYmd(): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/London',
@@ -103,7 +131,6 @@ const UnitLookupPage: React.FC = () => {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const location = { pathname, search: searchParams.toString() ? `?${searchParams}` : '', state: null as unknown }
-  const [isMobile, setIsMobile] = useState(false)
   const [activeTab, setActiveTab] = useState<UnitDetailTab>('overview')
   const query = useMemo(() => new URLSearchParams(location.search), [location.search])
   const todayUk = useMemo(() => getTodayUkDateYmd(), [])
@@ -344,26 +371,22 @@ const UnitLookupPage: React.FC = () => {
   }
 
   useEffect(() => {
-    const mql = window.matchMedia('(max-width: 768px)')
-    const update = () => setIsMobile(mql.matches)
-    update()
-    mql.addEventListener('change', update)
-    return () => mql.removeEventListener('change', update)
-  }, [])
-
-  useEffect(() => {
     if (!shouldFetchLatestService) return
     setLatestServiceError(null)
     const rid = latestRidForSelection
     if (!rid) return
 
     const ac = new AbortController()
+    const dateFromDay = selectedDay !== 'all' ? selectedDay : darwinRidToIsoDate(rid)
     const qp = new URLSearchParams()
-    if (selectedDay !== 'all') qp.set('date', selectedDay)
+    if (dateFromDay) qp.set('date', dateFromDay)
     const url = `/api/darwin/service/${encodeURIComponent(rid)}${qp.toString() ? `?${qp.toString()}` : ''}`
     fetchDarwin(url, { signal: ac.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => null) as { error?: string } | null
+          throw new Error(serviceDetailErrorMessage(res.status, body, dateFromDay))
+        }
         return res.json()
       })
       .then((detail: ServiceDetail) => {
@@ -372,6 +395,7 @@ const UnitLookupPage: React.FC = () => {
       })
       .catch((e) => {
         if ((e as Error)?.name === 'AbortError') return
+        setLatestService(null)
         setLatestServiceError((e as Error)?.message || String(e))
       })
 
@@ -491,76 +515,34 @@ const UnitLookupPage: React.FC = () => {
   }, [availableDays, selectedDay, hasUnitDayQuery, todayUk])
 
   return (
-    <div className="container container--unit-details">
-      <PageTopHeader
-        title={title}
-        subtitle={subtitle}
-        className={`unit-header unit-header--${status}`}
-        actionContent={!isMobile ? (
-          <BUTWideButton
-            width="hug"
-            instantAction
-            icon={<BackIcon />}
-            onClick={() => router.push(`/units${location.search || ''}`)}
-          >
-            Back
-          </BUTWideButton>
-        ) : undefined}
-      />
-      <div className="unit-page">
-        <div className="unit-details-layout">
-          <aside className="unit-details-sidebar">
-            <div className="unit-details-sidebar-actions">
-              <BUTWideButton
-                width="hug"
-                instantAction
-                icon={<BackIcon />}
-                onClick={() => router.push(`/units${location.search || ''}`)}
-              >
-                Back
-              </BUTWideButton>
-            </div>
-            <nav className="unit-details-tabs" aria-label="Unit sections">
-              <BUTWideButton
-                width="hug"
-                colorVariant="accent"
-                className="unit-details-tab"
-                state={activeTab === 'overview' ? 'active' : 'pressed'}
-                onClick={() => setActiveTab('overview')}
-              >
-                Overview
-              </BUTWideButton>
-              <BUTWideButton
-                width="hug"
-                colorVariant="accent"
-                className="unit-details-tab"
-                state={activeTab === 'service' ? 'active' : 'pressed'}
-                onClick={() => setActiveTab('service')}
-              >
-                Latest Service
-              </BUTWideButton>
-              <BUTWideButton
-                width="hug"
-                colorVariant="accent"
-                className="unit-details-tab"
-                state={activeTab === 'logs' ? 'active' : 'pressed'}
-                onClick={() => setActiveTab('logs')}
-              >
-                Unit Logs
-              </BUTWideButton>
-              <BUTWideButton
-                width="hug"
-                colorVariant="accent"
-                className="unit-details-tab"
-                state={activeTab === 'services' ? 'active' : 'pressed'}
-                onClick={() => setActiveTab('services')}
-              >
-                Services
-              </BUTWideButton>
-            </nav>
-          </aside>
-
-          <main className="unit-details-main">
+    <DarwinDetailsLayout
+      title={title}
+      subtitle={subtitle}
+      headerClassName={`unit-header unit-header--${status}`}
+      actionContent={(
+        <div className="station-details-header-actions">
+          <div className="station-details-header-actions__controls">
+            <BUTWideButton
+              width="hug"
+              instantAction
+              icon={<BackIcon />}
+              onClick={() => router.push(`/units${location.search || ''}`)}
+            >
+              Back
+            </BUTWideButton>
+          </div>
+        </div>
+      )}
+      sections={UNIT_SECTIONS}
+      activeSectionId={activeTab}
+      onSelect={(id) => {
+        if (id === 'overview' || id === 'service' || id === 'logs' || id === 'services') {
+          setActiveTab(id)
+        }
+      }}
+      ariaLabel="Unit sections"
+      minSectionCount={4}
+    >
             {status === 'idle' && (
               <section className="unit-state-card">
                 <p>Enter a unit ID to load PTAC unit details.</p>
@@ -613,25 +595,14 @@ const UnitLookupPage: React.FC = () => {
             )}
 
             {data && activeTab === 'overview' && (
-              <>
+              <section className="modal-section">
+                <StationSectionTitle title="Overview" icon={Info} pageHeading />
                 <section className="unit-summary-card">
-                  <div className="unit-summary-grid">
-                    <div className="unit-summary-item">
-                      <span className="unit-summary-label">Unit ID</span>
-                      <span className="unit-summary-value">{data.unitId}</span>
-                    </div>
-                    <div className="unit-summary-item">
-                      <span className="unit-summary-label">Fleet</span>
-                      <span className="unit-summary-value">{data.fleetId || '-'}</span>
-                    </div>
-                    <div className="unit-summary-item">
-                      <span className="unit-summary-label">Vehicles</span>
-                      <span className="unit-summary-value">{data.vehicles.length}</span>
-                    </div>
-                    <div className="unit-summary-item">
-                      <span className="unit-summary-label">Services in diagram</span>
-                      <span className="unit-summary-value">{filteredServices.length}</span>
-                    </div>
+                  <div className="modal-details-grid">
+                    <StationDetailField label="Unit ID" value={data.unitId} />
+                    <StationDetailField label="Fleet" value={data.fleetId || '-'} />
+                    <StationDetailField label="Vehicles" value={String(data.vehicles.length)} />
+                    <StationDetailField label="Services in diagram" value={String(filteredServices.length)} />
                   </div>
                 </section>
 
@@ -690,12 +661,12 @@ const UnitLookupPage: React.FC = () => {
                     ))}
                   </div>
                 </section>
-              </>
+              </section>
             )}
 
             {data && activeTab === 'logs' && (
-              <section className="unit-list-card">
-                <h2>Logs by vehicle</h2>
+              <section className="modal-section unit-list-card">
+                <StationSectionTitle title="Unit logs" icon={WarningCircle} pageHeading />
                 <div className="unit-services">
                   {!latestService && (
                     <p className="unit-muted">Loading latest service logs...</p>
@@ -727,12 +698,15 @@ const UnitLookupPage: React.FC = () => {
             )}
 
             {data && activeTab === 'service' && (
-              <section className="unit-list-card">
-                <h2>
-                  Latest service snapshot ({latestRidForSelection || 'no RID'})
-                  {selectedDay !== 'all' ? ` · ${formatDateOnly(selectedDay)}` : ''}
-                </h2>
-                {latestServiceError && <p className="unit-muted">Could not load latest service detail: {latestServiceError}</p>}
+              <section className="modal-section unit-list-card">
+                <StationSectionTitle
+                  title={`Latest service${latestRidForSelection ? ` (${latestRidForSelection})` : ''}${selectedDay !== 'all' ? ` · ${formatDateOnly(selectedDay)}` : ''}`}
+                  icon={Train}
+                  pageHeading
+                />
+                {latestServiceError && (
+                  <p className="unit-muted">Could not load latest service detail: {latestServiceError}</p>
+                )}
                 {latestService ? (
                   <>
                     <div className="unit-summary-grid">
@@ -853,7 +827,7 @@ const UnitLookupPage: React.FC = () => {
                       )}
                     </div>
                   </>
-                ) : (
+                ) : latestServiceError ? null : (
                   <p className="unit-muted">
                     {latestRidForSelection ? 'Loading latest service details...' : 'No service available for selected day.'}
                   </p>
@@ -862,8 +836,8 @@ const UnitLookupPage: React.FC = () => {
             )}
 
             {data && activeTab === 'services' && (
-              <section className="unit-list-card">
-                <h2>Services</h2>
+              <section className="modal-section unit-list-card">
+                <StationSectionTitle title="Services" icon={CalendarBlank} pageHeading />
                 <div className="unit-services">
                   {filteredServices.map((svc, idx) => (
                     <TextCard
@@ -873,6 +847,11 @@ const UnitLookupPage: React.FC = () => {
                       state="default"
                       onClick={() => {
                         const qp = new URLSearchParams()
+                        const serviceDate =
+                          (selectedDay && selectedDay !== 'all' ? selectedDay : null) ||
+                          darwinRidToIsoDate(svc.rid) ||
+                          (svc.start ? svc.start.slice(0, 10) : null)
+                        if (serviceDate) qp.set('date', serviceDate)
                         if (selectedDay && selectedDay !== 'all') qp.set('unitDay', selectedDay)
                         qp.set('from', `${location.pathname}${location.search || ''}`)
                         router.push(`/services/${encodeURIComponent(svc.rid)}${qp.toString() ? `?${qp.toString()}` : ''}`)
@@ -888,17 +867,12 @@ const UnitLookupPage: React.FC = () => {
             )}
 
             {data && (
-              <section className="unit-list-card">
-                <p className="unit-muted">
-                  Source: Network Rail Darwin Push Port and PTAC feed.{' '}
-                  <DataLicenceAttribution />
-                </p>
-              </section>
+              <p className="unit-muted darwin-details-source">
+                Source: Network Rail Darwin Push Port and PTAC feed.{' '}
+                <DataLicenceAttribution />
+              </p>
             )}
-          </main>
-        </div>
-      </div>
-    </div>
+    </DarwinDetailsLayout>
   )
 }
 

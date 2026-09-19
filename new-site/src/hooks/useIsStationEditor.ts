@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { isLocalDevLoginBypassEnabled } from '@/utils/localDevFlags'
 import { getMasterPublishEmail } from '@/utils/masterPublishPolicy'
 
 /**
@@ -14,6 +15,11 @@ export function useIsStationEditor(): { loading: boolean; isEditor: boolean } {
   const [isEditor, setIsEditor] = useState(false)
 
   useEffect(() => {
+    if (isLocalDevLoginBypassEnabled()) {
+      setIsEditor(true)
+      setLoading(false)
+      return
+    }
     if (authLoading) return
     if (!user) {
       setIsEditor(false)
@@ -60,6 +66,10 @@ export function useIsStationEditor(): { loading: boolean; isEditor: boolean } {
       cancelled = true
     }
   }, [user, authLoading])
+
+  if (isLocalDevLoginBypassEnabled()) {
+    return { loading: false, isEditor: true }
+  }
 
   return { loading: authLoading || loading, isEditor }
 }

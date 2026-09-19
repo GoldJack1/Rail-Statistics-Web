@@ -23,7 +23,13 @@ export default function AppMain({ children }: { children: React.ReactNode }) {
     pathname === '/account' ||
     pathname.startsWith('/account/') ||
     pathname === '/leaderboards' ||
-    pathname.startsWith('/leaderboards/')
+    pathname.startsWith('/leaderboards/') ||
+    pathname === '/departures' ||
+    pathname.startsWith('/departures/') ||
+    pathname === '/services' ||
+    pathname.startsWith('/services/') ||
+    pathname === '/units' ||
+    pathname.startsWith('/units/')
 
   return (
     <main className={`main-content app-main${fillsMainColumn ? ' app-main--stations-layout' : ''}`}>

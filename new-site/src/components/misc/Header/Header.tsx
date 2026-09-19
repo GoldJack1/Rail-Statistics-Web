@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useId, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useAppHeaderOffset } from '@/hooks/useAppHeaderOffset'
 import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
+import { areDarwinNavPagesEnabled } from '@/utils/localDevFlags'
 import { resolveAppDownloadAction } from '@/utils/appDownload'
 import { BUTBaseButton, BUTHeaderLink, BUTWideButton } from '../../buttons'
 import HomeDownloadPlatformModal from '../../models/HomeDownloadPlatformModal/HomeDownloadPlatformModal'
@@ -46,6 +47,8 @@ function getHeaderPageTitle(pathname: string): string {
   if (pathname.startsWith('/admin/messages')) return 'Messages'
   if (pathname.startsWith('/admin/network-messages')) return 'Network Messages'
   if (pathname.startsWith('/admin/d-payg')) return 'D-PAYG'
+  if (pathname.startsWith('/departures')) return 'Departures'
+  if (pathname.startsWith('/services')) return 'Service'
   if (pathname.startsWith('/units')) return 'Units'
   if (pathname.startsWith('/admin/api-status')) return 'API Status'
   return 'Rail Statistics'
@@ -71,6 +74,8 @@ const Header: React.FC = () => {
     pathname.startsWith('/contactless-fares') ||
     pathname.startsWith('/smartcard-fares')
   const isMapActive = pathname === '/stations/map' || pathname === '/admin/map'
+  const isDeparturesActive = pathname.startsWith('/departures') || pathname.startsWith('/services')
+  const isUnitsActive = pathname.startsWith('/units')
 
   const isAccountActive = pathname.startsWith('/account') || pathname.startsWith('/leaderboards')
 
@@ -81,6 +86,12 @@ const Header: React.FC = () => {
     { to: '/stations', label: 'Stations', active: isStationsActive && !isMapActive },
     { to: '/fares', label: 'Fares', active: isFaresActive },
     { to: '/stations/map', label: 'Maps', active: isMapActive },
+    ...(areDarwinNavPagesEnabled()
+      ? [
+          { to: '/departures', label: 'Departures', active: isDeparturesActive },
+          { to: '/units', label: 'Units', active: isUnitsActive },
+        ]
+      : []),
     ...(isAccountSystemEnabled
       ? [{ to: '/account', label: 'Account', active: isAccountActive }]
       : []),

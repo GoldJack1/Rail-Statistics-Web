@@ -8,7 +8,9 @@ import { useStationAdminMode } from '../../../hooks/useStationAdminMode'
 import { useIsStationEditor } from '../../../hooks/useIsStationEditor'
 import { useTheme } from '../../../hooks/useTheme'
 import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
+import { isLocalDevLoginBypassEnabled, areDarwinNavPagesEnabled } from '@/utils/localDevFlags'
 import {
+  ensureStationAdminModeDefaultOn,
   isStationAdminSearchParam,
   writeStationAdminModeEnabled,
 } from '../../../utils/stationAdminModeStorage'
@@ -33,6 +35,12 @@ const Footer: React.FC = () => {
     pathname === '/stations/map' ||
     pathname === '/admin/stations' ||
     pathname === '/admin/map'
+
+  useEffect(() => {
+    if (isLocalDevLoginBypassEnabled()) {
+      ensureStationAdminModeDefaultOn()
+    }
+  }, [])
 
   useEffect(() => {
     if (user && isStationAdminSearchParam(search)) {
@@ -89,6 +97,16 @@ const Footer: React.FC = () => {
               <BUTFooterLink to="/stations/map">
                 Maps
               </BUTFooterLink>
+            {areDarwinNavPagesEnabled() ? (
+              <>
+                <BUTFooterLink to="/departures">
+                  Departures
+                </BUTFooterLink>
+                <BUTFooterLink to="/units">
+                  Units
+                </BUTFooterLink>
+              </>
+            ) : null}
             <BUTFooterLink to="/migration">
               Migration
             </BUTFooterLink>
@@ -115,7 +133,7 @@ const Footer: React.FC = () => {
             </span>
           </BUTFooterLink>
         </div>
-        {user && isEditor ? (
+        {isEditor ? (
           <div className="site-footer-secondary-row">
             <div className="site-footer-admin-toggle">
               <span className="site-footer-admin-toggle__label">Admin</span>
@@ -142,9 +160,11 @@ const Footer: React.FC = () => {
               <BUTFooterLink to="/admin/design-system">
                 Design System
               </BUTFooterLink>
-              <BUTFooterLink onActivate={logout} className="site-footer-logout">
-                Log out
-              </BUTFooterLink>
+              {user ? (
+                <BUTFooterLink onActivate={logout} className="site-footer-logout">
+                  Log out
+                </BUTFooterLink>
+              ) : null}
             </div>
           </div>
         ) : user ? (

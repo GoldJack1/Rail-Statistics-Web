@@ -46,8 +46,34 @@
     flex-shrink: 0;
 }
 
+.sidebar-dropdown__title-cluster {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding-left: var(--space-md);
+}
+
+.sidebar-dropdown__header--title {
+    flex: 0 1 auto;
+    padding: var(--space-lg) 0;
+}
+
+.sidebar-dropdown__header--chevron {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    padding-left: var(--space-sm);
+}
+
 .sidebar-dropdown__title {
     min-width: 0;
+}
+
+.sidebar-dropdown__title-addon {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    line-height: 0;
 }
 
 .sidebar-dropdown__chevron {

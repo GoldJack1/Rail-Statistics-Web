@@ -2,16 +2,19 @@
 
 import { useRouter, usePathname, useSearchParams, useParams } from 'next/navigation'
 import React, { useMemo, useState } from 'react'
-import { ArrowsClockwise } from '@phosphor-icons/react'
+import { ArrowsClockwise, Code, Info, MapPin, Train } from '@phosphor-icons/react'
 
 import { useServiceDetail } from '@/hooks/useServiceDetail'
 import { useStations } from '@/hooks/useStations'
-import { PageTopHeader } from '@/components/misc'
-import { BUTBaseButton, BUTCircleButton, BUTLeftIconWideButton, BUTTwoButtonBar, BUTWideButton } from '@/components/buttons'
+import { BUTBaseButton, BUTCircleButton, BUTTwoButtonBar, BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import { ActivityPill } from '@/components/darwin/ActivityPill'
 import { CarriageMap } from '@/components/darwin/CarriageMap'
 import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
+import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
+import StationDetailField from '@/components/models/StationDetails/StationDetailField'
+import StationSectionTitle from '@/components/models/StationDetails/StationSectionTitle'
+import type { AccountSection } from '@/components/misc/AccountSectionNav/AccountSectionNav'
 import type { ServiceDetail } from '@/types/darwin'
 import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
 import { paramAsString } from '@/utils/nextParams'
@@ -30,6 +33,14 @@ const SLOT_KIND_LABEL: Record<'origin' | 'stop' | 'pass' | 'destination', string
   destination: 'Destination',
 }
 type ViewMode = 'detailed' | 'simple'
+type ServiceSection = 'overview' | 'formation' | 'calling' | 'raw'
+
+const SERVICE_SECTIONS: AccountSection[] = [
+  { id: 'overview', label: 'Overview', icon: Info },
+  { id: 'formation', label: 'Formation', icon: Train },
+  { id: 'calling', label: 'Calling pattern', icon: MapPin },
+  { id: 'raw', label: 'Raw data', icon: Code },
+]
 
 /**
  * Phrase a Darwin association into a sentence the passenger can act on.
@@ -338,6 +349,7 @@ const ServiceDetailPage: React.FC = () => {
   const router = useRouter()
   const rid = paramAsString(params.rid)
   const [viewMode, setViewMode] = useState<ViewMode>('detailed')
+  const [section, setSection] = useState<ServiceSection>('overview')
 
   const query = useMemo(() => new URLSearchParams(location.search), [location.search])
   const historicalDate = query.get('date') || undefined
@@ -394,14 +406,14 @@ const ServiceDetailPage: React.FC = () => {
   const viewModeSelectedIndex = viewMode === 'detailed' ? 0 : 1
 
   return (
-    <div className="service-detail-shell">
-      <PageTopHeader
-        title={title}
-        subtitle={subtitle}
-        className={`service-detail-header service-detail-header--${status}`}
-        actionContent={(
-          <div className="svc-header-actions">
-            <BUTLeftIconWideButton
+    <DarwinDetailsLayout
+      title={title}
+      subtitle={subtitle}
+      headerClassName={`service-detail-header service-detail-header--${status}`}
+      actionContent={(
+        <div className="station-details-header-actions">
+          <div className="station-details-header-actions__controls">
+            <BUTWideButton
               width="hug"
               icon={<BackIcon />}
               onClick={() => {
@@ -411,7 +423,7 @@ const ServiceDetailPage: React.FC = () => {
               }}
             >
               Back
-            </BUTLeftIconWideButton>
+            </BUTWideButton>
             <BUTCircleButton
               ariaLabel="Refresh service detail"
               instantAction
@@ -420,10 +432,18 @@ const ServiceDetailPage: React.FC = () => {
               icon={<ArrowsClockwise size={16} aria-hidden />}
             />
           </div>
-        )}
-      />
-
-      <div className="service-detail-page">
+        </div>
+      )}
+      sections={SERVICE_SECTIONS}
+      activeSectionId={section}
+      onSelect={(id) => {
+        if (id === 'overview' || id === 'formation' || id === 'calling' || id === 'raw') {
+          setSection(id)
+        }
+      }}
+      ariaLabel="Service sections"
+      minSectionCount={4}
+    >
         {status === 'not-found' && (
           <section className="svc-state-card svc-state-card--error">
             <h2>Service not found</h2>
@@ -447,8 +467,9 @@ const ServiceDetailPage: React.FC = () => {
           </section>
         )}
 
-        {data && (
-          <>
+        {data && section === 'overview' && (
+          <section className="modal-section">
+            <StationSectionTitle title="Overview" icon={Info} pageHeading />
             <section className="svc-viewmode-card" aria-label="View mode">
               <BUTTwoButtonBar
                 className="svc-viewmode-toggle"
@@ -469,52 +490,29 @@ const ServiceDetailPage: React.FC = () => {
               className={`svc-summary-card ${data.cancelled ? 'svc-summary-card--cancelled' : ''}`}
               aria-label="Service summary"
             >
-              <div className="svc-summary-grid">
-                <div className="svc-summary-item">
-                  <span className="svc-summary-label">Operator</span>
-                  <span className="svc-summary-value">{data.tocName || data.toc}</span>
-                </div>
-                <div className="svc-summary-item">
-                  <span className="svc-summary-label">Headcode</span>
-                  <span className="svc-summary-value svc-mono">{data.trainId}</span>
-                </div>
-                {viewMode === 'detailed' && (
-                  <div className="svc-summary-item">
-                    <span className="svc-summary-label">UID</span>
-                    <span className="svc-summary-value svc-mono">{data.uid}</span>
-                  </div>
-                )}
-                {viewMode === 'detailed' && (
-                  <div className="svc-summary-item">
-                    <span className="svc-summary-label">Service date</span>
-                    <span className="svc-summary-value svc-mono">{data.ssd}</span>
-                  </div>
-                )}
-                <div className="svc-summary-item">
-                  <span className="svc-summary-label">Origin</span>
-                  <span className="svc-summary-value">{data.originName || data.origin}</span>
-                </div>
-                <div className="svc-summary-item">
-                  <span className="svc-summary-label">Destination</span>
-                  <span className="svc-summary-value">{data.destinationName || data.destination}</span>
-                </div>
-                {viewMode === 'detailed' && (
-                  <div className="svc-summary-item">
-                    <span className="svc-summary-label">Calling pattern</span>
-                    <span className="svc-summary-value svc-mono">
-                      {data.stops.filter((s) => SLOT_KIND[s.slot] !== 'pass').length} calling · {data.stops.filter((s) => SLOT_KIND[s.slot] === 'pass').length} passing
-                    </span>
-                  </div>
-                )}
-                {viewMode === 'detailed' && (
-                  <div className="svc-summary-item">
-                    <span className="svc-summary-label">Type</span>
-                    <span className="svc-summary-value">
-                      {data.isPassenger ? 'Passenger' : 'Non-passenger'}
-                      {data.trainCat ? ` · ${data.trainCat}` : ''}
-                    </span>
-                  </div>
-                )}
+              <div className="modal-details-grid">
+                <StationDetailField label="Operator" value={data.tocName || data.toc} />
+                <StationDetailField label="Headcode" value={data.trainId} />
+                {viewMode === 'detailed' ? (
+                  <StationDetailField label="UID" value={data.uid} />
+                ) : null}
+                {viewMode === 'detailed' ? (
+                  <StationDetailField label="Service date" value={data.ssd} />
+                ) : null}
+                <StationDetailField label="Origin" value={data.originName || data.origin} />
+                <StationDetailField label="Destination" value={data.destinationName || data.destination} />
+                {viewMode === 'detailed' ? (
+                  <StationDetailField
+                    label="Calling pattern"
+                    value={`${data.stops.filter((s) => SLOT_KIND[s.slot] !== 'pass').length} calling · ${data.stops.filter((s) => SLOT_KIND[s.slot] === 'pass').length} passing`}
+                  />
+                ) : null}
+                {viewMode === 'detailed' ? (
+                  <StationDetailField
+                    label="Type"
+                    value={`${data.isPassenger ? 'Passenger' : 'Non-passenger'}${data.trainCat ? ` · ${data.trainCat}` : ''}`}
+                  />
+                ) : null}
               </div>
 
               {data.cancelled && data.cancellation && (
@@ -565,13 +563,21 @@ const ServiceDetailPage: React.FC = () => {
               ))}
 
             </section>
+            <footer className="svc-footer">
+              <span>Source: Network Rail Darwin Push Port</span>
+              <span className="svc-footer-sep" aria-hidden="true">·</span>
+              <DataLicenceAttribution />
+              <span className="svc-footer-sep" aria-hidden="true">·</span>
+              <span>RID {data.rid}</span>
+              <span className="svc-footer-sep" aria-hidden="true">·</span>
+              <span>Updated {new Date(data.updatedAt).toLocaleString('en-GB', { timeZone: 'Europe/London' })}</span>
+            </footer>
+          </section>
+        )}
 
-            {/* Live formation + per-coach loading. Sits above the calling
-             * pattern so passengers see coach information — typically the
-             * thing they're trying to figure out at the platform — first.
-             * Renders a muted placeholder note when no formation has been
-             * published (most regional units don't broadcast it). */}
-            <section className="svc-formation-section" aria-label="Coach formation and loading">
+        {data && section === 'formation' && (
+            <section className="modal-section svc-formation-section" aria-label="Coach formation and loading">
+              <StationSectionTitle title="Formation" icon={Train} pageHeading />
               <CarriageMap
                 formation={data.formation}
                 consist={data.consist}
@@ -615,10 +621,11 @@ const ServiceDetailPage: React.FC = () => {
                 </div>
               ))}
             </section>
+        )}
 
-            {/* Calling pattern */}
-            <section className="svc-pattern-card" aria-label="Calling pattern">
-              <h2 className="svc-pattern-title">Calling pattern</h2>
+        {data && section === 'calling' && (
+            <section className="modal-section svc-pattern-card" aria-label="Calling pattern">
+              <StationSectionTitle title="Calling pattern" icon={MapPin} pageHeading />
               <div className="svc-table-wrap">
                 <table className="svc-stops-table">
                   <thead>
@@ -770,25 +777,15 @@ const ServiceDetailPage: React.FC = () => {
                 </table>
               </div>
             </section>
-
-            {/* Vehicle details and logs hidden by request; users can jump to
-             * Unit detail from Coach formation actions above. */}
-
-            <RawDataDump data={data} />
-
-            <footer className="svc-footer">
-              <span>Source: Network Rail Darwin Push Port</span>
-              <span className="svc-footer-sep" aria-hidden="true">·</span>
-              <DataLicenceAttribution />
-              <span className="svc-footer-sep" aria-hidden="true">·</span>
-              <span>RID {data.rid}</span>
-              <span className="svc-footer-sep" aria-hidden="true">·</span>
-              <span>Updated {new Date(data.updatedAt).toLocaleString('en-GB', { timeZone: 'Europe/London' })}</span>
-            </footer>
-          </>
         )}
-      </div>
-    </div>
+
+        {data && section === 'raw' && (
+          <section className="modal-section">
+            <StationSectionTitle title="Raw data" icon={Code} pageHeading />
+            <RawDataDump data={data} />
+          </section>
+        )}
+    </DarwinDetailsLayout>
   )
 }
 

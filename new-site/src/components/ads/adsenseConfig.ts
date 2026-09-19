@@ -18,3 +18,13 @@ export const ADSENSE_IN_FEED_LAYOUT_KEY = '-fb+5y+3y-dx+b1'
  * Unset / any other value keeps ads off (safe default for local/dev).
  */
 export const isAdSenseEnabled = process.env.NEXT_PUBLIC_ADSENSE_ENABLED === 'true'
+
+/**
+ * Head tags (`adsbygoogle.js` + publisher meta). Off in `next dev` unless
+ * `NEXT_PUBLIC_ADSENSE_ON_LOCALHOST=true`, so Google’s managed ads script
+ * cannot rewrite `<head>` before hydration.
+ */
+export const isAdSenseHeadTagsEnabled =
+  isAdSenseEnabled &&
+  (process.env.NODE_ENV === 'production' ||
+    process.env.NEXT_PUBLIC_ADSENSE_ON_LOCALHOST === 'true')

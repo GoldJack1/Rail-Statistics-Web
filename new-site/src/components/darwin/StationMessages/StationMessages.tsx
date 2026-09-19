@@ -1,10 +1,14 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
+import { X } from '@phosphor-icons/react'
+
+import TextCard from '@/components/cards/TextCard/TextCard'
+import type { TextCardState } from '@/components/cards/TextCard/TextCard'
 import type { StationMessage } from '../../../types/darwin'
+import '@/components/stations/NetworkMessageAlertBanner.css'
 import './StationMessages.css'
 
-const SEVERITY_LABELS = ['Info', 'Minor', 'Major', 'Severe']
 const COLLAPSE_THRESHOLD = 2
 const DISMISSED_KEY = 'rs.darwin.dismissedMessages'
 const STATUS_DISRUPTIONS_BOILERPLATE_RE =
@@ -12,26 +16,27 @@ const STATUS_DISRUPTIONS_BOILERPLATE_RE =
 const PROMOTE_TO_MAJOR_RE =
   /\b(unable to run|no trains(?: are)? running|line (?:is )?closed|service(?:s)? suspended)\b/i
 
-/** Set of dismissed message ids, persisted in localStorage so a user's
- * dismissal sticks across reloads. The Darwin daemon only re-broadcasts a
- * message if the underlying NRCC entry changes its id, so this is safe. */
+/** Match http(s) URLs and bare www. hosts for linkification. */
+const URL_IN_TEXT_RE =
+  /\b((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?)\]'"])/gi
+
 function readDismissed(): Set<string> {
   try {
     const raw = window.localStorage.getItem(DISMISSED_KEY)
     if (!raw) return new Set()
     const parsed = JSON.parse(raw)
     return new Set(Array.isArray(parsed) ? parsed.map(String) : [])
-  } catch { return new Set() }
-}
-function writeDismissed(ids: Set<string>): void {
-  try { window.localStorage.setItem(DISMISSED_KEY, JSON.stringify([...ids])) } catch {}
+  } catch {
+    return new Set()
+  }
 }
 
-/**
- * NRCC messages sometimes append a generic "Latest information can be found in
- * Status and Disruptions" sentence. Hide this boilerplate so only actionable
- * message content is shown in the banner.
- */
+function writeDismissed(ids: Set<string>): void {
+  try {
+    window.localStorage.setItem(DISMISSED_KEY, JSON.stringify([...ids]))
+  } catch {}
+}
+
 function sanitizeMessageText(text: string): string {
   return text
     .replace(STATUS_DISRUPTIONS_BOILERPLATE_RE, ' ')
@@ -39,16 +44,56 @@ function sanitizeMessageText(text: string): string {
     .trim()
 }
 
-/**
- * Darwin/NRCC occasionally marks obviously high-impact text as severity=1.
- * Promote those patterns to "Major" in presentation to avoid downplaying
- * service-stopping disruptions (e.g. "Trains are unable to run between...").
- */
 function deriveDisplaySeverity(message: StationMessage): number {
   const feedSeverity = Math.max(0, Math.min(3, Math.floor(message.severity || 0)))
   if (feedSeverity >= 2) return feedSeverity
   if (PROMOTE_TO_MAJOR_RE.test(message.plainMessage || '')) return 2
   return feedSeverity
+}
+
+/** Darwin OW 0–3 → same TextCard colours as network-message priorities. */
+function textCardStateForSeverity(severity: number): TextCardState {
+  if (severity >= 3) return 'redAction'
+  if (severity === 2) return 'accent'
+  if (severity === 1) return 'favAction'
+  return 'default'
+}
+
+function hrefForMatchedUrl(raw: string): string {
+  const trimmed = raw.trim()
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  return `https://${trimmed}`
+}
+
+function linkifyText(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = []
+  let lastIndex = 0
+  const re = new RegExp(URL_IN_TEXT_RE.source, URL_IN_TEXT_RE.flags)
+  let match: RegExpExecArray | null
+  while ((match = re.exec(text)) !== null) {
+    const start = match.index
+    const raw = match[1] ?? match[0]
+    if (start > lastIndex) {
+      nodes.push(text.slice(lastIndex, start))
+    }
+    const href = hrefForMatchedUrl(raw)
+    nodes.push(
+      <a
+        key={`link-${start}-${raw}`}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="network-message-alert-banner__link"
+      >
+        {raw}
+      </a>
+    )
+    lastIndex = start + raw.length
+  }
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex))
+  }
+  return nodes.length > 0 ? nodes : [text]
 }
 
 export const StationMessages: React.FC<{
@@ -58,18 +103,14 @@ export const StationMessages: React.FC<{
   scope?: string
 }> = ({ messages }) => {
   const [dismissed, setDismissed] = useState<Set<string>>(() => readDismissed())
-  const [expanded,  setExpanded]  = useState(false)
+  const [expanded, setExpanded] = useState(false)
 
-  // Re-read on the first mount and whenever the messages array reference
-  // changes — covers the case where the user dismissed elsewhere then
-  // navigated back.
-  useEffect(() => { setDismissed(readDismissed()) }, [messages])
+  useEffect(() => {
+    setDismissed(readDismissed())
+  }, [messages])
 
   if (!messages || messages.length === 0) return null
 
-  // Defence in depth: even if the daemon ever lets through an empty / very
-  // short message (broken flatten, partial broadcast), don't render an
-  // empty banner. The UI should never display a blank "MAJOR TRAIN" pill.
   const visible = messages
     .filter((m) => !dismissed.has(m.id) && m.plainMessage)
     .map((m) => ({ ...m, plainMessage: sanitizeMessageText(m.plainMessage) }))
@@ -77,38 +118,62 @@ export const StationMessages: React.FC<{
   if (visible.length === 0) return null
 
   const showAll = expanded || visible.length <= COLLAPSE_THRESHOLD
-  const shown   = showAll ? visible : visible.slice(0, COLLAPSE_THRESHOLD)
+  const shown = showAll ? visible : visible.slice(0, COLLAPSE_THRESHOLD)
   const hiddenCount = visible.length - shown.length
 
   function dismiss(id: string) {
-    const next = new Set(dismissed); next.add(id)
-    writeDismissed(next); setDismissed(next)
+    const next = new Set(dismissed)
+    next.add(id)
+    writeDismissed(next)
+    setDismissed(next)
   }
 
   return (
-    <div className="dep-msg-stack" role="region" aria-label="Station messages">
+    <div className="network-message-alert-banner dep-station-messages" role="region" aria-label="Station messages">
       {shown.map((m) => {
         const sev = deriveDisplaySeverity(m)
         return (
-          <div key={m.id} className={`dep-msg dep-msg--sev${sev}`} role="alert">
-            <div className="dep-msg-header">
-              <span className="dep-msg-sev">{SEVERITY_LABELS[sev]}</span>
-              {m.category && <span className="dep-msg-cat">{m.category}</span>}
-              <button
-                type="button"
-                className="dep-msg-dismiss"
-                aria-label="Dismiss message"
-                onClick={() => dismiss(m.id)}
-              >×</button>
-            </div>
-            <p className="dep-msg-body">{m.plainMessage}</p>
+          <div
+            key={m.id}
+            className={`network-message-alert-banner__item network-message-alert-banner__item--priority-${
+              sev >= 3 ? 1 : sev === 2 ? 2 : sev === 1 ? 3 : 4
+            }`}
+          >
+            <TextCard
+              static
+              title=""
+              description={(
+                <span className="network-message-alert-banner__description">
+                  <span className="network-message-alert-banner__paragraphs">
+                    <span className="network-message-alert-banner__paragraph">
+                      <span className="network-message-alert-banner__paragraph-text">
+                        {linkifyText(m.plainMessage)}
+                      </span>
+                    </span>
+                  </span>
+                </span>
+              )}
+              state={textCardStateForSeverity(sev)}
+              trailingIcon={(
+                <button
+                  type="button"
+                  className="dep-station-messages__dismiss"
+                  aria-label="Dismiss message"
+                  onClick={() => dismiss(m.id)}
+                >
+                  <X size={16} weight="bold" aria-hidden />
+                </button>
+              )}
+              className="network-message-alert-banner__card"
+              ariaLabel={m.plainMessage}
+            />
           </div>
         )
       })}
       {hiddenCount > 0 && (
         <button
           type="button"
-          className="dep-msg-more"
+          className="network-message-alert-banner__toggle"
           onClick={() => setExpanded(true)}
         >
           Show {hiddenCount} more message{hiddenCount === 1 ? '' : 's'}
