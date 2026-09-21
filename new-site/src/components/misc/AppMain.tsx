@@ -29,7 +29,9 @@ export default function AppMain({ children }: { children: React.ReactNode }) {
     pathname === '/services' ||
     pathname.startsWith('/services/') ||
     pathname === '/units' ||
-    pathname.startsWith('/units/')
+    pathname.startsWith('/units/') ||
+    pathname === '/bash-planner' ||
+    pathname.startsWith('/bash-planner/')
 
   return (
     <main className={`main-content app-main${fillsMainColumn ? ' app-main--stations-layout' : ''}`}>

@@ -10,26 +10,21 @@ import { TextCard } from '@/components/cards'
 import { CarriageMap } from '@/components/darwin/CarriageMap'
 import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
 import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
+import {
+  groupUnitsFromConsist,
+  ServiceVehicleDetails,
+  type ServiceUnitGroup,
+} from '@/components/darwin/ServiceVehicleDetails'
 import type { AccountSection } from '@/components/misc/AccountSectionNav/AccountSectionNav'
 import StationDetailField from '@/components/models/StationDetails/StationDetailField'
 import StationSectionTitle from '@/components/models/StationDetails/StationSectionTitle'
 import { useUnitDetail } from '@/hooks/useUnitDetail'
-import type { PtacVehicle, ServiceDetail } from '@/types/darwin'
+import type { ServiceDetail } from '@/types/darwin'
 import { paramAsString } from '@/utils/nextParams'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
+import { isPlausibleUnitOperatingDay, ukCalendarYmd } from '@/utils/unitOperatingDay'
 import './UnitLookupPage.css'
 import '../../services/[rid]/ServiceDetailPage.css'
-
-type UnitGroup = {
-  unitKey: string
-  unitId: string | null
-  fleetId: string | null
-  resourceType: string | null
-  unitStatus: string | null
-  endOfDayMiles: number | null
-  reversed: boolean
-  vehicles: PtacVehicle[]
-}
 
 type UnitDetailTab = 'overview' | 'service' | 'logs' | 'services'
 
@@ -113,16 +108,7 @@ function serviceDetailErrorMessage(status: number, body: { error?: string } | nu
 }
 
 function getTodayUkDateYmd(): string {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/London',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  }).formatToParts(new Date())
-  const day = parts.find((p) => p.type === 'day')?.value || '01'
-  const month = parts.find((p) => p.type === 'month')?.value || '01'
-  const year = parts.find((p) => p.type === 'year')?.value || '1970'
-  return `${year}-${month}-${day}`
+  return ukCalendarYmd()
 }
 
 const UnitLookupPage: React.FC = () => {
@@ -159,38 +145,10 @@ const UnitLookupPage: React.FC = () => {
     return 'Search by unit ID (e.g. 150001, 801207)'
   }, [status, error])
 
-  const latestServiceUnitGroups = useMemo<UnitGroup[]>(() => {
-    if (!latestService?.consist?.allocations?.length) return []
-    const map = new Map<string, UnitGroup>()
-    latestService.consist.allocations.forEach((a) => {
-      ;(a.resourceGroups || []).forEach((g, groupIdx) => {
-        const unitKey = `unit-${g.unitId || 'unknown'}-${g.fleetId || 'unknown'}-${groupIdx}`
-        const existing = map.get(unitKey)
-        if (!existing) {
-          map.set(unitKey, {
-            unitKey,
-            unitId: g.unitId || null,
-            fleetId: g.fleetId || null,
-            resourceType: g.typeOfResourceLabel || g.typeOfResource || null,
-            unitStatus: g.status || null,
-            endOfDayMiles: g.endOfDayMiles ?? null,
-            reversed: !!a.reversed,
-            vehicles: [...(g.vehicles || [])],
-          })
-          return
-        }
-        const seen = new Set(existing.vehicles.map((v) => `${v.vehicleId || ''}-${v.position ?? ''}`))
-        for (const v of g.vehicles || []) {
-          const vk = `${v.vehicleId || ''}-${v.position ?? ''}`
-          if (!seen.has(vk)) {
-            existing.vehicles.push(v)
-            seen.add(vk)
-          }
-        }
-      })
-    })
-    return [...map.values()]
-  }, [latestService])
+  const latestServiceUnitGroups = useMemo<ServiceUnitGroup[]>(
+    () => groupUnitsFromConsist(latestService?.consist),
+    [latestService]
+  )
 
   const latestServiceLogsByVehicle = useMemo(() => {
     const rows: Array<{
@@ -219,14 +177,19 @@ const UnitLookupPage: React.FC = () => {
   }, [latestServiceUnitGroups])
 
   const availableDays = useMemo(() => {
+    const todayYmd = todayUk
     const fromDetailServices = (data?.services || [])
       .map((svc) => (svc.start ? svc.start.slice(0, 10) : null))
-      .filter((d): d is string => !!d)
-    const fromDetailMileage = Object.keys(data?.endOfDayMileageByDate || {})
+      .filter((d): d is string => isPlausibleUnitOperatingDay(d, todayYmd))
+    const fromDetailMileage = Object.keys(data?.endOfDayMileageByDate || {}).filter((d) =>
+      isPlausibleUnitOperatingDay(d, todayYmd)
+    )
     const fromCatalogServices = (catalogUnit?.services || [])
       .map((svc) => (svc.start ? svc.start.slice(0, 10) : null))
-      .filter((d): d is string => !!d)
-    const fromCatalogMileage = Object.keys(catalogUnit?.endOfDayMileageByDate || {})
+      .filter((d): d is string => isPlausibleUnitOperatingDay(d, todayYmd))
+    const fromCatalogMileage = Object.keys(catalogUnit?.endOfDayMileageByDate || {}).filter((d) =>
+      isPlausibleUnitOperatingDay(d, todayYmd)
+    )
     return Array.from(
       new Set([
         ...fromDetailServices,
@@ -235,7 +198,7 @@ const UnitLookupPage: React.FC = () => {
         ...fromCatalogMileage,
       ])
     ).sort((a, b) => b.localeCompare(a))
-  }, [data, catalogUnit])
+  }, [data, catalogUnit, todayUk])
 
   const filteredServices = useMemo(() => {
     if (!data) return []
@@ -283,10 +246,10 @@ const UnitLookupPage: React.FC = () => {
       ...(data?.endOfDayMileageByDate || {}),
     }
     return Object.entries(merged)
-      .filter(([day, miles]) => !!day && typeof miles === 'number' && Number.isFinite(miles))
+      .filter(([day, miles]) => isPlausibleUnitOperatingDay(day, todayUk) && typeof miles === 'number' && Number.isFinite(miles))
       .sort((a, b) => b[0].localeCompare(a[0]))
       .map(([day, miles]) => ({ day, miles }))
-  }, [data?.endOfDayMileageByDate, catalogUnit?.endOfDayMileageByDate])
+  }, [data?.endOfDayMileageByDate, catalogUnit?.endOfDayMileageByDate, todayUk])
 
   const snapshotMileageFallback = useMemo(() => {
     if (!data) return null
@@ -328,47 +291,6 @@ const UnitLookupPage: React.FC = () => {
       return { ...row, delta }
     })
   }, [mileageRowsWithSnapshot])
-
-  const renderDetailField = (
-    label: string,
-    value: string | number | null | undefined,
-    opts?: { fullWidth?: boolean }
-  ) => {
-    if (value == null) return null
-    const text = String(value).trim()
-    if (!text || text === '—') return null
-    return (
-      <div className={`svc-allocation-field${opts?.fullWidth ? ' svc-allocation-field--block' : ''}`}>
-        <span className="svc-allocation-label">{label}</span>
-        <span className="svc-allocation-value">{text}</span>
-      </div>
-    )
-  }
-
-  const sharedFrom = (
-    vehicles: PtacVehicle[],
-    pick: (v: PtacVehicle) => string | null
-  ) => {
-    if (vehicles.length === 0) return null
-    const first = pick(vehicles[0])
-    if (!first) return null
-    return vehicles.every((v) => pick(v) === first) ? first : null
-  }
-
-  const summariseEnteredService = (vehicles: PtacVehicle[], sharedEntered: string | null) => {
-    if (sharedEntered) return formatDateOnly(sharedEntered)
-    const enteredByDate = new Map<string, string[]>()
-    vehicles.forEach((v) => {
-      const date = v.dateEnteredService || 'Unknown date'
-      const label = v.vehicleId || `Pos ${v.position ?? '—'}`
-      const arr = enteredByDate.get(date) || []
-      arr.push(label)
-      enteredByDate.set(date, arr)
-    })
-    return [...enteredByDate.entries()]
-      .map(([date, ids]) => `${formatDateOnly(date)}: ${ids.join(', ')}`)
-      .join(' | ')
-  }
 
   useEffect(() => {
     if (!shouldFetchLatestService) return
@@ -674,8 +596,10 @@ const UnitLookupPage: React.FC = () => {
                   {latestService && latestServiceLogsByVehicle.map((row) => (
                     <details key={row.key} className="svc-collapsible-card svc-vehicle-card">
                       <summary className="svc-collapsible-summary">
-                        <span className="svc-pattern-title">{row.vehicleId}</span>
-                        <span className="unit-log-count-chip">{row.logCount}</span>
+                        <span className="svc-collapsible-summary-row">
+                          <span className="svc-pattern-title">{row.vehicleId}</span>
+                          <span className="unit-log-count-chip">{row.logCount}</span>
+                        </span>
                       </summary>
                       <p className="unit-log-count-subtitle">Unit {row.unitId}</p>
                       {row.defects.length > 0 ? (
@@ -740,92 +664,7 @@ const UnitLookupPage: React.FC = () => {
                       />
                     </div>
 
-                    <div className="unit-service-vehicles">
-                      {latestServiceUnitGroups.length === 0 ? (
-                        <p className="unit-muted">No allocation groups available for this service.</p>
-                      ) : (
-                        <details className="svc-collapsible-card svc-vehicle-card" open>
-                          <summary className="svc-collapsible-summary">
-                            <span className="svc-pattern-title">Vehicle details & logs</span>
-                          </summary>
-                          <p className="svc-allocation-subtitle">Grouped by unit, then one section per vehicle.</p>
-                          <div className="svc-vehicle-list">
-                            {latestServiceUnitGroups.map((g) => {
-                              const sortedVehicles = g.vehicles
-                                .slice()
-                                .sort((a, b) => (a.position ?? 999) - (b.position ?? 999))
-                              const shared = {
-                                vehicleType: sharedFrom(sortedVehicles, (v) => v.typeOfVehicle || null),
-                                plannedGroup: sharedFrom(sortedVehicles, (v) => v.plannedGroupId || null),
-                                maxSpeed: sharedFrom(sortedVehicles, (v) => (v.maximumSpeedMph != null ? `${v.maximumSpeedMph} mph` : null)),
-                                brakeType: sharedFrom(sortedVehicles, (v) => v.trainBrakeTypeLabel || v.trainBrakeType || null),
-                                status: sharedFrom(sortedVehicles, (v) => v.vehicleStatus || null),
-                                category: sharedFrom(sortedVehicles, (v) => v.registeredCategoryLabel || v.registeredCategory || null),
-                                liveryDecor: sharedFrom(sortedVehicles, (v) => ([v.livery, v.decor].filter(Boolean).join(' · ') || null)),
-                                entered: sharedFrom(sortedVehicles, (v) => v.dateEnteredService || null),
-                              }
-
-                              return (
-                                <article className="svc-unit-item" key={g.unitKey}>
-                                  <header className="svc-vehicle-head">
-                                    <h3 className="svc-vehicle-title">Unit {g.unitId || 'Unknown'}</h3>
-                                  </header>
-                                  <div className="svc-unit-shared">
-                                    <h4 className="svc-vehicle-logs-title">Whole unit (shared details)</h4>
-                                    <div className="svc-allocation-grid">
-                                      {renderDetailField('Fleet', g.fleetId)}
-                                      {renderDetailField('Resource type', g.resourceType)}
-                                      {renderDetailField('Unit status', g.unitStatus)}
-                                      {renderDetailField('End-of-day miles', g.endOfDayMiles)}
-                                      {renderDetailField('Vehicle count', sortedVehicles.length)}
-                                      {g.reversed ? renderDetailField('Formation direction', 'Reversed') : null}
-                                      {renderDetailField('Vehicle type', shared.vehicleType)}
-                                      {renderDetailField('Planned group', shared.plannedGroup)}
-                                      {renderDetailField('Max speed', shared.maxSpeed)}
-                                      {renderDetailField('Brake type', shared.brakeType)}
-                                      {renderDetailField('Status', shared.status)}
-                                      {renderDetailField('Category', shared.category)}
-                                      {renderDetailField('Livery / decor', shared.liveryDecor)}
-                                      {renderDetailField('Date entered service', summariseEnteredService(sortedVehicles, shared.entered), { fullWidth: true })}
-                                    </div>
-                                  </div>
-
-                                  <div className="svc-unit-vehicles">
-                                    {sortedVehicles.map((v, vIdx) => {
-                                      const defects = v.defects || []
-                                      const lengthWeight = (v.lengthMm != null || v.weightTonnes != null)
-                                        ? `${v.lengthMm != null ? `${v.lengthMm} mm` : '—'} / ${v.weightTonnes != null ? `${v.weightTonnes} t` : '—'}`
-                                        : null
-                                      return (
-                                        <article className="svc-vehicle-item" key={`${g.unitKey}-v-${v.vehicleId || vIdx}`}>
-                                          <header className="svc-vehicle-head">
-                                            <h4 className="svc-vehicle-title">{v.vehicleId || `Vehicle ${vIdx + 1}`}</h4>
-                                            <div className="svc-allocation-tags">
-                                              {v.position != null && <span className="svc-allocation-tag">Pos {v.position}</span>}
-                                              {defects.length > 0 && <span className="svc-allocation-tag svc-allocation-tag--warn">{defects.length} log{defects.length === 1 ? '' : 's'}</span>}
-                                            </div>
-                                          </header>
-                                          <div className="svc-allocation-grid">
-                                            {renderDetailField('Specific type', v.specificType || null)}
-                                            {renderDetailField('Seats', v.numberOfSeats ?? null)}
-                                            {renderDetailField('Cabs', v.cabs ?? null)}
-                                            {renderDetailField('Length / weight', lengthWeight)}
-                                            {renderDetailField('Special characteristics', v.specialCharacteristics || null)}
-                                            {renderDetailField('Vehicle name', v.vehicleName || null)}
-                                            {renderDetailField('Date entered service', v.dateEnteredService ? formatDateOnly(v.dateEnteredService) : null)}
-                                          </div>
-                                          <p className="svc-vehicle-no-logs">Logs: {defects.length}</p>
-                                        </article>
-                                      )
-                                    })}
-                                  </div>
-                                </article>
-                              )
-                            })}
-                          </div>
-                        </details>
-                      )}
-                    </div>
+                    <ServiceVehicleDetails consist={latestService.consist} />
                   </>
                 ) : latestServiceError ? null : (
                   <p className="unit-muted">

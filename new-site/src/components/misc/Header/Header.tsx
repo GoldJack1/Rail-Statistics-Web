@@ -48,6 +48,7 @@ function getHeaderPageTitle(pathname: string): string {
   if (pathname.startsWith('/admin/network-messages')) return 'Network Messages'
   if (pathname.startsWith('/admin/d-payg')) return 'D-PAYG'
   if (pathname.startsWith('/departures')) return 'Departures'
+  if (pathname.startsWith('/bash-planner')) return 'Bash planner'
   if (pathname.startsWith('/services')) return 'Service'
   if (pathname.startsWith('/units')) return 'Units'
   if (pathname.startsWith('/admin/api-status')) return 'API Status'
@@ -75,6 +76,7 @@ const Header: React.FC = () => {
     pathname.startsWith('/smartcard-fares')
   const isMapActive = pathname === '/stations/map' || pathname === '/admin/map'
   const isDeparturesActive = pathname.startsWith('/departures') || pathname.startsWith('/services')
+  const isBashPlannerActive = pathname.startsWith('/bash-planner')
   const isUnitsActive = pathname.startsWith('/units')
 
   const isAccountActive = pathname.startsWith('/account') || pathname.startsWith('/leaderboards')
@@ -89,6 +91,7 @@ const Header: React.FC = () => {
     ...(areDarwinNavPagesEnabled()
       ? [
           { to: '/departures', label: 'Departures', active: isDeparturesActive },
+          { to: '/bash-planner', label: 'Bash', active: isBashPlannerActive },
           { to: '/units', label: 'Units', active: isUnitsActive },
         ]
       : []),

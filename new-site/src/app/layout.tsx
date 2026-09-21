@@ -11,6 +11,7 @@ import Header from '@/components/misc/Header/Header'
 import Footer from '@/components/misc/DeferredSiteFooter'
 import AppMain from '@/components/misc/AppMain'
 import ServiceWorkerRegistration from '@/components/misc/ServiceWorkerRegistration'
+import DarwinHotPrefetch from '@/components/darwin/DarwinHotPrefetch'
 import FirebaseAnalytics from '@/components/misc/FirebaseAnalytics'
 import AdSenseScript from '@/components/ads/AdSenseScript'
 import { ADSENSE_CLIENT, isAdSenseHeadTagsEnabled } from '@/components/ads/adsenseConfig'
@@ -135,6 +136,7 @@ export default function RootLayout({
             <ConsumerAuthProvider>
               <StationCollectionProvider>
                 <ServiceWorkerRegistration />
+                <DarwinHotPrefetch />
                 <div className="app">
                   <Header />
                   <AppMain>

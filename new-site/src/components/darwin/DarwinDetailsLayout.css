@@ -5,6 +5,11 @@
 .darwin-details-page .svc-pattern-card,
 .darwin-details-page .svc-formation-section,
 .darwin-details-page .svc-state-card,
+.darwin-details-page .svc-rawdump,
+.darwin-details-page .svc-allocation-card,
+.darwin-details-page .cmap,
+.darwin-details-page .cmap-stage,
+.darwin-details-page .cmap-note,
 .darwin-details-page .unit-summary-card,
 .darwin-details-page .unit-list-card,
 .darwin-details-page .unit-date-filter-card,
@@ -19,6 +24,7 @@
 
 .darwin-details-page .svc-viewmode-card {
   margin-bottom: var(--space-lg);
+  justify-content: flex-start;
 }
 
 .darwin-details-page .svc-pattern-card > .svc-pattern-title {
@@ -29,15 +35,55 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-xl);
+  overflow: visible;
+  min-width: 0;
+}
+
+.darwin-details-page .station-details-card.modal-content {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.darwin-details-page .unit-service-vehicles {
+  min-width: 0;
+}
+
+.darwin-details-page .svc-formation-section .unit-service-vehicles {
+  margin-top: var(--space-lg);
 }
 
 .darwin-details-page .svc-footer,
 .darwin-details-page .unit-muted.darwin-details-source {
-  margin: 0;
+  margin: var(--space-xl, 1.5rem) 0 0;
   padding: 0;
   border: 0;
   background: transparent;
   box-shadow: none;
+}
+
+.darwin-details-page .stations-table-panel {
+  min-width: 0;
+}
+
+.darwin-details-page .stations-table__sort-button {
+  cursor: default;
+}
+
+.darwin-details-page .stations-table__sort-button:hover {
+  box-shadow: none;
+  color: inherit;
+}
+
+.darwin-details-page .stations-table tbody .stations-table__row.svc-stop--cancelled {
+  --stations-table-row-bg: color-mix(in srgb, var(--accent-base) 10%, var(--stations-table-row-default));
+}
+
+.darwin-details-page .stations-table .stations-table__name {
+  white-space: normal;
+}
+
+.darwin-details-page .stations-table td.stations-table__live {
+  white-space: normal;
 }
 
 .darwin-details-page .unit-date-filter-card {

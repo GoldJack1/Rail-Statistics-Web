@@ -108,8 +108,8 @@ export interface DepartureRow {
 
   /**
    * Live passenger-loading at the queried stop. `loadingPercentage` is a
-   * 0–100 figure (when published by the TOC). `coachLoading` is per-coach
-   * Darwin enum (1 = empty, 10 = standing room only).
+   * 0–100 figure (when published by the TOC). `coachLoading` is per-coach:
+   * Darwin’s 1–10 occupancy grade, or 0–100% on operators such as XR.
    */
   loadingPercentage: number | null;
   coachLoading: CoachLoadingValue[] | null;
@@ -133,7 +133,7 @@ export interface DepartureRow {
 
 export interface CoachLoadingValue {
   number: string;
-  /** 1 (empty) – 10 (full). NaN if Darwin sent a non-numeric value. */
+  /** 0–100% occupancy. */
   value: number;
 }
 
@@ -252,7 +252,7 @@ export interface ServiceStop {
   cancelReasonAtStop: DarwinReason | null;
   /** Per-stop overall load %, when published. */
   loadingPercentage: number | null;
-  /** Per-stop, per-coach loading enum (1–10). */
+  /** Per-stop, per-coach loading (0–100%). */
   coachLoading: CoachLoadingValue[] | null;
 }
 
@@ -470,4 +470,61 @@ export interface UnitDetail {
     position: number | null;
     reversed: boolean;
   }>;
+}
+
+export interface BashPlanLeg {
+  rid: string
+  trainId: string
+  fromCrs: string
+  fromName: string
+  toCrs: string
+  toName: string
+  dep: string
+  arr: string
+  fromTpl?: string | null
+  toTpl?: string | null
+  fromPlat?: string | null
+  toPlat?: string | null
+  board?: DepartureRow | null
+}
+
+export interface BashRiskyConnection {
+  rid: string
+  trainId: string
+  destCrs: string
+  destName: string
+  dep: string
+  minsAfterArrival: number
+}
+
+export interface BashPlanHop {
+  fromCrs: string
+  fromName: string
+  toCrs: string
+  toName: string
+  dep: string
+  arr: string
+  waitMin: number
+  arriveAtFrom?: string
+  boardPlatform?: string | null
+  alightPlatform?: string | null
+  prevAlightPlatform?: string | null
+  platformChange?: boolean
+  legs: BashPlanLeg[]
+  riskyConnections: BashRiskyConnection[]
+}
+
+export interface BashPlanResult {
+  ok: boolean
+  error?: string
+  date?: string
+  at?: string
+  start?: { crs: string; name: string }
+  end?: { crs: string; name: string }
+  safeWaitMin?: number
+  visitOrder?: Array<{ crs: string; name: string; arr: string; waitMin: number }>
+  hops?: BashPlanHop[]
+  totalMin?: number
+  caution?: string
+  finishAt?: string
 }

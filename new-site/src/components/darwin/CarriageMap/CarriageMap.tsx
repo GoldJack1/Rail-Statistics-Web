@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import type {
   CoachLoadingValue,
   ConsistData,
@@ -10,7 +10,15 @@ import type {
   ServiceStop,
 } from '../../../types/darwin'
 import { BUTOperatorChip } from '../../buttons'
+import BUTDDMList from '../../buttons/ddm/BUTDDMList'
+import {
+  coachLoadFill,
+  coachLoadingIsPercent,
+  formatCoachLoad,
+} from '../../../utils/darwinCoachLoading'
 import './CarriageMap.css'
+
+const SHOW_ALL_STOPS = '__all__'
 
 /**
  * Live carriage map: renders one cell per coach, optionally enriched by
@@ -19,18 +27,17 @@ import './CarriageMap.css'
  *   1. **Darwin `formation`** (passenger-facing coach class, toilets/catering)
  *   2. **PTAC `consist`** (physical reality: actual unit + vehicle IDs,
  *      seat counts, max speed, brake type, open defects)
- *   3. **Per-stop `coachLoading`** (1-10 enum) and `loadingPercentage` (0-100)
- *      on each `ServiceStop`
+ *   3. **Per-coach `coachLoading`** (Darwin 1–10, or XR 0–100%), shown on
+ *      the unit. Choose a calling point or Show all; station-wide
+ *      `loadingPercentage` is never copied onto every coach.
  *
  * The component prefers PTAC consist as its primary axis when available
  * (it groups vehicles by unit, which gives a more accurate physical layout
  * for split-portion services). Falls back to Darwin formation, then to a
  * one-line "no formation data" note.
  *
- * The stop picker only renders when at least one stop has loading data
- * published. Loading values are keyed by Darwin coach number; we attempt
- * a best-effort match by position when reconciling against PTAC's vehicle
- * positions.
+ * Loading values are keyed by Darwin coach number and shown on the unit
+ * they belong to.
  */
 export const CarriageMap: React.FC<{
   formation: FormationData | null
@@ -39,19 +46,41 @@ export const CarriageMap: React.FC<{
   reverse: boolean
   initialTpl?: string | null
   onUnitClick?: (unitId: string) => void
-}> = ({ formation, consist, stops, reverse, initialTpl, onUnitClick }) => {
+  /** Overview / Formation / Loading as separate pages. */
+  layout?: 'full' | 'loading-only' | 'stock-only'
+}> = ({ formation, consist, stops, reverse, initialTpl, onUnitClick, layout = 'full' }) => {
   const loadingStops = useMemo(
-    () => stops.filter((s) => (s.coachLoading && s.coachLoading.length > 0) || s.loadingPercentage != null),
-    [stops]
+    () => loadingStopsForView(stops, initialTpl),
+    [stops, initialTpl],
   )
-  const defaultTpl = (initialTpl && loadingStops.find((s) => s.tpl === initialTpl)?.tpl)
-    || loadingStops[0]?.tpl
-    || null
+  const defaultTpl = useMemo(() => {
+    if (loadingStops.length > 1) return SHOW_ALL_STOPS
+    return loadingStops[0]?.tpl || null
+  }, [loadingStops])
   const [selectedTpl, setSelectedTpl] = useState<string | null>(defaultTpl)
+  useEffect(() => {
+    setSelectedTpl((prev) => {
+      if (prev === SHOW_ALL_STOPS && loadingStops.length > 1) return prev
+      if (prev && prev !== SHOW_ALL_STOPS && loadingStops.some((s) => s.tpl === prev)) return prev
+      return defaultTpl
+    })
+  }, [defaultTpl, loadingStops])
+  const showAllStops = selectedTpl === SHOW_ALL_STOPS && loadingStops.length > 1
   const selectedStop = useMemo(
-    () => loadingStops.find((s) => s.tpl === selectedTpl) || null,
-    [loadingStops, selectedTpl]
+    () => (showAllStops ? null : loadingStops.find((s) => s.tpl === selectedTpl) || loadingStops[0] || null),
+    [loadingStops, selectedTpl, showAllStops],
   )
+  const loadingAtItems = useMemo(() => {
+    const stops = loadingStops.map((s) => s.name || s.tpl)
+    return loadingStops.length > 1 ? ['Show all', ...stops] : stops
+  }, [loadingStops])
+  const loadingAtSelectedIndex = useMemo(() => {
+    if (loadingStops.length === 0) return -1
+    if (loadingStops.length > 1 && showAllStops) return 0
+    const stopIndex = loadingStops.findIndex((s) => s.tpl === selectedStop?.tpl)
+    if (stopIndex < 0) return loadingStops.length > 1 ? 0 : 0
+    return loadingStops.length > 1 ? stopIndex + 1 : stopIndex
+  }, [loadingStops, showAllStops, selectedStop])
 
   // Decide which data source drives the layout. PTAC wins when present
   // because it groups vehicles into "stages" (legs of the journey), which
@@ -67,7 +96,11 @@ export const CarriageMap: React.FC<{
     return m
   }, [stops])
 
-  if (!havePtac && !haveDarwin) {
+  const haveLoading = loadingStops.length > 0
+  const showLoading = haveLoading && layout !== 'stock-only'
+  const showStock = layout !== 'loading-only'
+  if (layout === 'loading-only' && !haveLoading) return null
+  if (!havePtac && !haveDarwin && !showLoading) {
     return (
       <div className="cmap-note">
         <strong>No coach formation data for this service.</strong>
@@ -81,9 +114,7 @@ export const CarriageMap: React.FC<{
     )
   }
 
-  // Build the loading lookup once. Keyed by coach-number string ("1", "A2", etc.)
-  const loadingByCoachNumber = new Map<string, CoachLoadingValue>()
-  for (const c of selectedStop?.coachLoading || []) loadingByCoachNumber.set(c.number, c)
+  const loadingByCoachNumber = coachLoadingMap(selectedStop)
 
   // Top-level summary: classes + units present across the whole journey.
   // (Stages may add/remove units en route, but the summary line lists every
@@ -101,58 +132,100 @@ export const CarriageMap: React.FC<{
     // Hide PTAC-only metadata ("Stages"/"TOC") from the user-facing summary.
   }
 
+  const renderLoadingBar = (stop: ServiceStop | null, byCoach: Map<string, CoachLoadingValue>, asPercent: boolean) => (
+    <CoachLoadBar
+      coaches={flattenCoachLoads(stages, formation, reverse, byCoach, stop?.loadingPercentage ?? null)}
+      asPercent={asPercent}
+    />
+  )
+
+  const renderStockMap = () =>
+    havePtac
+      ? renderPtacStages(stages, formation, new Map(), tiplocName, onUnitClick, false, 'stock')
+      : renderDarwinOnly(formation!, new Map(), reverse, false, 'stock')
+
   return (
-    <div className="cmap" aria-label="Carriage formation and loading">
-      <div className="cmap-header">
-        <div className="cmap-title-group">
-          <h3 className="cmap-title">Coach formation</h3>
-          {reverse && <span className="cmap-tag">↻ Reversed</span>}
+    <div className="cmap-stack">
+      {showLoading && (
+        <section className="cmap-loading" aria-label="Loading capacity">
+          <div className="cmap-header">
+            {layout !== 'loading-only' && (
+            <div className="cmap-title-group">
+              <h3 className="cmap-title">Loading capacity</h3>
+            </div>
+            )}
+            {loadingStops.length > 1 && (
+            <div className="cmap-stop-picker">
+              <span className="cmap-stop-picker-label">Loading at</span>
+              <BUTDDMList
+                items={loadingAtItems}
+                filterName="Loading at"
+                selectionMode="single"
+                selectedPositions={loadingAtSelectedIndex >= 0 ? [loadingAtSelectedIndex] : []}
+                onSelectionChanged={(selectedPositions) => {
+                  const idx = selectedPositions[0]
+                  if (typeof idx !== 'number') return
+                  if (loadingStops.length > 1 && idx === 0) {
+                    setSelectedTpl(SHOW_ALL_STOPS)
+                    return
+                  }
+                  const stop = loadingStops.length > 1 ? loadingStops[idx - 1] : loadingStops[idx]
+                  setSelectedTpl(stop?.tpl || null)
+                }}
+                colorVariant="primary"
+                className="cmap-stop-picker-ddm"
+              />
+            </div>
+            )}
+          </div>
+
+          {showAllStops ? (
+            loadingStops.map((stop) => (
+              <section key={stop.tpl} className="cmap-all-stop">
+                <h4 className="cmap-all-stop-title">{stop.name || stop.tpl}</h4>
+                {renderLoadingBar(stop, coachLoadingMap(stop), stopLoadAsPercent(stop))}
+              </section>
+            ))
+          ) : (
+            renderLoadingBar(selectedStop, loadingByCoachNumber, stopLoadAsPercent(selectedStop))
+          )}
+        </section>
+      )}
+
+      {showStock ? !havePtac && !haveDarwin ? (
+        <div className="cmap-note">
+          <strong>No coach formation data for this service.</strong>
+          <p>
+            Neither Darwin&apos;s coach-formation feed nor Network Rail&apos;s PTAC feed
+            has published a formation for this train yet. Coverage is best
+            for SE / XR (Darwin) and SE / NT / TP / SW / GTR / c2c
+            (PTAC). Data may arrive as the daemon runs longer.
+          </p>
         </div>
-        {loadingStops.length > 0 && (
-          <label className="cmap-stop-picker">
-            <span className="cmap-stop-picker-label">Loading at</span>
-            <select
-              className="cmap-stop-picker-select"
-              value={selectedTpl || ''}
-              onChange={(e) => setSelectedTpl(e.target.value || null)}
-            >
-              {loadingStops.map((s) => (
-                <option key={s.tpl} value={s.tpl}>
-                  {s.name || s.tpl}
-                  {s.loadingPercentage != null ? ` — ${s.loadingPercentage}%` : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+      ) : (
+      <section className="cmap" aria-label="Detailed unit formations">
+        <div className="cmap-header">
+          <div className="cmap-title-group">
+            {layout !== 'stock-only' && <h3 className="cmap-title">Detailed unit formations</h3>}
+            {reverse && <span className="cmap-tag">↻ Reversed</span>}
+          </div>
+        </div>
+
+        {summaryBits.length > 0 && (
+          <ul className="cmap-summary">
+            {summaryBits.map((b) => (
+              <li key={b.label} className="cmap-summary-item">
+                <span className="cmap-summary-label">{b.label}</span>
+                <span className="cmap-summary-value">{b.value}</span>
+              </li>
+            ))}
+          </ul>
         )}
-      </div>
 
-      {summaryBits.length > 0 && (
-        <ul className="cmap-summary">
-          {summaryBits.map((b) => (
-            <li key={b.label} className="cmap-summary-item">
-              <span className="cmap-summary-label">{b.label}</span>
-              <span className="cmap-summary-value">{b.value}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {havePtac
-        ? renderPtacStages(stages, formation, loadingByCoachNumber, tiplocName, onUnitClick)
-        : renderDarwinOnly(formation!, loadingByCoachNumber, reverse)}
-
-      {/* Class legend — only show the abbreviations that actually appear
-       * in the currently-rendered formation, so we're not teaching the
-       * user about K/A on a service that doesn't have either. */}
-      <CoachClassLegend stages={stages} formation={formation} />
-
-      {selectedStop?.loadingPercentage != null && (
-        <p className="cmap-overall">
-          Overall load at <strong>{selectedStop.name || selectedStop.tpl}</strong>:{' '}
-          <strong>{selectedStop.loadingPercentage}%</strong>
-        </p>
-      )}
+        {renderStockMap()}
+        <CoachClassLegend stages={stages} formation={formation} />
+      </section>
+      ) : null}
     </div>
   )
 }
@@ -458,12 +531,157 @@ function classifyStageBoundary(prev: PtacStage, next: PtacStage): 'reversal' | '
  * across the *first* stage only — that's the most useful slice because
  * Darwin's coach numbering is published once per service, not per stage.
  */
+function coachLoadingMap(stop: ServiceStop | null | undefined): Map<string, CoachLoadingValue> {
+  const map = new Map<string, CoachLoadingValue>()
+  for (const c of stop?.coachLoading || []) map.set(c.number, c)
+  return map
+}
+
+function stopLoadAsPercent(stop: ServiceStop | null | undefined): boolean {
+  const values = (stop?.coachLoading || []).map((c) => c.value)
+  return coachLoadingIsPercent(values, null, values.length > 0)
+}
+
+/**
+ * Board cards at an intermediate stop (e.g. Farringdon) reuse the latest
+ * Darwin formationLoading from earlier on the journey. Keep that stop in
+ * the picker so details match the board.
+ */
+function loadingStopsForView(stops: ServiceStop[], initialTpl?: string | null): ServiceStop[] {
+  const published = stops.filter(
+    (s) =>
+      Boolean(s.coachLoading && s.coachLoading.length > 0) ||
+      (s.loadingPercentage != null && Number.isFinite(s.loadingPercentage)),
+  )
+  const needle = (initialTpl || '').toUpperCase()
+  if (!needle || published.length === 0) return published
+  const idx = stops.findIndex(
+    (s) => s.tpl === needle || (s.crs || '').toUpperCase() === needle,
+  )
+  if (idx < 0) return published
+  const current = stops[idx]
+  if (current.coachLoading && current.coachLoading.length > 0) return published
+  for (let i = idx; i >= 0; i -= 1) {
+    const prior = stops[i]
+    if (!prior.coachLoading || prior.coachLoading.length === 0) continue
+    const inherited: ServiceStop = { ...current, coachLoading: prior.coachLoading }
+    return [inherited, ...published.filter((s) => s.tpl !== inherited.tpl)]
+  }
+  return published
+}
+
+function loadBarCoachClass(index: number, count: number): string {
+  if (count <= 1) return 'cmap-loading-coach cmap-loading-coach--solo'
+  if (index === 0) return 'cmap-loading-coach cmap-loading-coach--front'
+  if (index === count - 1) return 'cmap-loading-coach cmap-loading-coach--rear'
+  return 'cmap-loading-coach'
+}
+
+function flattenCoachLoads(
+  stages: PtacStage[],
+  formation: FormationData | null,
+  reverse: boolean,
+  loadingByCoachNumber: Map<string, CoachLoadingValue>,
+  overallPct: number | null,
+): Array<{ label: string; value: number | null }> {
+  const overall =
+    overallPct != null && Number.isFinite(overallPct) ? overallPct : null
+  const withOverallFallback = (items: Array<{ label: string; value: number | null }>) => {
+    if (items.some((item) => item.value != null)) return items
+    if (overall == null) return items
+    if (items.length > 0) return items.map((item) => ({ ...item, value: overall }))
+    return [{ label: '1', value: overall }]
+  }
+  if (stages.length > 0) {
+    const darwinByPosition = new Map<number, FormationCoach>()
+    formation?.coaches.forEach((c, i) => darwinByPosition.set(i + 1, c))
+    const vehicleCoachLabelById = new Map<string, string>()
+    const items: Array<{ label: string; value: number | null }> = []
+    let running = 0
+    for (const g of stages[0].units) {
+      const vehicles = g.reversed ? [...g.vehicles].reverse() : g.vehicles
+      for (const v of vehicles) {
+        running += 1
+        const darwinCoach = darwinByPosition.get(running)
+        const mappedLabel = v.vehicleId ? vehicleCoachLabelById.get(v.vehicleId) : undefined
+        const label = mappedLabel ?? darwinCoach?.number ?? String(running)
+        if (!mappedLabel && v.vehicleId) vehicleCoachLabelById.set(v.vehicleId, label)
+        const loadingVal = loadingByCoachNumber.get(label) ?? loadingByCoachNumber.get(String(running))
+        const value = loadingVal && Number.isFinite(loadingVal.value) ? loadingVal.value : null
+        items.push({ label, value })
+      }
+    }
+    return withOverallFallback(items)
+  }
+  if (formation?.coaches?.length) {
+    const coaches = reverse ? [...formation.coaches].reverse() : formation.coaches
+    return withOverallFallback(coaches.map((coach) => {
+      const loadingVal = loadingByCoachNumber.get(coach.number)
+      return {
+        label: coach.number,
+        value: loadingVal && Number.isFinite(loadingVal.value) ? loadingVal.value : null,
+      }
+    }))
+  }
+  const fromFeed = [...loadingByCoachNumber.values()]
+    .filter((coach) => coach.number)
+    .sort((a, b) => Number(a.number) - Number(b.number) || a.number.localeCompare(b.number))
+  return withOverallFallback(fromFeed.map((coach) => ({
+    label: coach.number,
+    value: Number.isFinite(coach.value) ? coach.value : null,
+  })))
+}
+
+function CoachLoadBar({
+  coaches,
+  asPercent,
+}: {
+  coaches: Array<{ label: string; value: number | null }>
+  asPercent: boolean
+}) {
+  const count = coaches.length
+  if (count === 0) return null
+  return (
+    <div
+      className="cmap-loading-bar"
+      role="list"
+      aria-label="Coach loading"
+    >
+      {coaches.map((coach, index) => (
+        <span
+          key={`${coach.label}-${index}`}
+          role="listitem"
+          className={[
+            loadBarCoachClass(index, count),
+            coach.value == null ? 'cmap-loading-coach--unknown' : '',
+          ].filter(Boolean).join(' ')}
+          style={{ backgroundColor: coachLoadFill(coach.value, asPercent) }}
+          title={
+            coach.value != null
+              ? `Coach ${coach.label} · ${formatCoachLoad(coach.value, asPercent)} loaded`
+              : `Coach ${coach.label} · no loading data`
+          }
+        >
+          <span className="cmap-loading-text">
+            <span className="cmap-loading-num">{coach.label}</span>
+            <span className="cmap-loading-pct">
+              {coach.value == null ? '—' : formatCoachLoad(coach.value, asPercent)}
+            </span>
+          </span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function renderPtacStages(
   stages: PtacStage[],
   darwinFormation: FormationData | null,
   loadingByCoachNumber: Map<string, CoachLoadingValue>,
   tiplocName: Map<string, string>,
-  onUnitClick?: (unitId: string) => void,
+  onUnitClick: ((unitId: string) => void) | undefined,
+  asPercent: boolean,
+  purpose: 'loading' | 'stock',
 ): React.ReactNode {
   const darwinByPosition = new Map<number, FormationCoach>()
   if (darwinFormation) {
@@ -523,6 +741,7 @@ function renderPtacStages(
                     className={`cmap-unit${g.reversed ? ' cmap-unit--reversed' : ''}`}
                     key={`${g.unitId}-${g.position}-${idx}`}
                   >
+                    {purpose === 'stock' && (
                     <div className="cmap-unit-header">
                       <span className="cmap-unit-name">{g.unitId || '—'}</span>
                       {g.fleetId && <span className="cmap-unit-fleet">{g.fleetId}</span>}
@@ -539,6 +758,7 @@ function renderPtacStages(
                         </BUTOperatorChip>
                       )}
                     </div>
+                    )}
                     <ol className="cmap-row cmap-row--unit" role="list">
                       {(g.reversed ? [...g.vehicles].reverse() : g.vehicles).map((v) => {
                         running += 1
@@ -548,7 +768,15 @@ function renderPtacStages(
                         if (!mappedLabel && sIdx === 0 && v.vehicleId) {
                           vehicleCoachLabelById.set(v.vehicleId, coachLabel)
                         }
-                        return renderVehicleCell(v, coachLabel, darwinCoach, loadingByCoachNumber, running)
+                        return renderVehicleCell(
+                          v,
+                          coachLabel,
+                          darwinCoach,
+                          loadingByCoachNumber,
+                          running,
+                          asPercent,
+                          purpose,
+                        )
                       })}
                     </ol>
                   </div>
@@ -568,24 +796,34 @@ function renderDarwinOnly(
   formation: FormationData,
   loadingByCoachNumber: Map<string, CoachLoadingValue>,
   reverseFormation: boolean,
+  asPercent: boolean,
+  purpose: 'loading' | 'stock',
 ): React.ReactNode {
   const coaches = reverseFormation ? [...formation.coaches].reverse() : formation.coaches
   return (
     <ol className="cmap-row" role="list">
       {coaches.map((coach) => {
         const v = loadingByCoachNumber.get(coach.number)
-        const enumVal = v && Number.isFinite(v.value) ? v.value : null
+        const loadVal =
+          purpose === 'loading' && v && Number.isFinite(v.value) ? v.value : null
+        const showLoad = purpose === 'loading'
         return (
           <li
             key={coach.number}
-            className={`cmap-coach${enumVal == null ? ' cmap-coach--unknown' : ''}`}
-            style={{ backgroundColor: loadFill(enumVal) }}
-            title={describeCoach(coach.number, coach.class, enumVal)}
+            className={`cmap-coach${showLoad && loadVal == null ? ' cmap-coach--unknown' : ''}`}
+            style={showLoad ? { backgroundColor: coachLoadFill(loadVal, asPercent) } : undefined}
+            title={
+              purpose === 'loading'
+                ? describeCoach(coach.number, coach.class, loadVal, asPercent)
+                : `Coach ${coach.number} (${coach.class || 'unknown class'})`
+            }
           >
             <span className="cmap-coach-num">{coach.number}</span>
             {coach.class && <span className="cmap-coach-class" title={coach.class}>{classAbbrev(coach.class)}</span>}
-            <span className="cmap-coach-load">{enumVal == null ? '—' : `${enumVal}/10`}</span>
-            {(coach.toilet || coach.catering) && (
+            {showLoad && (
+              <span className="cmap-coach-load">{loadVal == null ? '—' : formatCoachLoad(loadVal, asPercent)}</span>
+            )}
+            {purpose === 'stock' && (coach.toilet || coach.catering) && (
               <span className="cmap-coach-amenities">
                 {coach.toilet && coach.toilet !== 'None' && <span title={`Toilet: ${coach.toilet}`}>🚻</span>}
                 {coach.catering && <span title={`Catering: ${coach.catering}`}>☕</span>}
@@ -608,10 +846,13 @@ function renderVehicleCell(
   darwinCoach: FormationCoach | undefined,
   loadingByCoachNumber: Map<string, CoachLoadingValue>,
   runningPosition: number,
+  asPercent: boolean,
+  purpose: 'loading' | 'stock',
 ): React.ReactNode {
   const cls        = darwinCoach?.class ?? null
   const loadingVal = loadingByCoachNumber.get(coachLabel) ?? loadingByCoachNumber.get(String(runningPosition))
-  const enumVal = loadingVal && Number.isFinite(loadingVal.value) ? loadingVal.value : null
+  const fromCoach = loadingVal && Number.isFinite(loadingVal.value) ? loadingVal.value : null
+  const loadVal = purpose === 'loading' ? fromCoach : null
   const seats   = v.numberOfSeats
   const defects = v.defects?.length || 0
   // Multi-source class detection: Darwin formation (most reliable, but rare),
@@ -623,41 +864,43 @@ function renderVehicleCell(
   //   'accessible'  — Reduced-capacity Standard with wheelchair / disabled seating
   const coachClass = inferCoachClass(v, cls)
   const classMeta  = COACH_CLASS_META[coachClass]
+  const showLoad = purpose === 'loading'
   return (
     <li
       key={(v.vehicleId || '') + '-' + runningPosition}
       className={[
         'cmap-coach',
-        'cmap-coach--ptac',
+        purpose === 'stock' ? 'cmap-coach--ptac' : 'cmap-coach--load',
         `cmap-coach--class-${coachClass}`,
-        enumVal == null ? 'cmap-coach--unknown' : '',
-        defects > 0 ? 'cmap-coach--defect' : '',
+        showLoad && loadVal == null ? 'cmap-coach--unknown' : '',
+        purpose === 'stock' && defects > 0 ? 'cmap-coach--defect' : '',
       ].filter(Boolean).join(' ')}
-      style={{ backgroundColor: loadFill(enumVal) }}
+      style={showLoad ? { backgroundColor: coachLoadFill(loadVal, asPercent) } : undefined}
       title={[
         `Coach ${coachLabel}`,
-        v.vehicleId ? `Vehicle ${v.vehicleId}` : null,
-        v.specificType ? `(${v.specificType})` : null,
+        purpose === 'stock' && v.vehicleId ? `Vehicle ${v.vehicleId}` : null,
+        purpose === 'stock' && v.specificType ? `(${v.specificType})` : null,
         `class: ${classMeta.label}`,
-        seats != null ? `${seats} seats` : null,
-        v.maximumSpeedMph != null ? `${v.maximumSpeedMph} mph` : null,
-        v.trainBrakeTypeLabel ? `brake: ${v.trainBrakeTypeLabel}` : null,
-        enumVal != null ? `loading: ${enumVal}/10` : null,
-        defects > 0 ? `${defects} open defect${defects === 1 ? '' : 's'}` : null,
+        purpose === 'stock' && seats != null ? `${seats} seats` : null,
+        purpose === 'stock' && v.maximumSpeedMph != null ? `${v.maximumSpeedMph} mph` : null,
+        purpose === 'stock' && v.trainBrakeTypeLabel ? `brake: ${v.trainBrakeTypeLabel}` : null,
+        showLoad && loadVal != null ? `loading: ${formatCoachLoad(loadVal, asPercent)}` : null,
+        showLoad && loadVal == null ? 'no loading data' : null,
+        purpose === 'stock' && defects > 0 ? `${defects} open defect${defects === 1 ? '' : 's'}` : null,
       ].filter(Boolean).join(' · ')}
     >
       <span className="cmap-coach-num">{coachLabel}</span>
-      <span className="cmap-coach-vid">{v.vehicleId}</span>
+      {purpose === 'stock' && <span className="cmap-coach-vid">{v.vehicleId}</span>}
       <span className={`cmap-coach-class cmap-coach-class--${coachClass}`} title={classMeta.label}>
         {classMeta.abbrev}
       </span>
-      <span className="cmap-coach-load">
-        {enumVal == null ? (seats != null ? `${seats}s` : '—') : `${enumVal}/10`}
-      </span>
-      {(seats != null && enumVal != null) && (
+      {showLoad && (
+        <span className="cmap-coach-load">{loadVal == null ? '—' : formatCoachLoad(loadVal, asPercent)}</span>
+      )}
+      {purpose === 'stock' && seats != null && (
         <span className="cmap-coach-seats">{seats}s</span>
       )}
-      {defects > 0 && (
+      {purpose === 'stock' && defects > 0 && (
         <span className="cmap-coach-defects" title={v.defects.map((d) => `${d.code}: ${d.description}`).join('\n')}>
           ⚠ {defects}
         </span>
@@ -809,17 +1052,9 @@ const CoachClassLegend: React.FC<{
   )
 }
 
-function loadFill(enumVal: number | null): string {
-  if (enumVal == null) return 'var(--bg-secondary)'
-  const t   = Math.max(0, Math.min(1, (enumVal - 1) / 9))
-  const hue = Math.round(120 - 120 * t)
-  const intensity = 20 + Math.round(t * 50)
-  return `color-mix(in srgb, hsl(${hue} 70% 50%) ${intensity}%, var(--bg-secondary))`
-}
-
-function describeCoach(number: string, cls: string | null, enumVal: number | null): string {
-  if (enumVal == null) return `Coach ${number} (${cls || 'unknown class'}) — no loading data`
-  return `Coach ${number} (${cls || 'unknown class'}) — loading ${enumVal}/10`
+function describeCoach(number: string, cls: string | null, loadVal: number | null, asPercent: boolean): string {
+  if (loadVal == null) return `Coach ${number} (${cls || 'unknown class'}) — no loading data`
+  return `Coach ${number} (${cls || 'unknown class'}) — loading ${formatCoachLoad(loadVal, asPercent)}`
 }
 
 export default CarriageMap

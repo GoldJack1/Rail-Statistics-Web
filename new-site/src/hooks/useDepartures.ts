@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DeparturesSnapshot } from '@/types/darwin'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
+import { recallBoard, rememberBoard, rememberRecentCrs } from '@/utils/darwinHotCache'
 
 export type DeparturesStatus =
   | 'idle'
@@ -21,6 +22,8 @@ export interface UseDeparturesOptions {
   staleAfterMs?: number
   date?: string
   at?: string
+  /** Board fetched on the server so the first paint is not a loading spinner. */
+  initialSnapshot?: DeparturesSnapshot | null
 }
 
 export interface UseDeparturesResult {
@@ -38,9 +41,6 @@ const DEFAULT_POLL_MS  = 10_000
 const DEFAULT_STALE_MS = 30_000
 const MAX_NETWORK_RETRIES = 3
 const RETRY_BASE_DELAY_MS = 500
-const LIVE_CACHE_MAX_AGE_MS = 15_000
-/** Match longer daemon historical snapshot TTL so revisiting dates reuses RAM cache instead of refetching. */
-const HIST_CACHE_MAX_AGE_MS = 15 * 60_000
 const CACHE_MAX_ENTRIES = 200
 
 interface DeparturesCacheEntry {
@@ -93,79 +93,99 @@ async function delay(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
+function peekCache(key: string): DeparturesSnapshot | null {
+  return departuresSWRCache.get(key)?.data ?? null
+}
+
+function seedCache(key: string, snap: DeparturesSnapshot) {
+  departuresSWRCache.set(key, { key, data: snap, cachedAtMs: Date.now() })
+}
+
 export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
-  const { code, hours, pollMs = DEFAULT_POLL_MS, staleAfterMs = DEFAULT_STALE_MS, date, at } = opts
+  const {
+    code,
+    hours,
+    pollMs = DEFAULT_POLL_MS,
+    staleAfterMs = DEFAULT_STALE_MS,
+    date,
+    at,
+    initialSnapshot = null,
+  } = opts
   const effectivePollMs = date ? 0 : pollMs
-  const cacheMaxAgeMs = date ? HIST_CACHE_MAX_AGE_MS : LIVE_CACHE_MAX_AGE_MS
-
-  const [data, setData]     = useState<DeparturesSnapshot | null>(null)
-  const [error, setError]   = useState<string | null>(null)
-  const [status, setStatus] = useState<DeparturesStatus>('idle')
-  const [ageMs, setAgeMs]   = useState<number | null>(null)
-
-  const abortRef = useRef<AbortController | null>(null)
-  const pollRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const ageTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const buildUrl = useCallback(() => {
-    const sp = new URLSearchParams()
-    if (hours != null) sp.set('hours', String(hours))
-    if (date) sp.set('date', date)
-    if (at) sp.set('at', at)
-    const qs = sp.toString()
-    return `/api/darwin/departures/${encodeURIComponent(code)}${qs ? `?${qs}` : ''}`
-  }, [code, hours, date, at])
-
   const cacheKey = `${code}|${hours ?? ''}|${date ?? ''}|${at ?? ''}`
 
+  const [data, setData]     = useState<DeparturesSnapshot | null>(() => {
+    if (!code) return null
+    if (initialSnapshot) {
+      seedCache(cacheKey, initialSnapshot)
+      return initialSnapshot
+    }
+    const cached = peekCache(cacheKey)
+    if (cached) {
+      seedCache(cacheKey, cached)
+      return cached
+    }
+    return null
+  })
+  const [error, setError]   = useState<string | null>(null)
+  const [status, setStatus] = useState<DeparturesStatus>(() => {
+    if (!code) return 'idle'
+    return (initialSnapshot || peekCache(cacheKey)) ? 'ok' : 'loading'
+  })
+  const [ageMs, setAgeMs]   = useState<number | null>(null)
+
+  const pollRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const ageTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const inflightKeyRef = useRef<string | null>(null)
+
+  const applySnapshot = useCallback((snap: DeparturesSnapshot) => {
+    setData(snap)
+    setError(null)
+    const age = Date.now() - Date.parse(snap.updatedAt)
+    setAgeMs(age)
+    setStatus(age > staleAfterMs ? 'stale' : 'ok')
+  }, [staleAfterMs])
+
   const putCache = useCallback((key: string, snap: DeparturesSnapshot) => {
-    const now = Date.now()
-    departuresSWRCache.set(key, { key, data: snap, cachedAtMs: now })
+    departuresSWRCache.set(key, { key, data: snap, cachedAtMs: Date.now() })
     if (departuresSWRCache.size <= CACHE_MAX_ENTRIES) return
-    // Evict oldest entries first.
     const oldest = [...departuresSWRCache.entries()]
       .sort((a, b) => a[1].cachedAtMs - b[1].cachedAtMs)
       .slice(0, departuresSWRCache.size - CACHE_MAX_ENTRIES)
     for (const [k] of oldest) departuresSWRCache.delete(k)
   }, [])
 
-  const getFreshCache = useCallback((key: string): DeparturesSnapshot | null => {
-    const hit = departuresSWRCache.get(key)
-    if (!hit) return null
-    if (Date.now() - hit.cachedAtMs > cacheMaxAgeMs) {
-      departuresSWRCache.delete(key)
-      return null
-    }
-    return hit.data
-  }, [cacheMaxAgeMs])
-
-  const fetchOnce = useCallback(async () => {
+  const fetchOnce = useCallback(async (signal: AbortSignal, key: string) => {
     if (!code) return
-    abortRef.current?.abort()
-    const ac = new AbortController()
-    abortRef.current = ac
+    if (inflightKeyRef.current === key) return
+    inflightKeyRef.current = key
     try {
-      const url = buildUrl()
+      const sp = new URLSearchParams()
+      if (hours != null) sp.set('hours', String(hours))
+      if (date) sp.set('date', date)
+      if (at) sp.set('at', at)
+      const qs = sp.toString()
+      const url = `/api/darwin/departures/${encodeURIComponent(code)}${qs ? `?${qs}` : ''}`
       let res: Response | null = null
       for (let attempt = 0; attempt <= MAX_NETWORK_RETRIES; attempt += 1) {
-        if (ac.signal.aborted) throw createAbortError()
+        if (signal.aborted) throw createAbortError()
         try {
-          res = await fetchDarwin(url, { signal: ac.signal })
+          res = await fetchDarwin(url, { signal })
           break
         } catch (rawErr) {
           const err = rawErr as Error
-          if (ac.signal.aborted) throw createAbortError()
+          if (signal.aborted) throw createAbortError()
           if (attempt === MAX_NETWORK_RETRIES) {
             throw new Error(err.message || userMessageForNetworkFailure())
           }
           if (!isTransientNetworkError(err)) throw err
-          await delay(RETRY_BASE_DELAY_MS * (attempt + 1), ac.signal)
+          await delay(RETRY_BASE_DELAY_MS * (attempt + 1), signal)
         }
       }
       if (!res) throw new Error(userMessageForNetworkFailure())
       if (res.status === 404) {
         const body = await res.json().catch(() => ({}))
-        departuresSWRCache.delete(cacheKey)
+        departuresSWRCache.delete(key)
         setData(null)
         setError(body?.error || userMessageForStatus(404))
         setStatus('not-found')
@@ -173,32 +193,24 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
       }
       if (!res.ok) throw new Error(userMessageForStatus(res.status))
       const snap: DeparturesSnapshot = await res.json()
-      putCache(cacheKey, snap)
-      setData(snap)
-      setError(null)
-      const age = Date.now() - Date.parse(snap.updatedAt)
-      setAgeMs(age)
-      setStatus(age > staleAfterMs ? 'stale' : 'ok')
+      putCache(key, snap)
+      rememberBoard(key, snap)
+      rememberRecentCrs(code)
+      applySnapshot(snap)
     } catch (e) {
       if ((e as Error)?.name === 'AbortError') return
       setError((e as Error)?.message || 'Could not load live departures.')
       setStatus(prev => (prev === 'idle' || prev === 'loading' ? 'error' : prev))
-      // Keep stale data visible if we had it; just flag the error.
+    } finally {
+      if (inflightKeyRef.current === key) inflightKeyRef.current = null
     }
-  }, [buildUrl, cacheKey, code, putCache, staleAfterMs])
+  }, [applySnapshot, at, code, date, hours, putCache])
 
-  // Schedule the next poll. Pauses while tab hidden.
-  const schedulePoll = useCallback(() => {
-    if (pollRef.current) clearTimeout(pollRef.current)
+  const refetch = useCallback(() => {
     if (!code) return
-    if (effectivePollMs <= 0) return
-    pollRef.current = setTimeout(async () => {
-      if (document.visibilityState === 'visible') {
-        await fetchOnce()
-      }
-      schedulePoll()
-    }, effectivePollMs)
-  }, [code, fetchOnce, effectivePollMs])
+    const ac = new AbortController()
+    void fetchOnce(ac.signal, cacheKey)
+  }, [cacheKey, code, fetchOnce])
 
   useEffect(() => {
     if (!code) {
@@ -207,39 +219,48 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
       setError(null)
       return
     }
-    // SWR behavior:
-    // - if we have recent cache for this key, show it instantly
-    // - always revalidate in background for fresh data
-    const cached = getFreshCache(cacheKey)
+
+    const cached = peekCache(cacheKey) || recallBoard(cacheKey)
     if (cached) {
-      setData(cached)
-      setError(null)
-      const age = Date.now() - Date.parse(cached.updatedAt)
-      setAgeMs(age)
-      setStatus(age > staleAfterMs ? 'stale' : 'ok')
+      applySnapshot(cached)
     } else {
       setData(null)
       setError(null)
       setStatus('loading')
     }
-    fetchOnce()
-    schedulePoll()
-    return () => {
-      pollRef.current && clearTimeout(pollRef.current)
-      abortRef.current?.abort()
-    }
-  }, [cacheKey, code, date, fetchOnce, getFreshCache, hours, pollMs, schedulePoll, staleAfterMs, at])
 
-  // Re-fetch immediately when tab becomes visible after being hidden.
+    const ac = new AbortController()
+    void fetchOnce(ac.signal, cacheKey)
+
+    if (pollRef.current) clearTimeout(pollRef.current)
+    const schedulePoll = () => {
+      if (effectivePollMs <= 0) return
+      pollRef.current = setTimeout(() => {
+        if (document.visibilityState === 'visible' && inflightKeyRef.current !== cacheKey) {
+          void fetchOnce(ac.signal, cacheKey)
+        }
+        schedulePoll()
+      }, effectivePollMs)
+    }
+    schedulePoll()
+
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current)
+      ac.abort()
+      if (inflightKeyRef.current === cacheKey) inflightKeyRef.current = null
+    }
+  }, [applySnapshot, cacheKey, code, effectivePollMs, fetchOnce])
+
   useEffect(() => {
     const onVis = () => {
-      if (document.visibilityState === 'visible' && code) fetchOnce()
+      if (document.visibilityState === 'visible' && code && inflightKeyRef.current !== cacheKey) {
+        refetch()
+      }
     }
     document.addEventListener('visibilitychange', onVis)
     return () => document.removeEventListener('visibilitychange', onVis)
-  }, [code, fetchOnce])
+  }, [cacheKey, code, refetch])
 
-  // Tick the age counter once a second so the UI's "X s ago" can update.
   useEffect(() => {
     if (!data) { setAgeMs(null); return }
     if (ageTickRef.current) clearInterval(ageTickRef.current)
@@ -251,8 +272,8 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
         return age > staleAfterMs ? 'stale' : 'ok'
       })
     }, 1000)
-    return () => { ageTickRef.current && clearInterval(ageTickRef.current) }
+    return () => { if (ageTickRef.current) clearInterval(ageTickRef.current) }
   }, [data, staleAfterMs])
 
-  return { status, data, error, ageMs, refetch: fetchOnce }
+  return { status, data, error, ageMs, refetch }
 }

@@ -8,6 +8,7 @@ import {
 } from '@/components/misc/AccountSectionNav/AccountSectionNav'
 import '@/app/stations/[network]/[stationSlug]/StationDetailsPage.css'
 import '@/components/models/StationModal/StationModal.css'
+import '@/components/cards/StationsTableView/StationsTableView.css'
 import './DarwinDetailsLayout.css'
 
 export type DarwinDetailsLayoutProps = {

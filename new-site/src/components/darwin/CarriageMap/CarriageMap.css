@@ -2,6 +2,85 @@
  * detail page below the calling pattern card. Each coach is a flex cell that
  * scales horizontally; values 1-10 colour-grade green → amber → red. */
 
+.cmap-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  min-width: 0;
+}
+
+.cmap-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.cmap-loading-bar {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.cmap-loading-coach {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border-radius: 8px;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.cmap-loading-coach--front {
+  border-radius: 36px 8px 8px 12px;
+  padding-left: 10px;
+}
+
+.cmap-loading-coach--rear {
+  border-radius: 8px 36px 12px 8px;
+  padding-right: 10px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.cmap-loading-coach--solo {
+  border-radius: 36px 36px 12px 12px;
+}
+
+.cmap-loading-coach--unknown {
+  border: 1px dashed var(--border-color);
+}
+
+.cmap-loading-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0;
+}
+
+.cmap-loading-num {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+
+.cmap-loading-pct {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
 .cmap {
   display: flex;
   flex-direction: column;
@@ -11,6 +90,7 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
+  min-width: 0;
 }
 
 .cmap-header {
@@ -91,6 +171,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
+  min-width: 0;
 }
 .cmap-unit {
   display: flex;
@@ -100,6 +181,7 @@
   background: transparent;
   border: 0;
   border-radius: 0;
+  min-width: 0;
 }
 .cmap-unit--reversed {
   border-style: dashed;
@@ -173,6 +255,7 @@
   border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--bg-primary) 70%, transparent);
+  min-width: 0;
 }
 .cmap-stage-header {
   display: flex;
@@ -230,20 +313,37 @@
 
 .cmap-stop-picker {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-xs);
+  min-width: min(100%, 22rem);
+  flex: 1 1 16rem;
+  position: relative;
+  z-index: 3;
+}
+.cmap-stop-picker-label {
+  white-space: nowrap;
   font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--text-secondary);
 }
-.cmap-stop-picker-select {
-  padding: 2px var(--space-xs);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
-  background-color: var(--bg-primary);
+.cmap-stop-picker-ddm {
+  width: 100%;
+}
+.cmap-all-stop {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-color);
+}
+.cmap-all-stop-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
   color: var(--text-primary);
-  font-size: var(--text-xs);
-  font-family: inherit;
-  max-width: 18rem;
 }
 
 /* The row of coaches grows to fill width; the order in the source array is
@@ -255,6 +355,8 @@
   padding: 0;
   display: flex;
   gap: var(--space-sm);
+  width: 100%;
+  min-width: 0;
 }
 .cmap-row::before,
 .cmap-row--unit::before {
@@ -264,7 +366,7 @@
 
 .cmap-coach {
   flex: 1 1 0;
-  min-width: 72px;
+  min-width: 0;
   min-height: 90px;
   display: flex;
   flex-direction: column;
@@ -273,7 +375,7 @@
   gap: 2px;
   border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
   border-radius: var(--radius-md);
-  padding: var(--space-sm);
+  padding: 6px 4px;
   text-align: center;
   position: relative;
   transition: transform 0.12s ease;
@@ -358,9 +460,11 @@
   margin-top: 2px;
 }
 
-/* PTAC-enriched vehicle cell — slightly taller to accommodate the extra
- * lines (vehicle ID and either seats-or-loading), with the vehicle ID in
- * a monospace font so the digits sit on a tabular grid. */
+/* PTAC-enriched vehicle cell — slightly taller to accommodate vehicle ID
+ * and seat count. Loading cells stay shorter, occupancy-only. */
+.cmap-coach--load {
+  min-height: 96px;
+}
 .cmap-coach--ptac {
   min-height: 110px;
 }
@@ -370,6 +474,8 @@
   letter-spacing: 0;
   color: var(--text-secondary);
   line-height: 1.2;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .cmap-coach-seats {
   font-size: 10px;
@@ -396,12 +502,6 @@
     color-mix(in srgb, var(--accent-base) 12%, transparent),
     color-mix(in srgb, var(--accent-base) 12%, transparent)
   );
-}
-
-.cmap-overall {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
 }
 
 /* Class-key legend rendered below the coach grid. Only shows the classes
@@ -445,6 +545,6 @@
 /* On narrow screens the coach row scrolls horizontally so individual coaches
  * stay legible rather than squeezing to nothing. */
 @media (max-width: 639px) {
-  .cmap-row { overflow-x: auto; padding-bottom: var(--space-sm); }
-  .cmap-coach { flex: 0 0 80px; }
+  .cmap-row { padding-bottom: var(--space-sm); }
+  .cmap-coach { flex: 1 1 0; min-width: 0; }
 }
