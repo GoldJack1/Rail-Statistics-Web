@@ -8,7 +8,8 @@ import { useStationAdminMode } from '../../../hooks/useStationAdminMode'
 import { useIsStationEditor } from '../../../hooks/useIsStationEditor'
 import { useTheme } from '../../../hooks/useTheme'
 import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
-import { isLocalDevLoginBypassEnabled, areDarwinNavPagesEnabled } from '@/utils/localDevFlags'
+import { isLocalDevLoginBypassEnabled } from '@/utils/localDevFlags'
+import { useDarwinNavPagesVisible } from '@/hooks/useDarwinNavPagesVisible'
 import {
   ensureStationAdminModeDefaultOn,
   isStationAdminSearchParam,
@@ -29,6 +30,7 @@ const Footer: React.FC = () => {
   const search = searchParams?.toString() ? `?${searchParams.toString()}` : ''
   const router = useRouter()
   const adminModeActive = useStationAdminMode()
+  const showDarwinNav = useDarwinNavPagesVisible()
   const loginTapRef = useRef({ count: 0, lastAt: 0 })
   const syncAdminSearchParam =
     pathname === '/stations' ||
@@ -97,7 +99,7 @@ const Footer: React.FC = () => {
               <BUTFooterLink to="/stations/map">
                 Maps
               </BUTFooterLink>
-            {areDarwinNavPagesEnabled() ? (
+            {showDarwinNav ? (
               <>
                 <BUTFooterLink to="/departures">
                   Departures

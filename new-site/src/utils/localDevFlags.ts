@@ -6,7 +6,7 @@ export function isLocalDevLoginBypassEnabled(): boolean {
   )
 }
 
-/** Show Departures / Units in header and footer. */
+/** Show Departures / Units / Bash without requiring a signed-in admin. */
 export function areDarwinNavPagesEnabled(): boolean {
   if (process.env.NEXT_PUBLIC_DARWIN_PAGES_ENABLED === 'true') return true
   return isLocalDevLoginBypassEnabled()

@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useId, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useAppHeaderOffset } from '@/hooks/useAppHeaderOffset'
 import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
-import { areDarwinNavPagesEnabled } from '@/utils/localDevFlags'
+import { useDarwinNavPagesVisible } from '@/hooks/useDarwinNavPagesVisible'
 import { resolveAppDownloadAction } from '@/utils/appDownload'
 import { BUTBaseButton, BUTHeaderLink, BUTWideButton } from '../../buttons'
 import HomeDownloadPlatformModal from '../../models/HomeDownloadPlatformModal/HomeDownloadPlatformModal'
@@ -80,6 +80,7 @@ const Header: React.FC = () => {
   const isUnitsActive = pathname.startsWith('/units')
 
   const isAccountActive = pathname.startsWith('/account') || pathname.startsWith('/leaderboards')
+  const showDarwinNav = useDarwinNavPagesVisible()
 
   const pageTitle = getHeaderPageTitle(pathname)
 
@@ -88,7 +89,7 @@ const Header: React.FC = () => {
     { to: '/stations', label: 'Stations', active: isStationsActive && !isMapActive },
     { to: '/fares', label: 'Fares', active: isFaresActive },
     { to: '/stations/map', label: 'Maps', active: isMapActive },
-    ...(areDarwinNavPagesEnabled()
+    ...(showDarwinNav
       ? [
           { to: '/departures', label: 'Departures', active: isDeparturesActive },
           { to: '/bash-planner', label: 'Bash', active: isBashPlannerActive },
