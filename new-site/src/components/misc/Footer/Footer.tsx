@@ -9,6 +9,7 @@ import { useIsStationEditor } from '../../../hooks/useIsStationEditor'
 import { useTheme } from '../../../hooks/useTheme'
 import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
 import { isLocalDevLoginBypassEnabled } from '@/utils/localDevFlags'
+import { useDarwinNavPagesVisible } from '@/hooks/useDarwinNavPagesVisible'
 import {
   ensureStationAdminModeDefaultOn,
   isStationAdminSearchParam,
@@ -29,6 +30,7 @@ const Footer: React.FC = () => {
   const search = searchParams?.toString() ? `?${searchParams.toString()}` : ''
   const router = useRouter()
   const adminModeActive = useStationAdminMode()
+  const showDarwinNav = useDarwinNavPagesVisible()
   const loginTapRef = useRef({ count: 0, lastAt: 0 })
   const syncAdminSearchParam =
     pathname === '/stations' ||
@@ -97,15 +99,19 @@ const Footer: React.FC = () => {
               <BUTFooterLink to="/stations/map">
                 Maps
               </BUTFooterLink>
-              <BUTFooterLink to="/departures">
-                Departures
-              </BUTFooterLink>
-              <BUTFooterLink to="/bash-planner">
-                Bash
-              </BUTFooterLink>
-              <BUTFooterLink to="/units">
-                Units
-              </BUTFooterLink>
+            {showDarwinNav ? (
+              <>
+                <BUTFooterLink to="/departures">
+                  Departures
+                </BUTFooterLink>
+                <BUTFooterLink to="/bash-planner">
+                  Bash
+                </BUTFooterLink>
+                <BUTFooterLink to="/units">
+                  Units
+                </BUTFooterLink>
+              </>
+            ) : null}
             <BUTFooterLink to="/migration">
               Migration
             </BUTFooterLink>
