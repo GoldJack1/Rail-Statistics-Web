@@ -50,7 +50,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let cancelled = false
     let idleHandle: number | undefined
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined
-    let onFirstInteraction: (() => void) | undefined
 
     const authIsRouteCritical = isAuthCriticalPath(pathname)
 
@@ -92,27 +91,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       })
     }
 
-    const armInteractionInit = () => {
-      onFirstInteraction = () => {
-        if (onFirstInteraction) {
-          window.removeEventListener('pointerdown', onFirstInteraction, { capture: true })
-          window.removeEventListener('keydown', onFirstInteraction, { capture: true })
-        }
-        if (!cancelled) void init()
-      }
-      window.addEventListener('pointerdown', onFirstInteraction, { once: true, capture: true })
-      window.addEventListener('keydown', onFirstInteraction, { once: true, capture: true })
-    }
-
     if (authIsRouteCritical) {
       void init({ deferAppCheck: readAuthSessionHint() && pathname !== '/log-in' })
     } else if (isColdVisitorDeferPath(pathname) && !readAuthSessionHint()) {
       // Anonymous public visit — never load Auth/App Check/reCAPTCHA on cold PSI.
       setLoading(false)
     } else if (isColdVisitorDeferPath(pathname)) {
-      // Returning visitor with session hint: restore auth only after a gesture (no timer).
-      armInteractionInit()
-      setLoading(false)
+      // Signed-in catalogue admin: restore auth now so Departures/Bash/Units nav can show.
+      void init({ deferAppCheck: true })
     } else if (typeof window.requestIdleCallback === 'function') {
       idleHandle = window.requestIdleCallback(() => void init(), { timeout: 5_000 })
     } else {
@@ -122,10 +108,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       cancelled = true
       if (unsubscribe) unsubscribe()
-      if (onFirstInteraction) {
-        window.removeEventListener('pointerdown', onFirstInteraction, { capture: true })
-        window.removeEventListener('keydown', onFirstInteraction, { capture: true })
-      }
       if (idleHandle !== undefined) window.cancelIdleCallback(idleHandle)
       if (timeoutHandle !== undefined) clearTimeout(timeoutHandle)
     }
