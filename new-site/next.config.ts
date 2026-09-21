@@ -1,5 +1,17 @@
 import type { NextConfig } from "next";
+import os from "os";
 import path from "path";
+
+/** LAN IPs so HMR works when opening the app as http://192.168.x.x:3000 */
+function lanDevOrigins(): string[] {
+  const hosts = new Set<string>(["127.0.0.1", "localhost"]);
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const addr of addrs || []) {
+      if (addr.family === "IPv4" && !addr.internal) hosts.add(addr.address);
+    }
+  }
+  return [...hosts];
+}
 
 const emptyPolyfill = "./src/lib/empty-polyfill.js";
 
@@ -10,6 +22,7 @@ const buildId =
   "local-dev";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: lanDevOrigins(),
   env: {
     NEXT_PUBLIC_BUILD_ID: buildId,
   },

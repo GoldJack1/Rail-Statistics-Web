@@ -1,7 +1,40 @@
-import type { CoachLoadingValue, DepartureRow, ServiceDetail, ServiceStop } from '@/types/darwin'
+import type { CoachLoadingValue, ConsistData, DepartureRow, ServiceDetail, ServiceStop } from '@/types/darwin'
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
+}
+
+export function coachCountFromConsist(consist: ConsistData | null | undefined): number | null {
+  if (!consist?.allocations?.length) return null
+  const ids = new Set<string>()
+  let maxGroup = 0
+  for (const allocation of consist.allocations) {
+    for (const group of allocation.resourceGroups || []) {
+      const vehicles = group.vehicles || []
+      maxGroup = Math.max(maxGroup, vehicles.length)
+      for (const vehicle of vehicles) {
+        const id = vehicle.vehicleId?.trim()
+        if (id) ids.add(id)
+      }
+    }
+  }
+  if (ids.size > 0) return ids.size
+  return maxGroup > 0 ? maxGroup : null
+}
+
+export function unitIdsFromConsist(consist: ConsistData | null | undefined): string[] | null {
+  if (!consist?.allocations?.length) return null
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const allocation of consist.allocations) {
+    for (const group of allocation.resourceGroups || []) {
+      const unitId = group.unitId?.trim()
+      if (!unitId || seen.has(unitId)) continue
+      seen.add(unitId)
+      ids.push(unitId)
+    }
+  }
+  return ids.length ? ids : null
 }
 
 export function coachCountFromRow(row: DepartureRow): number | null {
@@ -38,18 +71,53 @@ export function coachLoadValues(row: DepartureRow, count: number): Array<number 
   return values
 }
 
+/** Darwin formationLoading is 1–10; XR (and overall loadingPercentage) is 0–100. */
 export function coachLoadUsesPercent(row: DepartureRow, values: Array<number | null>): boolean {
   if (row.loadingPercentage != null && !(row.coachLoading && row.coachLoading.length)) return true
   return values.some((value) => value != null && value > 10)
 }
 
+export function coachLoadingIsPercent(
+  values: Array<number | null | undefined>,
+  overallPercent?: number | null,
+  hasPerCoach?: boolean,
+): boolean {
+  if (overallPercent != null && !hasPerCoach) return true
+  return values.some((value) => value != null && value > 10)
+}
+
+/** Normalise Darwin 1–10 occupancy onto a 0–100 scale. XR/GTR % stays as-is. */
+export function loadPercentValue(value: number, asPercent: boolean): number {
+  if (asPercent || value > 10) return value
+  return value * 10
+}
+
+export function formatCoachLoad(value: number, asPercent = true): string {
+  return `${Math.round(loadPercentValue(value, asPercent))}%`
+}
+
 /** Green → amber → red fill matching CarriageMap loading grades. */
+export function coachLoadFill(value: number | null, asPercent = true): string {
+  if (value == null || !Number.isFinite(value)) return 'var(--bg-secondary)'
+  const t = clamp01(loadPercentValue(value, asPercent) / 100)
+  const hue = Math.round(120 - 120 * t)
+  const intensity = 20 + Math.round(t * 50)
+  return `color-mix(in srgb, hsl(${hue} 70% 50%) ${intensity}%, var(--bg-secondary))`
+}
+
 export function rowHasCoachLoading(row: DepartureRow): boolean {
   return Boolean(row.coachLoading && row.coachLoading.length > 0) || row.loadingPercentage != null
 }
 
+export function stopHasPublishedLoading(stop: { coachLoading?: unknown[] | null; loadingPercentage?: number | null }): boolean {
+  return (
+    Boolean(stop.coachLoading && stop.coachLoading.length > 0) ||
+    (stop.loadingPercentage != null && Number.isFinite(stop.loadingPercentage))
+  )
+}
+
 function stopHasCoachLoading(stop: ServiceStop): boolean {
-  return Boolean(stop.coachLoading && stop.coachLoading.length > 0) || stop.loadingPercentage != null
+  return stopHasPublishedLoading(stop)
 }
 
 /**
@@ -90,9 +158,9 @@ export function pickCoachLoadingFromService(
 
 export type CoachLoadTone = 'ontime' | 'delayed' | 'cancelled'
 
-export function coachLoadTone(value: number | null, asPercent: boolean): CoachLoadTone | null {
+export function coachLoadTone(value: number | null, asPercent = true): CoachLoadTone | null {
   if (value == null || !Number.isFinite(value)) return null
-  const t = asPercent ? clamp01(value / 100) : clamp01(value <= 0 ? 0 : (value - 1) / 9)
+  const t = clamp01(loadPercentValue(value, asPercent) / 100)
   if (t < 1 / 3) return 'ontime'
   if (t < 2 / 3) return 'delayed'
   return 'cancelled'

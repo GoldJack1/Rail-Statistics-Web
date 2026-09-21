@@ -119,7 +119,7 @@ const ApiStatusPage: React.FC = () => {
 
   const fetchAvailable = async () => {
     try {
-      const res = await fetchDarwin('/api/darwin/history/dates')
+      const res = await fetchDarwin('/api/darwin/history/dates?snapshots=1')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const payload: HistoryDatesPayload = await res.json()
       setAvailable(payload)

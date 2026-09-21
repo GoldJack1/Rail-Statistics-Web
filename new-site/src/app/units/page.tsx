@@ -10,6 +10,8 @@ import { UnitCatalogCard } from '@/components/cards'
 import { PageTopHeader, SidebarDropdownSection, SidebarPanel } from '@/components/misc'
 import TXTINPBUTIconWideButtonSearch from '@/components/textInputButtons/special/TXTINPBUTIconWideButtonSearch'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
+import { peekHotUnitsCatalog } from '@/utils/darwinHotCache'
+import { isPlausibleUnitOperatingDay, ukCalendarYmd } from '@/utils/unitOperatingDay'
 import '@/styles/browsePageLayout.css'
 import './UnitsInServicePage.css'
 
@@ -68,8 +70,13 @@ const UnitsInServicePage: React.FC = () => {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const location = { pathname, search: searchParams.toString() ? `?${searchParams}` : '', state: null as unknown }
-  const [catalog, setCatalog] = useState<UnitCatalogItem[]>([])
-  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading')
+  const [catalog, setCatalog] = useState<UnitCatalogItem[]>(() => {
+    const hot = peekHotUnitsCatalog()
+    return Array.isArray(hot?.units) ? (hot.units as UnitCatalogItem[]) : []
+  })
+  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>(() => (
+    peekHotUnitsCatalog()?.units ? 'ok' : 'loading'
+  ))
   const [error, setError] = useState<string | null>(null)
   const [selectedFleet, setSelectedFleet] = useState<string | null>(null)
   const query = useMemo(() => new URLSearchParams(location.search), [location.search])
@@ -97,12 +104,15 @@ const UnitsInServicePage: React.FC = () => {
   }
 
   const availableDays = useMemo(() => {
+    const todayYmd = ukCalendarYmd()
     const dates = new Set<string>()
     for (const unit of catalog) {
-      for (const d of Object.keys(unit.endOfDayMileageByDate || {})) dates.add(d)
+      for (const d of Object.keys(unit.endOfDayMileageByDate || {})) {
+        if (isPlausibleUnitOperatingDay(d, todayYmd)) dates.add(d.slice(0, 10))
+      }
       for (const svc of unit.services || []) {
         const start = (svc?.start || '').slice(0, 10)
-        if (start) dates.add(start)
+        if (isPlausibleUnitOperatingDay(start, todayYmd)) dates.add(start)
       }
     }
     return [...dates].sort((a, b) => b.localeCompare(a))
@@ -120,8 +130,16 @@ const UnitsInServicePage: React.FC = () => {
   }, [availableDays, selectedDay])
 
   const dayFilteredCatalog = useMemo(() => {
-    if (selectedDay === 'all') return catalog
-    return catalog.filter((unit) => {
+    const todayYmd = ukCalendarYmd()
+    const recentCatalog = catalog.filter((unit) => {
+      const mileageDays = Object.keys(unit.endOfDayMileageByDate || {})
+      const serviceDays = (unit.services || []).map((svc) => (svc?.start || '').slice(0, 10)).filter(Boolean)
+      const allDays = [...mileageDays, ...serviceDays]
+      if (allDays.length === 0) return true
+      return allDays.some((d) => isPlausibleUnitOperatingDay(d, todayYmd))
+    })
+    if (selectedDay === 'all') return recentCatalog
+    return recentCatalog.filter((unit) => {
       if (unit.endOfDayMileageByDate && selectedDay in unit.endOfDayMileageByDate) return true
       return (unit.services || []).some((svc) => (svc?.start || '').slice(0, 10) === selectedDay)
     })
@@ -173,8 +191,19 @@ const UnitsInServicePage: React.FC = () => {
   useEffect(() => {
     const ac = new AbortController()
     const cached = unitsCatalogSWRCache.get(CATALOG_CACHE_KEY)
+    const hot = peekHotUnitsCatalog()
     if (cached && Date.now() - cached.cachedAtMs <= CATALOG_CACHE_MAX_AGE_MS) {
       setCatalog(cached.data)
+      setStatus('ok')
+      setError(null)
+    } else if (Array.isArray(hot?.units) && hot.units.length > 0) {
+      const next = hot.units as UnitCatalogItem[]
+      unitsCatalogSWRCache.set(CATALOG_CACHE_KEY, {
+        data: next,
+        updatedAt: hot.updatedAt,
+        cachedAtMs: Date.now(),
+      })
+      setCatalog(next)
       setStatus('ok')
       setError(null)
     } else {

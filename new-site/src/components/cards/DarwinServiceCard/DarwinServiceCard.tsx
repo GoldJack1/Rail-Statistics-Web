@@ -8,6 +8,7 @@ import {
   coachLoadTone,
   coachLoadUsesPercent,
   coachLoadValues,
+  formatCoachLoad,
 } from '@/utils/darwinCoachLoading'
 import '../StationCard/StationCard.css'
 import '../StationCardActionBar/StationCardActionBar.css'
@@ -243,9 +244,7 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
                         .join(' ')}
                       title={
                         loadValues[index] != null
-                          ? loadAsPercent
-                            ? `Coach ${index + 1} · ${Math.round(loadValues[index]!)}% loaded`
-                            : `Coach ${index + 1} · loading ${loadValues[index]}/10`
+                          ? `Coach ${index + 1} · ${formatCoachLoad(loadValues[index]!, loadAsPercent)} loaded`
                           : undefined
                       }
                     />

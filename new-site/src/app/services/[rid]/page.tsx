@@ -1,8 +1,8 @@
 'use client'
 
 import { useRouter, usePathname, useSearchParams, useParams } from 'next/navigation'
-import React, { useMemo, useState } from 'react'
-import { ArrowsClockwise, Code, Info, MapPin, Train } from '@phosphor-icons/react'
+import React, { useEffect, useMemo, useState } from 'react'
+import { ArrowsClockwise, ChartBar, Code, Info, MapPin, Train } from '@phosphor-icons/react'
 
 import { useServiceDetail } from '@/hooks/useServiceDetail'
 import { useStations } from '@/hooks/useStations'
@@ -12,12 +12,14 @@ import { ActivityPill } from '@/components/darwin/ActivityPill'
 import { CarriageMap } from '@/components/darwin/CarriageMap'
 import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
 import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
+import { ServiceVehicleDetails } from '@/components/darwin/ServiceVehicleDetails'
 import StationDetailField from '@/components/models/StationDetails/StationDetailField'
 import StationSectionTitle from '@/components/models/StationDetails/StationSectionTitle'
 import type { AccountSection } from '@/components/misc/AccountSectionNav/AccountSectionNav'
 import type { ServiceDetail } from '@/types/darwin'
 import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
 import { paramAsString } from '@/utils/nextParams'
+import { stopHasPublishedLoading } from '@/utils/darwinCoachLoading'
 import './ServiceDetailPage.css'
 
 const SLOT_KIND: Record<string, 'origin' | 'stop' | 'pass' | 'destination'> = {
@@ -33,14 +35,24 @@ const SLOT_KIND_LABEL: Record<'origin' | 'stop' | 'pass' | 'destination', string
   destination: 'Destination',
 }
 type ViewMode = 'detailed' | 'simple'
-type ServiceSection = 'overview' | 'formation' | 'calling' | 'raw'
+type ServiceSection = 'overview' | 'loading' | 'formation' | 'calling' | 'raw'
 
-const SERVICE_SECTIONS: AccountSection[] = [
+const BASE_SERVICE_SECTIONS: AccountSection[] = [
   { id: 'overview', label: 'Overview', icon: Info },
   { id: 'formation', label: 'Formation', icon: Train },
   { id: 'calling', label: 'Calling pattern', icon: MapPin },
   { id: 'raw', label: 'Raw data', icon: Code },
 ]
+
+const LOADING_SECTION: AccountSection = { id: 'loading', label: 'Loading capacity', icon: ChartBar }
+
+function StationsTableHead({ label, sticky }: { label: string; sticky?: boolean }) {
+  return (
+    <th className={sticky ? 'stations-table__name' : undefined}>
+      <span className="stations-table__sort-button">{label}</span>
+    </th>
+  )
+}
 
 /**
  * Phrase a Darwin association into a sentence the passenger can act on.
@@ -71,6 +83,18 @@ function describeAssociation(a: NonNullable<ReturnType<typeof useServiceDetail>[
     default:
       return `Associated with ${a.otherTrainId || a.otherRid} at ${where}.`
   }
+}
+
+function stopTplFromBackLink(from: string, stops: ServiceDetail['stops'], origin: string | null | undefined): string | null {
+  const match = /\/departures\/([^/?#]+)/i.exec(from)
+  const code = match?.[1] ? decodeURIComponent(match[1]).trim().toUpperCase() : ''
+  if (code) {
+    const byCrs = stops.find((s) => (s.crs || '').toUpperCase() === code)
+    if (byCrs) return byCrs.tpl
+    const byTpl = stops.find((s) => s.tpl === code)
+    if (byTpl) return byTpl.tpl
+  }
+  return origin || null
 }
 
 function formatAge(ms: number | null): string {
@@ -280,12 +304,13 @@ const RawDataDump: React.FC<{ data: ServiceDetail }> = ({ data }) => {
         <span className="svc-rawdump-title">Raw data</span>
         <span className="svc-rawdump-hint">{open ? 'click to collapse' : 'click to expand the full daemon payload'}</span>
       </summary>
-      <div className="svc-rawdump-meta">
+      <div className="modal-details-grid svc-rawdump-meta">
         {present.map(([label, val]) => (
-          <span key={label} className={`svc-rawdump-chip${val ? ' svc-rawdump-chip--present' : ''}`}>
-            <strong>{label}:</strong>{' '}
-            {typeof val === 'boolean' ? (val ? 'yes' : 'no') : val}
-          </span>
+          <StationDetailField
+            key={label}
+            label={label}
+            value={typeof val === 'boolean' ? (val ? 'Yes' : 'No') : String(val)}
+          />
         ))}
       </div>
       <div className="svc-rawdump-actions">
@@ -363,9 +388,26 @@ const ServiceDetailPage: React.FC = () => {
     rid,
     date: historicalDate,
     at: historicalAt,
-    pollMs: historicalDate ? 0 : 15_000,
+    pollMs: historicalMode || futureTimetableMode ? 0 : 15_000,
   })
   const { stations } = useStations()
+  const loadingTpl = useMemo(
+    () => (data ? stopTplFromBackLink(from, data.stops, data.origin) : null),
+    [data, from],
+  )
+  const hasLoading = useMemo(
+    () => Boolean(data?.stops?.some(stopHasPublishedLoading)),
+    [data],
+  )
+  const serviceSections = useMemo(() => {
+    if (!hasLoading) return BASE_SERVICE_SECTIONS
+    const [overview, ...rest] = BASE_SERVICE_SECTIONS
+    return [overview, LOADING_SECTION, ...rest]
+  }, [hasLoading])
+
+  useEffect(() => {
+    if (section === 'loading' && !hasLoading) setSection('overview')
+  }, [section, hasLoading])
 
   const fallbackStopNameLookup = useMemo(() => {
     const byTiploc = new Map<string, string>()
@@ -434,36 +476,40 @@ const ServiceDetailPage: React.FC = () => {
           </div>
         </div>
       )}
-      sections={SERVICE_SECTIONS}
+      sections={serviceSections}
       activeSectionId={section}
       onSelect={(id) => {
-        if (id === 'overview' || id === 'formation' || id === 'calling' || id === 'raw') {
+        if (id === 'overview' || id === 'loading' || id === 'formation' || id === 'calling' || id === 'raw') {
+          if (id === 'loading' && !hasLoading) return
           setSection(id)
         }
       }}
       ariaLabel="Service sections"
-      minSectionCount={4}
+      minSectionCount={hasLoading ? 5 : 4}
     >
         {status === 'not-found' && (
-          <section className="svc-state-card svc-state-card--error">
-            <h2>Service not found</h2>
-            <p>RID <code>{rid}</code> isn’t in today’s timetable. It may have already run, or the daemon may be using yesterday’s file.</p>
+          <section className="modal-section">
+            <StationSectionTitle title="Service not found" icon={Info} pageHeading />
+            <p className="edit-hint kb-source-hint">
+              RID <code>{rid}</code> isn’t in today’s timetable. It may have already run, or the daemon may be using yesterday’s file.
+            </p>
           </section>
         )}
 
         {status === 'error' && !data && (
-          <section className="svc-state-card svc-state-card--error">
-            <h2>Service unavailable</h2>
-            <p>{error}</p>
-            <p className="svc-hint">
+          <section className="modal-section">
+            <StationSectionTitle title="Service unavailable" icon={Info} pageHeading />
+            <p className="edit-hint kb-source-hint">{error}</p>
+            <p className="edit-hint kb-source-hint kb-source-hint--continued">
               Is the daemon running? Start it with <code>npm run devdarwin</code> from the repo root.
             </p>
           </section>
         )}
 
         {status === 'loading' && !data && (
-          <section className="svc-state-card">
-            <p>Loading service detail…</p>
+          <section className="modal-section">
+            <StationSectionTitle title="Overview" icon={Info} pageHeading />
+            <p className="edit-hint kb-source-hint">Loading service detail…</p>
           </section>
         )}
 
@@ -563,7 +609,7 @@ const ServiceDetailPage: React.FC = () => {
               ))}
 
             </section>
-            <footer className="svc-footer">
+            <p className="edit-hint kb-source-hint svc-footer">
               <span>Source: Network Rail Darwin Push Port</span>
               <span className="svc-footer-sep" aria-hidden="true">·</span>
               <DataLicenceAttribution />
@@ -571,19 +617,34 @@ const ServiceDetailPage: React.FC = () => {
               <span>RID {data.rid}</span>
               <span className="svc-footer-sep" aria-hidden="true">·</span>
               <span>Updated {new Date(data.updatedAt).toLocaleString('en-GB', { timeZone: 'Europe/London' })}</span>
-            </footer>
+            </p>
+          </section>
+        )}
+
+        {data && section === 'loading' && hasLoading && (
+          <section className="modal-section svc-formation-section" aria-label="Loading capacity">
+            <StationSectionTitle title="Loading capacity" icon={ChartBar} pageHeading />
+            <CarriageMap
+              formation={data.formation}
+              consist={data.consist}
+              stops={data.stops}
+              reverse={data.reverseFormation}
+              initialTpl={loadingTpl}
+              layout="loading-only"
+            />
           </section>
         )}
 
         {data && section === 'formation' && (
-            <section className="modal-section svc-formation-section" aria-label="Coach formation and loading">
+            <section className="modal-section svc-formation-section" aria-label="Formation">
               <StationSectionTitle title="Formation" icon={Train} pageHeading />
               <CarriageMap
                 formation={data.formation}
                 consist={data.consist}
                 stops={data.stops}
                 reverse={data.reverseFormation}
-                initialTpl={data.origin}
+                initialTpl={loadingTpl}
+                layout="stock-only"
                 onUnitClick={(unitId) => {
                   const qp = new URLSearchParams()
                   if (historicalDate) qp.set('unitDay', historicalDate)
@@ -593,6 +654,7 @@ const ServiceDetailPage: React.FC = () => {
               {/* Service associations: joins (JJ), divides (VV), next portions (NP).
                * Rendered beneath coach formation so unit/portion context sits
                * next to consist information. */}
+              <ServiceVehicleDetails consist={data.consist} />
               {data.associations && data.associations.length > 0 && data.associations.map((a) => (
                 <div key={`${a.category}-${a.otherRid}-${a.tiploc}`} className={`svc-banner svc-banner--assoc${a.isCancelled ? ' svc-banner--assoc-cancelled' : ''}`}>
                   {a.category !== 'NP' && (
@@ -626,26 +688,42 @@ const ServiceDetailPage: React.FC = () => {
         {data && section === 'calling' && (
             <section className="modal-section svc-pattern-card" aria-label="Calling pattern">
               <StationSectionTitle title="Calling pattern" icon={MapPin} pageHeading />
-              <div className="svc-table-wrap">
-                <table className="svc-stops-table">
+              <section className="svc-viewmode-card" aria-label="View mode">
+                <BUTTwoButtonBar
+                  className="svc-viewmode-toggle"
+                  colorVariant="accent"
+                  selectedIndex={viewModeSelectedIndex}
+                  buttons={[
+                    { label: 'Detailed', value: 'detailed' },
+                    { label: 'Simple', value: 'simple' },
+                  ]}
+                  onChange={(index) => {
+                    if (index === 0) setViewMode('detailed')
+                    if (index === 1) setViewMode('simple')
+                  }}
+                />
+              </section>
+              <div className="stations-table-panel">
+                <div className="stations-table-wrap">
+                <table className="stations-table svc-calling-table">
                   <thead>
                     <tr>
-                      <th>Type</th>
-                      <th>Location</th>
-                      {viewMode === 'detailed' && <th>PTA</th>}
-                      {viewMode === 'detailed' && <th>PTD</th>}
-                      <th>WTA</th>
-                      <th>WTD/WTP</th>
-                      <th>Δ min</th>
-                      <th>Platform</th>
-                      <th>Live</th>
+                      <StationsTableHead label="Type" />
+                      <StationsTableHead label="Location" sticky />
+                      {viewMode === 'detailed' && <StationsTableHead label="PTA" />}
+                      {viewMode === 'detailed' && <StationsTableHead label="PTD" />}
+                      <StationsTableHead label="WTA" />
+                      <StationsTableHead label="WTD/WTP" />
+                      <StationsTableHead label="Δ min" />
+                      <StationsTableHead label="Platform" />
+                      <StationsTableHead label="Live" />
                     </tr>
                   </thead>
                   <tbody>
-                {data.stops.map((s, idx) => {
+                {data.stops.flatMap((s, idx) => {
                   const stopLabel = displayStopName(data.stops, idx, fallbackStopNameLookup)
                   const kind = SLOT_KIND[s.slot] || 'stop'
-                  if (viewMode === 'simple' && kind === 'pass') return null
+                  if (viewMode === 'simple' && kind === 'pass') return []
                   const kindLabel = SLOT_KIND_LABEL[kind]
                   const pArr = s.pta || null
                   const pDep = s.ptd || null
@@ -684,10 +762,12 @@ const ServiceDetailPage: React.FC = () => {
                     next.set('label', stopLabel)
                     router.push(`/departures/${encodeURIComponent(departuresTargetCode)}${next.toString() ? `?${next.toString()}` : ''}`)
                   }
-                  return (
+                  return [(
                     <tr
                       key={`${s.tpl}-${idx}`}
                       className={[
+                        'stations-table__row',
+                        idx % 2 === 1 ? 'stations-table__row--striped' : '',
                         'svc-stop',
                         'svc-stop--jump',
                         `svc-stop--${kind}`,
@@ -705,20 +785,21 @@ const ServiceDetailPage: React.FC = () => {
                       }}
                     >
                       <td><span className={`svc-kind-badge svc-kind-badge--${kind}`}>{kindLabel}</span></td>
-                      <td>
+                      <td className="stations-table__name">
                         <div className="svc-stop-name">
                           <span className="svc-stop-name-text">{stopLabel}</span>
                           {s.crs ? <span className="svc-stop-crs">{s.crs}</span> : null}
                           {kind !== 'pass' && <ActivityPill activity={s.activity} />}
                         </div>
                       </td>
-                      {viewMode === 'detailed' && <td className="svc-mono">{kind === 'pass' ? '—' : (pArr || '—')}</td>}
-                      {viewMode === 'detailed' && <td className="svc-mono">{kind === 'pass' ? '—' : (pDep || '—')}</td>}
-                      <td className="svc-mono">{kind === 'pass' ? '—' : (wArr || '—')}</td>
-                      <td className="svc-mono">{kind === 'pass' ? (wPass || '—') : (wDep || '—')}</td>
+                      {viewMode === 'detailed' && <td className="svc-mono stations-table__id">{kind === 'pass' ? '—' : (pArr || '—')}</td>}
+                      {viewMode === 'detailed' && <td className="svc-mono stations-table__id">{kind === 'pass' ? '—' : (pDep || '—')}</td>}
+                      <td className="svc-mono stations-table__id">{kind === 'pass' ? '—' : (wArr || '—')}</td>
+                      <td className="svc-mono stations-table__id">{kind === 'pass' ? (wPass || '—') : (wDep || '—')}</td>
                       <td
                         className={[
                           'svc-mono',
+                          'stations-table__id',
                           deltaMinutes == null
                             ? ''
                             : deltaMinutes > 0
@@ -730,7 +811,7 @@ const ServiceDetailPage: React.FC = () => {
                       >
                         {deltaMinutes == null ? '—' : (deltaMinutes > 0 ? `+${deltaMinutes}` : String(deltaMinutes))}
                       </td>
-                      <td className="svc-mono">
+                      <td className="svc-mono stations-table__id">
                         <span className="svc-platform-cell">
                           <span>{platformValue}</span>
                           {platformValue !== '—' && viewMode === 'detailed' && (
@@ -749,7 +830,7 @@ const ServiceDetailPage: React.FC = () => {
                           )}
                         </span>
                       </td>
-                      <td>
+                      <td className="stations-table__live">
                         <div className="svc-stop-live">
                           {s.cancelledAtStop && <span className="svc-pill svc-pill--cancelled">Cancelled</span>}
                           {!s.cancelledAtStop && s.unknownDelay && <span className="svc-pill svc-pill--late">Delayed{s.liveSource ? ` (${s.liveSource})` : ''}</span>}
@@ -771,10 +852,11 @@ const ServiceDetailPage: React.FC = () => {
                         </div>
                       </td>
                     </tr>
-                  )
+                  )]
                 })}
                   </tbody>
                 </table>
+                </div>
               </div>
             </section>
         )}

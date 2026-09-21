@@ -6,8 +6,8 @@ import { createPortal } from 'react-dom'
 import { Info, MagnifyingGlass, X } from '@phosphor-icons/react'
 
 import { useDepartures } from '@/hooks/useDepartures'
-import { useBoardCoachLoading } from '@/hooks/useBoardCoachLoading'
-import type { DepartureRow, DepartureServiceType } from '@/types/darwin'
+import { applyBoardFormationOverlay, overlayKeyForRow, useBoardCoachLoading } from '@/hooks/useBoardCoachLoading'
+import type { DepartureRow, DepartureServiceType, DeparturesSnapshot } from '@/types/darwin'
 import type { Station } from '@/types'
 import { useStations } from '@/hooks/useStations'
 import { BackIcon } from '@/components/icons'
@@ -23,6 +23,8 @@ import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
 import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
 import { paramAsString } from '@/utils/nextParams'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
+import { peekHotHealth, peekHotHistoryDates } from '@/utils/darwinHotCache'
+import { prefetchDarwinService } from '@/hooks/useServiceDetail'
 import { isoDateToDdMmYyyy } from '@/utils/dateDdMmYyyy'
 import {
   filterStationsLikeFaresSearch,
@@ -71,22 +73,30 @@ function formatAge(ms: number | null): string {
   return `${h}h ago`
 }
 
+const HEADER_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
+
 function formatHeaderDate(dateStr: string): string {
-  const d = new Date(`${dateStr}T00:00:00`)
-  if (Number.isNaN(d.getTime())) return dateStr
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr.trim())
+  if (!match) return dateStr
+  const month = HEADER_MONTHS[Number(match[2]) - 1]
+  if (!month) return dateStr
+  return `${Number(match[3])} ${month} ${match[1]}`
 }
 
 function formatLiveNowUk(): string {
-  return new Date().toLocaleString('en-GB', {
-    day: '2-digit',
-    month: 'short',
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
     year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-    timeZone: 'Europe/London',
-  })
+  }).formatToParts(new Date())
+  const pick = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value || '00'
+  const month = HEADER_MONTHS[Number(pick('month')) - 1] || pick('month')
+  return `${Number(pick('day'))} ${month} ${pick('year')}, ${pick('hour')}:${pick('minute')}`
 }
 
 function getLiveNowPartsUk(now = new Date()): { date: string; time: string } {
@@ -242,22 +252,26 @@ const DarwinDepartureRowCard = React.memo(function DarwinDepartureRowCard({
 
   const onClick = useCallback(() => {
     const qp = new URLSearchParams()
-    if (historicalMode && historyDate) {
+    if (historyDate) {
       qp.set('date', historyDate)
       if (historyTime) qp.set('at', historyTime)
     }
     const backQs = new URLSearchParams()
     backQs.set('hours', String(hours))
-    if (historicalMode && historyDate) backQs.set('date', historyDate)
-    if (historicalMode && historyTime) backQs.set('at', historyTime)
+    if (historyDate) backQs.set('date', historyDate)
+    if (historyTime) backQs.set('at', historyTime)
     const backTo = `/departures/${encodeURIComponent(code)}${backQs.toString() ? `?${backQs.toString()}` : ''}`
     qp.set('from', backTo)
     const suffix = qp.toString() ? `?${qp.toString()}` : ''
+    prefetchDarwinService(row.rid, historyDate || undefined, historyTime || undefined)
     router.push(`/services/${encodeURIComponent(row.rid)}${suffix}`)
-  }, [router, historicalMode, historyDate, historyTime, code, hours, row.rid])
+  }, [router, historyDate, historyTime, code, hours, row.rid])
 
   return (
-    <div role="listitem">
+    <div
+      role="listitem"
+      onPointerEnter={() => prefetchDarwinService(row.rid, historyDate || undefined, historyTime || undefined)}
+    >
       <DarwinServiceCard
         row={row}
         historicalMode={historicalMode}
@@ -369,7 +383,9 @@ function isRawTiplocLikeName(name: string | null | undefined, fallbackCode: stri
   return /^[A-Z0-9]{4,}$/.test(n)
 }
 
-const DarwinDeparturesPage: React.FC = () => {
+const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | null }> = ({
+  initialSnapshot = null,
+}) => {
   const params = useParams()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -387,8 +403,13 @@ const DarwinDeparturesPage: React.FC = () => {
   const [showDetailedInfo, setShowDetailedInfo] = useState(false)
   const [showFormation, setShowFormation] = useState(true)
   const [boardMode, setBoardMode] = useState<BoardModeFilter>('departures')
-  const [historyDates, setHistoryDates] = useState<string[]>([])
+  const [historyDates, setHistoryDates] = useState<string[]>(() => peekHotHistoryDates() || [])
+  const [liveClockReady, setLiveClockReady] = useState(false)
   const { stations } = useStations()
+
+  useEffect(() => {
+    setLiveClockReady(true)
+  }, [])
 
   useEffect(() => {
     setShowDetailedInfo(readDetailedInfoPreference())
@@ -405,7 +426,12 @@ const DarwinDeparturesPage: React.FC = () => {
   const [historyTimeDraft, setHistoryTimeDraft] = useState<string>(historyTime || initialLiveWall.time)
   const [operatingDayHelpOpen, setOperatingDayHelpOpen] = useState(false)
   const todayIsoDate = getCurrentRailwayDayIsoUk()
-  const maxFutureDateIso = addDaysIsoDate(getCurrentRailwayDayIsoUk(), 2)
+  const minLookbackDateIso = addDaysIsoDate(todayIsoDate, -1)
+  const [maxFutureDateIso, setMaxFutureDateIso] = useState(() => {
+    const max = peekHotHealth()?.timetableWindow?.maxDate
+    if (typeof max === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(max)) return max
+    return addDaysIsoDate(todayIsoDate, 30)
+  })
   const operatingDayForMode = useMemo(() => {
     if (!historyDate) return todayIsoDate
     if (historyTime && /^\d{1,2}:\d{2}$/.test(historyTime.trim())) {
@@ -450,7 +476,9 @@ const DarwinDeparturesPage: React.FC = () => {
     hours,
     date: historyDate || undefined,
     at: historyDate && historyTime ? historyTime : undefined,
+    initialSnapshot: hasStationSelected ? initialSnapshot : null,
   })
+  const boardReady = !hasStationSelected || (status !== 'idle' && status !== 'loading')
 
   useEffect(() => {
     setSearchInput('')
@@ -459,6 +487,29 @@ const DarwinDeparturesPage: React.FC = () => {
   }, [code])
 
   useEffect(() => {
+    if (!boardReady) return
+    let cancelled = false
+    const loadWindow = async () => {
+      try {
+        const res = await fetchDarwin('/api/darwin/health')
+        if (!res.ok) return
+        const body = await res.json() as { timetableWindow?: { maxDate?: string } }
+        const max = body?.timetableWindow?.maxDate
+        if (!cancelled && typeof max === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(max)) {
+          setMaxFutureDateIso(max)
+        }
+      } catch {
+        // Keep the 30-day fallback until the daemon reports the CIF horizon.
+      }
+    }
+    void loadWindow()
+    return () => {
+      cancelled = true
+    }
+  }, [boardReady])
+
+  useEffect(() => {
+    if (!boardReady) return
     let cancelled = false
     const load = async () => {
       try {
@@ -469,6 +520,7 @@ const DarwinDeparturesPage: React.FC = () => {
         const dates = (body.dates || [])
           .filter((d) => d.hasState && d.hasTimetable)
           .map((d) => d.date)
+          .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= minLookbackDateIso)
           .sort((a, b) => b.localeCompare(a))
         setHistoryDates(dates)
       } catch {
@@ -476,9 +528,11 @@ const DarwinDeparturesPage: React.FC = () => {
         setHistoryDates([])
       }
     }
-    load()
-    return () => { cancelled = true }
-  }, [])
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [boardReady, minLookbackDateIso])
 
   const submitSearch = () => {
     const normalizedInput = normalizeSearchInputForMode(searchInput, searchMode).trim()
@@ -620,23 +674,22 @@ const DarwinDeparturesPage: React.FC = () => {
 
   const loadingOverlays = useBoardCoachLoading(
     activeFilteredRows,
-    hasStationSelected && showFormation,
+    hasStationSelected && showFormation && !futureTimetableMode,
     historicalMode ? historyDate : undefined,
     historicalMode ? historyTime : undefined,
   )
 
   const boardRows = useMemo(() => {
     if (loadingOverlays.size === 0) return activeFilteredRows
-    return activeFilteredRows.map((row) => {
-      const overlay = loadingOverlays.get(`${row.rid}:${row.movement ?? 'departure'}`)
-      if (!overlay) return row
-      return {
-        ...row,
-        coachLoading: overlay.coachLoading,
-        loadingPercentage: overlay.loadingPercentage,
-      }
-    })
+    return activeFilteredRows.map((row) => applyBoardFormationOverlay(row, loadingOverlays.get(overlayKeyForRow(row))))
   }, [activeFilteredRows, loadingOverlays])
+
+  useEffect(() => {
+    if (!historicalMode || boardRows.length === 0) return
+    for (const row of boardRows.slice(0, 8)) {
+      prefetchDarwinService(row.rid, historyDate || undefined, historyTime || undefined)
+    }
+  }, [historicalMode, historyDate, historyTime, boardRows])
 
   const filteredCounts = useMemo(
     () => ({ rows: activeFilteredRows.length }),
@@ -657,7 +710,7 @@ const DarwinDeparturesPage: React.FC = () => {
     const boardDateText = historyDate && historyTime
       ? `Wall clock: ${formatHeaderDate(historyDate)} · ${historyTime} · Operating day: ${operatingDayLabel}${modeSuffix}`
       : `Operating day: ${operatingDayLabel}${modeSuffix}`
-    const liveNowText = historicalMode || futureTimetableMode ? null : `Live now: ${formatLiveNowUk()}`
+    const liveNowText = !liveClockReady || historicalMode || futureTimetableMode ? null : `Live now: ${formatLiveNowUk()}`
 
     if (status === 'ok') {
       const statusText = historicalMode
@@ -717,7 +770,7 @@ const DarwinDeparturesPage: React.FC = () => {
     if (status === 'error')     return <span className="dep-subtitle__status">{error ? `Error: ${error}` : 'Board data unavailable'} · {boardDateText}</span>
     if (status === 'not-found') return <span className="dep-subtitle__status">Unknown station</span>
     return ''
-  }, [status, error, ageMs, hasStationSelected, data, filteredCounts.rows, boardMode, historicalMode, timedCurrentDayMode, historyDate, historyTime, futureTimetableMode, todayIsoDate, operatingDayForMode])
+  }, [status, error, ageMs, hasStationSelected, data, filteredCounts.rows, boardMode, historicalMode, timedCurrentDayMode, historyDate, historyTime, futureTimetableMode, todayIsoDate, operatingDayForMode, liveClockReady])
 
   const stationSuggestions = useMemo(
     () => filterStationsForSearchMode(stations, searchInput, searchMode),
@@ -733,6 +786,7 @@ const DarwinDeparturesPage: React.FC = () => {
   }
 
   const availableHistoryDatesSet = useMemo(() => new Set(historyDates), [historyDates])
+  const minPickerDateIso = minLookbackDateIso
 
   const applyDateTimeFilter = () => {
     const dateValue = historyDateDraft.trim()
@@ -751,7 +805,8 @@ const DarwinDeparturesPage: React.FC = () => {
       setHistoryDateError(`Future timetable view currently supports up to ${formatHeaderDate(maxFutureDateIso)}.`)
       return
     }
-    if (dateValue < todayIsoDate && historyDates.length > 0 && !availableHistoryDatesSet.has(dateValue)) {
+    const lookbackOk = dateValue >= minLookbackDateIso
+    if (dateValue < todayIsoDate && historyDates.length > 0 && !availableHistoryDatesSet.has(dateValue) && !lookbackOk) {
       setHistoryDateError('That date is not available in historical snapshots.')
       return
     }
@@ -963,6 +1018,7 @@ const DarwinDeparturesPage: React.FC = () => {
                         type="date"
                         lang="en-GB"
                         value={historyDateDraft}
+                        min={minPickerDateIso}
                         max={maxFutureDateIso}
                         aria-label="Choose date"
                         onChange={(event) => {

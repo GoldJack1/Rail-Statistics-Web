@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isLocalDarwinOrigin, resolveDarwinApiOrigin } from '@/utils/darwinApiOrigin'
 
 function json(status: number, body: unknown) {
   return NextResponse.json(body, { status })
@@ -23,12 +24,12 @@ function detectCountryCode(request: NextRequest): string | null {
 }
 
 async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promise<NextResponse> {
-  const origin = process.env.DARWIN_API_ORIGIN || 'https://api-darwin.railstatistics.co.uk'
+  const origin = resolveDarwinApiOrigin()
   const apiKey = process.env.DARWIN_API_KEY || ''
   const ukOnly = boolEnv(process.env.DARWIN_UK_ONLY)
   const ukAllowedCountries = new Set(['GB', 'UK'])
 
-  if (!apiKey) {
+  if (!apiKey && !isLocalDarwinOrigin(origin)) {
     return json(500, { error: 'DARWIN_API_KEY is not configured' })
   }
 
@@ -44,28 +45,49 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
   }
 
   const splat = pathSegments.length > 0 ? pathSegments.join('/') : 'health'
-  const upstream = new URL(`${origin.replace(/\/$/, '')}/api/${splat}${request.nextUrl.search}`)
+  const upstream = new URL(`${origin}/api/${splat}${request.nextUrl.search}`)
 
-  const headers = new Headers(request.headers)
-  headers.set('X-API-Key', apiKey)
-  headers.set('Host', upstream.host)
-  headers.delete('content-length')
+  const headers = new Headers()
+  if (apiKey) headers.set('X-API-Key', apiKey)
+  const accept = request.headers.get('accept')
+  if (accept) headers.set('Accept', accept)
+  const contentType = request.headers.get('content-type')
+  if (contentType) headers.set('Content-Type', contentType)
 
-  const upstreamRes = await fetch(upstream, {
-    method: request.method,
-    headers,
-    body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
-    // @ts-expect-error duplex required for streaming bodies in Node 18+
-    duplex: 'half',
-  })
+  try {
+    headers.set('Accept-Encoding', 'identity')
+    const upstreamRes = await fetch(upstream, {
+      method: request.method,
+      headers,
+      body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
+      // @ts-expect-error duplex required for streaming bodies in Node 18+
+      duplex: 'half',
+    })
 
-  const responseHeaders = new Headers(upstreamRes.headers)
-  responseHeaders.delete('content-length')
+    // Node decompresses the body. Do not forward hop-by-hop / encoding headers
+    // (Caddy gzip + transfer-encoding made Safari show "Load failed").
+    const responseHeaders = new Headers()
+    const contentType = upstreamRes.headers.get('content-type')
+    if (contentType) responseHeaders.set('content-type', contentType)
+    const cacheControl = upstreamRes.headers.get('cache-control')
+    if (cacheControl) responseHeaders.set('cache-control', cacheControl)
 
-  return new NextResponse(upstreamRes.body, {
-    status: upstreamRes.status,
-    headers: responseHeaders,
-  })
+    return new NextResponse(upstreamRes.body, {
+      status: upstreamRes.status,
+      headers: responseHeaders,
+    })
+  } catch (err) {
+    const cause = err instanceof Error ? err.cause : null
+    const code = cause && typeof cause === 'object' && 'code' in cause ? String((cause as { code?: string }).code) : ''
+    if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || code === 'ETIMEDOUT') {
+      return json(503, {
+        error: 'starting',
+        retryAfterSec: 3,
+        message: 'Darwin daemon is not reachable on :4001',
+      })
+    }
+    throw err
+  }
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {

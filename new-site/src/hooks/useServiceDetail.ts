@@ -30,6 +30,55 @@ const DEFAULT_POLL_MS  = 15_000
 const DEFAULT_STALE_MS = 60_000
 const MAX_NETWORK_RETRIES = 2
 const RETRY_BASE_DELAY_MS = 500
+const LIVE_SERVICE_CACHE_TTL_MS = 15_000
+const HIST_SERVICE_CACHE_TTL_MS = 6 * 60 * 60_000
+const SERVICE_CACHE_MAX = 200
+
+type ServiceCacheEntry = { detail: ServiceDetail; cachedAtMs: number; ttlMs: number }
+const serviceDetailCache = new Map<string, ServiceCacheEntry>()
+const prefetchInflight = new Set<string>()
+
+function serviceCacheKey(rid: string, date?: string, at?: string): string {
+  return `${rid}|${date || ''}|${at || ''}`
+}
+
+function cacheTtlMs(date?: string): number {
+  return date ? HIST_SERVICE_CACHE_TTL_MS : LIVE_SERVICE_CACHE_TTL_MS
+}
+
+function getCachedService(key: string): ServiceDetail | null {
+  const hit = serviceDetailCache.get(key)
+  if (!hit) return null
+  if (Date.now() - hit.cachedAtMs > hit.ttlMs) {
+    serviceDetailCache.delete(key)
+    return null
+  }
+  return hit.detail
+}
+
+function putCachedService(key: string, detail: ServiceDetail, ttlMs: number) {
+  serviceDetailCache.set(key, { detail, cachedAtMs: Date.now(), ttlMs })
+  if (serviceDetailCache.size <= SERVICE_CACHE_MAX) return
+  const oldest = [...serviceDetailCache.entries()]
+    .sort((a, b) => a[1].cachedAtMs - b[1].cachedAtMs)
+    .slice(0, serviceDetailCache.size - SERVICE_CACHE_MAX)
+  for (const [k] of oldest) serviceDetailCache.delete(k)
+}
+
+function applyCachedDetail(
+  detail: ServiceDetail,
+  staleAfterMs: number,
+  setData: (d: ServiceDetail) => void,
+  setError: (e: string | null) => void,
+  setAgeMs: (n: number) => void,
+  setStatus: (s: ServiceDetailStatus) => void,
+) {
+  setData(detail)
+  setError(null)
+  const age = Date.now() - Date.parse(detail.updatedAt)
+  setAgeMs(age)
+  setStatus(age > staleAfterMs ? 'stale' : 'ok')
+}
 
 function userMessageForStatus(status: number): string {
   if (status === 401 || status === 403) return 'Access to live service detail is currently restricted.'
@@ -73,6 +122,29 @@ async function delay(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
+function serviceUrl(rid: string, date?: string, at?: string): string {
+  const qs = new URLSearchParams()
+  if (date) qs.set('date', date)
+  if (at) qs.set('at', at)
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return `/api/darwin/service/${encodeURIComponent(rid)}${suffix}`
+}
+
+/** Warm the in-memory cache from a historical board hover/click so detail opens from RAM. */
+export function prefetchDarwinService(rid: string, date?: string, at?: string) {
+  if (!rid) return
+  const key = serviceCacheKey(rid, date, at)
+  if (getCachedService(key) || prefetchInflight.has(key)) return
+  prefetchInflight.add(key)
+  void fetchDarwin(serviceUrl(rid, date, at))
+    .then((res) => (res.ok ? res.json() : null))
+    .then((detail) => {
+      if (detail) putCachedService(key, detail as ServiceDetail, cacheTtlMs(date))
+    })
+    .catch(() => undefined)
+    .finally(() => prefetchInflight.delete(key))
+}
+
 /**
  * Polls /api/darwin/service/:rid every `pollMs` ms while the tab is visible.
  * Mirrors the shape and behaviour of `useDepartures`.
@@ -95,15 +167,17 @@ export function useServiceDetail({
 
   const fetchOnce = useCallback(async () => {
     if (!rid) return
+    const cacheKey = serviceCacheKey(rid, date, at)
+    const cached = getCachedService(cacheKey)
+    if (date && cached) {
+      applyCachedDetail(cached, staleAfterMs, setData, setError, setAgeMs, setStatus)
+      return
+    }
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
     try {
-      const qs = new URLSearchParams()
-      if (date) qs.set('date', date)
-      if (at) qs.set('at', at)
-      const suffix = qs.toString() ? `?${qs.toString()}` : ''
-      const url = `/api/darwin/service/${encodeURIComponent(rid)}${suffix}`
+      const url = serviceUrl(rid, date, at)
       let res: Response | null = null
       for (let attempt = 0; attempt <= MAX_NETWORK_RETRIES; attempt += 1) {
         if (ac.signal.aborted) throw createAbortError()
@@ -130,11 +204,8 @@ export function useServiceDetail({
       }
       if (!res.ok) throw new Error(userMessageForStatus(res.status))
       const detail: ServiceDetail = await res.json()
-      setData(detail)
-      setError(null)
-      const age = Date.now() - Date.parse(detail.updatedAt)
-      setAgeMs(age)
-      setStatus(age > staleAfterMs ? 'stale' : 'ok')
+      putCachedService(cacheKey, detail, cacheTtlMs(date))
+      applyCachedDetail(detail, staleAfterMs, setData, setError, setAgeMs, setStatus)
     } catch (e) {
       if ((e as Error)?.name === 'AbortError') return
       setError((e as Error)?.message || 'Could not load service detail.')
@@ -144,7 +215,7 @@ export function useServiceDetail({
 
   const schedulePoll = useCallback(() => {
     if (pollRef.current) clearTimeout(pollRef.current)
-    if (!rid) return
+    if (!rid || pollMs <= 0) return
     pollRef.current = setTimeout(async () => {
       if (document.visibilityState === 'visible') await fetchOnce()
       schedulePoll()
@@ -153,7 +224,17 @@ export function useServiceDetail({
 
   useEffect(() => {
     if (!rid) { setStatus('idle'); setData(null); setError(null); return }
-    setStatus(prev => (data ? prev : 'loading'))
+    const cached = getCachedService(serviceCacheKey(rid, date, at))
+    if (cached) {
+      applyCachedDetail(cached, staleAfterMs, setData, setError, setAgeMs, setStatus)
+      if (date) {
+        return () => {
+          abortRef.current?.abort()
+        }
+      }
+    } else {
+      setStatus(prev => (data ? prev : 'loading'))
+    }
     fetchOnce()
     schedulePoll()
     return () => {
@@ -164,12 +245,13 @@ export function useServiceDetail({
   }, [rid, pollMs, date, at])
 
   useEffect(() => {
+    if (date) return
     const onVis = () => {
       if (document.visibilityState === 'visible' && rid) fetchOnce()
     }
     document.addEventListener('visibilitychange', onVis)
     return () => document.removeEventListener('visibilitychange', onVis)
-  }, [rid, fetchOnce])
+  }, [rid, fetchOnce, date])
 
   useEffect(() => {
     if (!data) { setAgeMs(null); return }

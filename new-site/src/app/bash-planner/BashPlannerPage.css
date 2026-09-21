@@ -1,0 +1,213 @@
+.search-container,
+.search-input-shell {
+  width: 100%;
+}
+
+.bash-suggest-list {
+  list-style: none;
+  margin: var(--space-sm) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bash-suggest-list button {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.bash-suggest-list button:hover {
+  background: var(--button-bg-active, var(--bg-primary));
+  color: var(--button-text-active, var(--text-primary));
+}
+
+.bash-suggest-code {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.bash-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.bash-filter-group + .bash-filter-group {
+  margin-top: var(--space-md);
+}
+
+.bash-filter-label {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-disabled);
+}
+
+.bash-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bash-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.bash-chip button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.bash-chip-link {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.bash-error {
+  margin: var(--space-sm) 0 0;
+  color: var(--text-secondary);
+}
+
+.bash-plan-error {
+  color: hsl(0 68% 48%);
+}
+
+.bash-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.bash-hop {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+}
+
+.bash-hop-kicker {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-disabled);
+}
+
+.bash-board-line {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  color: inherit;
+  text-decoration: none;
+}
+
+.bash-leg-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--stations-card-gap, var(--space-lg));
+}
+
+.bash-leg-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 350px), 1fr));
+  gap: var(--stations-card-gap, var(--space-lg));
+  align-items: stretch;
+}
+
+.bash-leg-row > .rs-station-card-stack,
+.bash-leg-row > .rs-text-card,
+.bash-leg-row > .bash-board-line {
+  width: 100%;
+  min-width: 0;
+  align-self: stretch;
+}
+
+.bash-result-head {
+  align-items: flex-start;
+}
+
+.bash-result-copy {
+  min-width: 0;
+}
+
+.bash-result-copy h2,
+.bash-result-copy p {
+  margin: 0;
+}
+
+.bash-result-copy p {
+  margin-top: 4px;
+}
+
+.bash-leg-row--walk {
+  grid-template-columns: 1fr;
+}
+
+.bash-instruction-card .rs-text-card__chevron,
+.bash-walk-card .rs-text-card__chevron {
+  display: none;
+}
+
+.bash-instruction-card .rs-text-card__content,
+.bash-walk-card .rs-text-card__content {
+  padding-right: 0;
+}
+
+.bash-hop p {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.bash-leg-list a {
+  color: inherit;
+}
+
+.bash-risky {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
+
+.bash-risky h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.bash-risky p,
+.bash-caution {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.bash-muted {
+  color: var(--text-secondary);
+}

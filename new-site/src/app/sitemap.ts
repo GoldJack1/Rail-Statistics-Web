@@ -18,6 +18,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     '/contactless-fares',
     '/smartcard-fares',
     '/departures',
+    '/bash-planner',
     '/units',
     '/privacy',
     '/eula',
