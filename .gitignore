@@ -1,4 +1,14 @@
 .DS_Store
+node_modules/
+
+# Local env and credentials — never commit
+.env
+.env.*
+!.env.example
+!.env*.example
+*.pem
+credentials.json
+**/.vitest-secret-token
 
 # Leftover path after rename New Site → new-site (local .next cache only)
 /New Site/
