@@ -593,6 +593,10 @@
     padding: 0;
   }
 
+  .station-details-main .station-section-title--page-heading {
+    display: none;
+  }
+
   /*
    * Edge-bleed scroll wrap (same idea as stations-page network tabs).
    * Negative margin alone is not enough: width must grow by 2× inset or the

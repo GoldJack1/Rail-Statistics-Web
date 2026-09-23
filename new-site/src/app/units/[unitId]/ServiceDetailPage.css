@@ -253,30 +253,27 @@
 /* ===== Calling pattern card ===== */
 
 .svc-pattern-card {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  padding: var(--space-xl);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
 }
 
 .svc-pattern-title {
-  margin: 0 0 var(--space-lg);
-  font-size: var(--text-lg);
-  font-weight: 600;
-  color: var(--text-primary);
+  display: none;
 }
 
 /* Table view for calling pattern */
 .svc-table-wrap {
   width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .svc-stops-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 900px;
+  min-width: 0;
 }
 
 .svc-stops-table th,
@@ -306,10 +303,6 @@
 .svc-stop--jump:focus-visible {
   outline: 2px solid var(--accent-base);
   outline-offset: -2px;
-}
-
-.svc-stop--cancelled td {
-  background: color-mix(in srgb, var(--accent-base) 8%, transparent);
 }
 
 .svc-kind-badge {
@@ -788,8 +781,8 @@
 
 /* ===== Mobile ===== */
 @media (max-width: 639px) {
-  .svc-summary-card,
-  .svc-pattern-card { padding: var(--space-lg); }
+  .svc-summary-card { padding: var(--space-lg); }
+  .svc-pattern-card { padding: 0; }
   .svc-allocation-card { padding: var(--space-lg); }
   .svc-vehicle-card { padding: var(--space-lg); }
   .svc-viewmode-card { justify-content: flex-start; }

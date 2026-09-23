@@ -21,14 +21,14 @@ export const ActivityPill: React.FC<{
   const tokens: DarwinActivity[] = showAll ? decodeActivity(activity) : importantActivities(activity)
   if (tokens.length === 0) return null
   return (
-    <span className={['act-pill-row', className].filter(Boolean).join(' ')}>
+    <span className={['act-pill-row act-pill-row--text', className].filter(Boolean).join(' ')}>
       {tokens.map((t, i) => (
         <span
           key={`${t.code}-${i}`}
-          className={`act-pill act-pill--${t.code.toLowerCase().replace(/\s+/g, '-')}`}
+          className="act-note"
           title={`Darwin activity code: ${t.code}`}
         >
-          {t.label}
+          ({t.label})
         </span>
       ))}
     </span>

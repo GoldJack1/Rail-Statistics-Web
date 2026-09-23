@@ -35,7 +35,10 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
 
   if (ukOnly) {
     const country = detectCountryCode(request)
-    if (!country || !ukAllowedCountries.has(country)) {
+    // Localhost never receives Cloudflare/Netlify geo headers. Production still
+    // fails closed when the country is missing or not the UK.
+    const allowMissingCountry = process.env.NODE_ENV !== 'production' && !country
+    if (!allowMissingCountry && (!country || !ukAllowedCountries.has(country))) {
       return json(451, {
         error: 'regional_restriction',
         message: 'Darwin realtime API is only available in the UK.',

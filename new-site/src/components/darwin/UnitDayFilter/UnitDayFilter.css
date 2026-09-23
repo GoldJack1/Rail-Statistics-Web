@@ -1,0 +1,111 @@
+.unit-day-filter {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-sm);
+  max-width: none;
+}
+
+.unit-day-filter__label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-disabled);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.unit-day-filter__tabs {
+  width: 100%;
+}
+
+.unit-day-picker {
+  position: absolute;
+  top: calc(100% + var(--space-xs));
+  left: 0;
+  z-index: 20;
+  width: min(100%, 22rem);
+  padding: var(--space-md);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-sm);
+  box-sizing: border-box;
+}
+
+.unit-day-picker__nav {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.unit-day-picker__month {
+  margin: 0;
+  text-align: center;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.unit-day-picker__weekdays,
+.unit-day-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.unit-day-picker__weekdays {
+  margin-bottom: 4px;
+}
+
+.unit-day-picker__weekdays span {
+  text-align: center;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-disabled);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.unit-day-picker__day {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  min-height: 36px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.unit-day-picker__day.is-outside {
+  color: var(--text-disabled);
+}
+
+.unit-day-picker__day.is-disabled {
+  color: var(--text-disabled);
+  opacity: 0.35;
+  cursor: default;
+}
+
+.unit-day-picker__day:not(.is-disabled):hover,
+.unit-day-picker__day:not(.is-disabled):focus-visible {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.unit-day-picker__day.is-selected {
+  background: color-mix(in srgb, var(--accent-base) 22%, var(--bg-secondary));
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.unit-day-picker__empty {
+  margin: var(--space-sm) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}

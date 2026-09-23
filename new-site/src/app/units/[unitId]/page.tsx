@@ -4,12 +4,14 @@ import { useRouter, usePathname, useSearchParams, useParams } from 'next/navigat
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarBlank, Info, Train, WarningCircle } from '@phosphor-icons/react'
 
-import { BUTWideButton } from '@/components/buttons'
+import { BUTBaseButton, BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import { TextCard } from '@/components/cards'
 import { CarriageMap } from '@/components/darwin/CarriageMap'
 import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
 import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
+import { ServiceStopList } from '@/components/darwin/ServiceStopList/ServiceStopList'
+import { UnitDayFilter } from '@/components/darwin/UnitDayFilter/UnitDayFilter'
 import {
   groupUnitsFromConsist,
   ServiceVehicleDetails,
@@ -18,10 +20,12 @@ import {
 import type { AccountSection } from '@/components/misc/AccountSectionNav/AccountSectionNav'
 import StationDetailField from '@/components/models/StationDetails/StationDetailField'
 import StationSectionTitle from '@/components/models/StationDetails/StationSectionTitle'
+import SidebarDropdownSection from '@/components/misc/SidebarDropdownSection/SidebarDropdownSection'
 import { useUnitDetail } from '@/hooks/useUnitDetail'
 import type { ServiceDetail } from '@/types/darwin'
 import { paramAsString } from '@/utils/nextParams'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
+import { stopHasPublishedLoading } from '@/utils/darwinCoachLoading'
 import { isPlausibleUnitOperatingDay, ukCalendarYmd } from '@/utils/unitOperatingDay'
 import './UnitLookupPage.css'
 import '../../services/[rid]/ServiceDetailPage.css'
@@ -148,6 +152,10 @@ const UnitLookupPage: React.FC = () => {
   const latestServiceUnitGroups = useMemo<ServiceUnitGroup[]>(
     () => groupUnitsFromConsist(latestService?.consist),
     [latestService]
+  )
+  const latestServiceHasLoading = useMemo(
+    () => Boolean(latestService?.stops?.some(stopHasPublishedLoading)),
+    [latestService],
   )
 
   const latestServiceLogsByVehicle = useMemo(() => {
@@ -494,26 +502,15 @@ const UnitLookupPage: React.FC = () => {
             )}
 
             {data && (
-              <section className="unit-date-filter-card" aria-label="Unit day filter">
-                <label htmlFor="unit-detail-day-filter">Show unit data for day</label>
-                <select
-                  id="unit-detail-day-filter"
-                  value={selectedDay}
-                  onChange={(e) => {
-                    const nextDay = e.target.value
-                    updateQuery((next) => {
-                      next.set('unitDay', nextDay)
-                    })
-                  }}
-                >
-                  <option value="all">All days in collection</option>
-                  {availableDays.map((d) => (
-                    <option key={d} value={d}>
-                      {formatDateOnly(d)}
-                    </option>
-                  ))}
-                </select>
-              </section>
+              <UnitDayFilter
+                availableDays={availableDays}
+                selectedDay={selectedDay}
+                onSelect={(nextDay) => {
+                  updateQuery((next) => {
+                    next.set('unitDay', nextDay)
+                  })
+                }}
+              />
             )}
 
             {data && activeTab === 'overview' && (
@@ -528,8 +525,11 @@ const UnitLookupPage: React.FC = () => {
                   </div>
                 </section>
 
-                <section className="unit-list-card">
-                  <h2>Per-day unit mileage</h2>
+                <SidebarDropdownSection
+                  title="Per-day unit mileage"
+                  defaultExpanded={mileageRowsWithDifference.length > 0 && mileageRowsWithDifference.length <= 4}
+                  className="svc-content-dropdown"
+                >
                   {mileageRowsWithDifference.length > 0 ? (
                     <div className="unit-mileage-list" role="list" aria-label="Per-day unit mileage">
                       {mileageRowsWithDifference.map((row) => (
@@ -573,34 +573,37 @@ const UnitLookupPage: React.FC = () => {
                       No end-of-day mileage published yet.
                     </p>
                   )}
-                </section>
+                </SidebarDropdownSection>
 
-                <section className="unit-list-card">
-                  <h2>Vehicle IDs</h2>
+                <SidebarDropdownSection
+                  title="Vehicle IDs"
+                  defaultExpanded
+                  className="svc-content-dropdown"
+                >
                   <div className="unit-vehicle-list">
                     {data.vehicles.map((v, idx) => (
                       <span key={`${v.vehicleId || idx}`} className="unit-chip">{v.vehicleId || `Vehicle ${idx + 1}`}</span>
                     ))}
                   </div>
-                </section>
+                </SidebarDropdownSection>
               </section>
             )}
 
             {data && activeTab === 'logs' && (
-              <section className="modal-section unit-list-card">
+              <section className="modal-section">
                 <StationSectionTitle title="Unit logs" icon={WarningCircle} pageHeading />
-                <div className="unit-services">
+                <div className="svc-dropdown-stack">
                   {!latestService && (
                     <p className="unit-muted">Loading latest service logs...</p>
                   )}
                   {latestService && latestServiceLogsByVehicle.map((row) => (
-                    <details key={row.key} className="svc-collapsible-card svc-vehicle-card">
-                      <summary className="svc-collapsible-summary">
-                        <span className="svc-collapsible-summary-row">
-                          <span className="svc-pattern-title">{row.vehicleId}</span>
-                          <span className="unit-log-count-chip">{row.logCount}</span>
-                        </span>
-                      </summary>
+                    <SidebarDropdownSection
+                      key={row.key}
+                      title={row.vehicleId}
+                      defaultExpanded={row.logCount > 0}
+                      className="svc-content-dropdown"
+                      titleAddon={<span className="unit-log-count-chip">{row.logCount}</span>}
+                    >
                       <p className="unit-log-count-subtitle">Unit {row.unitId}</p>
                       {row.defects.length > 0 ? (
                         <ul className="svc-vehicle-log-list">
@@ -615,56 +618,98 @@ const UnitLookupPage: React.FC = () => {
                       ) : (
                         <p className="unit-muted">No logs for this vehicle.</p>
                       )}
-                    </details>
+                    </SidebarDropdownSection>
                   ))}
                 </div>
               </section>
             )}
 
             {data && activeTab === 'service' && (
-              <section className="modal-section unit-list-card">
-                <StationSectionTitle
-                  title={`Latest service${latestRidForSelection ? ` (${latestRidForSelection})` : ''}${selectedDay !== 'all' ? ` · ${formatDateOnly(selectedDay)}` : ''}`}
-                  icon={Train}
-                  pageHeading
-                />
+              <section className="modal-section">
+                <StationSectionTitle title="Latest service" icon={Train} pageHeading />
                 {latestServiceError && (
                   <p className="unit-muted">Could not load latest service detail: {latestServiceError}</p>
                 )}
                 {latestService ? (
                   <>
-                    <div className="unit-summary-grid">
-                      <div className="unit-summary-item">
-                        <span className="unit-summary-label">Service</span>
-                        <span className="unit-summary-value">
-                          {`${latestService.trainId} · ${latestService.originName || latestService.origin} -> ${latestService.destinationName || latestService.destination}`}
-                        </span>
-                      </div>
-                      <div className="unit-summary-item">
-                        <span className="unit-summary-label">Allocations</span>
-                        <span className="unit-summary-value">{latestService.consist?.allocations?.length || 0}</span>
-                      </div>
-                      <div className="unit-summary-item">
-                        <span className="unit-summary-label">Formation coaches</span>
-                        <span className="unit-summary-value">{latestService.formation?.coaches?.length || 0}</span>
-                      </div>
-                      <div className="unit-summary-item">
-                        <span className="unit-summary-label">Stops</span>
-                        <span className="unit-summary-value">{latestService.stops.length}</span>
-                      </div>
+                    <div className="unit-service-heading">
+                      <p className="svc-pattern-title">
+                        {`${latestService.trainId} · ${latestService.originName || latestService.origin} → ${latestService.destinationName || latestService.destination}`}
+                      </p>
+                      <p className="unit-muted">
+                        RID {latestService.rid}
+                        {selectedDay !== 'all' ? ` · ${formatDateOnly(selectedDay)}` : ''}
+                      </p>
+                      <BUTBaseButton
+                        variant="chip"
+                        width="hug"
+                        colorVariant="accent"
+                        instantAction
+                        onClick={() => {
+                          const qp = new URLSearchParams()
+                          const serviceDate =
+                            (selectedDay && selectedDay !== 'all' ? selectedDay : null) ||
+                            latestService.historicalDate ||
+                            latestService.ssd ||
+                            darwinRidToIsoDate(latestService.rid)
+                          if (serviceDate) qp.set('date', serviceDate)
+                          if (selectedDay && selectedDay !== 'all') qp.set('unitDay', selectedDay)
+                          qp.set('from', `${location.pathname}${location.search || ''}`)
+                          router.push(`/services/${encodeURIComponent(latestService.rid)}${qp.toString() ? `?${qp.toString()}` : ''}`)
+                        }}
+                      >
+                        Open full service
+                      </BUTBaseButton>
                     </div>
-                    <div className="unit-service-formation">
-                      <h3>Carriage map</h3>
-                      <CarriageMap
-                        formation={latestService.formation}
-                        consist={latestService.consist}
-                        stops={latestService.stops}
-                        reverse={latestService.reverseFormation}
-                        initialTpl={latestService.origin}
-                      />
-                    </div>
-
+                    <CarriageMap
+                      formation={latestService.formation}
+                      consist={latestService.consist}
+                      stops={latestService.stops}
+                      reverse={latestService.reverseFormation}
+                      initialTpl={latestService.origin}
+                      layout="stock-only"
+                      onUnitClick={(id) => {
+                        if (id.trim().toUpperCase() === unitId) return
+                        const qp = new URLSearchParams()
+                        if (selectedDay && selectedDay !== 'all') qp.set('unitDay', selectedDay)
+                        router.push(`/units/${encodeURIComponent(id)}${qp.toString() ? `?${qp.toString()}` : ''}`)
+                      }}
+                    />
+                    {latestServiceHasLoading && (
+                      <SidebarDropdownSection
+                        title="Loading capacity"
+                        defaultExpanded={false}
+                        className="svc-content-dropdown"
+                      >
+                        <CarriageMap
+                          formation={latestService.formation}
+                          consist={latestService.consist}
+                          stops={latestService.stops}
+                          reverse={latestService.reverseFormation}
+                          initialTpl={latestService.origin}
+                          layout="loading-only"
+                        />
+                      </SidebarDropdownSection>
+                    )}
                     <ServiceVehicleDetails consist={latestService.consist} />
+                    <SidebarDropdownSection
+                      title="Calling pattern"
+                      defaultExpanded={false}
+                      className="svc-content-dropdown"
+                    >
+                      <ServiceStopList
+                        stops={latestService.stops}
+                        viewMode="simple"
+                        boardDate={
+                          (selectedDay !== 'all' ? selectedDay : null) ||
+                          latestService.historicalDate ||
+                          latestService.ssd ||
+                          darwinRidToIsoDate(latestService.rid)
+                        }
+                        historical={!!latestService.historicalDate}
+                        returnTo={`${pathname}${location.search || ''}`}
+                      />
+                    </SidebarDropdownSection>
                   </>
                 ) : latestServiceError ? null : (
                   <p className="unit-muted">
@@ -682,7 +727,7 @@ const UnitLookupPage: React.FC = () => {
                     <TextCard
                       key={`${svc.rid}-${idx}`}
                       title={`${svc.headcode || 'Service'} · ${formatTimeOnly(svc.start)} ${svc.startName || svc.startTpl || '-'} -> ${svc.endName || svc.endTpl || '-'} ${formatTimeOnly(svc.end)}`}
-                      description={`${selectedDay === 'all' ? `${formatDateFromDateTime(svc.start)} · ` : ''}RID ${svc.rid}${svc.position != null ? ` · Pos ${svc.position}` : ''}${svc.reversed ? ' · Reversed' : ''}`}
+                      description={`${formatDateFromDateTime(svc.start)} · RID ${svc.rid}${svc.position != null ? ` · Pos ${svc.position}` : ''}${svc.reversed ? ' · Reversed' : ''}`}
                       state="default"
                       onClick={() => {
                         const qp = new URLSearchParams()

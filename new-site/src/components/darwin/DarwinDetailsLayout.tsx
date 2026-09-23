@@ -16,6 +16,7 @@ export type DarwinDetailsLayoutProps = {
   subtitle?: ReactNode
   headerClassName?: string
   actionContent?: ReactNode
+  sidebarHeader?: ReactNode
   sections: AccountSection[]
   activeSectionId: string
   onSelect: (sectionId: string) => void
@@ -33,6 +34,7 @@ export function DarwinDetailsLayout({
   subtitle,
   headerClassName,
   actionContent,
+  sidebarHeader,
   sections,
   activeSectionId,
   onSelect,
@@ -58,6 +60,7 @@ export function DarwinDetailsLayout({
             activeSectionId={activeSectionId}
             onSelect={onSelect}
             ariaLabel={ariaLabel}
+            headerContent={sidebarHeader}
           />
           <main className="station-details-main">
             <section className="station-details-card modal-content">

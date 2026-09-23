@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useId, useState } from 'react'
+import React, { useEffect, useId, useState, type ReactNode } from 'react'
 import type { Icon } from '@phosphor-icons/react'
 import {
   MobileHeaderMenu,
@@ -30,6 +30,7 @@ type AccountSectionNavProps = {
   activeSectionId: string
   onSelect: (sectionId: string) => void
   ariaLabel?: string
+  headerContent?: ReactNode
 }
 
 function DesktopSectionTabs({
@@ -37,10 +38,12 @@ function DesktopSectionTabs({
   activeSectionId,
   onSelect,
   ariaLabel,
+  headerContent,
 }: AccountSectionNavProps) {
   return (
     <aside className="station-details-sidebar account-sidebar">
       <SidebarPanel className="station-details-sidebar-panel">
+        {headerContent}
         <SidebarPanelNav className="station-details-tabs" aria-label={ariaLabel}>
           {sections.map((section) => {
             const isSelectable = section.selectable !== false
@@ -86,6 +89,7 @@ export function AccountSectionNav({
   activeSectionId,
   onSelect,
   ariaLabel = 'Account sections',
+  headerContent,
 }: AccountSectionNavProps) {
   const navId = useId()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -117,6 +121,7 @@ export function AccountSectionNav({
         activeSectionId={activeSectionId}
         onSelect={onSelect}
         ariaLabel={ariaLabel}
+        headerContent={headerContent}
       />
 
       <div className="station-details-mobile-sections account-mobile-sections">

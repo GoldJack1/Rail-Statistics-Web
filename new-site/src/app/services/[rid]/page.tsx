@@ -6,35 +6,27 @@ import { ArrowsClockwise, ChartBar, Code, Info, MapPin, Train } from '@phosphor-
 
 import { useServiceDetail } from '@/hooks/useServiceDetail'
 import { useStations } from '@/hooks/useStations'
-import { BUTBaseButton, BUTCircleButton, BUTTwoButtonBar, BUTWideButton } from '@/components/buttons'
+import { BUTBaseButton, BUTCircleButton, BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
-import { ActivityPill } from '@/components/darwin/ActivityPill'
+import { TextCard } from '@/components/cards'
 import { CarriageMap } from '@/components/darwin/CarriageMap'
 import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
 import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
+import { ServiceStopList, slotKind } from '@/components/darwin/ServiceStopList/ServiceStopList'
 import { ServiceVehicleDetails } from '@/components/darwin/ServiceVehicleDetails'
+import { buildStopNameLookup, displayStopName } from '@/components/darwin/serviceStopLabel'
+import { ServiceViewModeToggle } from '@/components/darwin/ServiceViewModeToggle'
+import { readServiceViewMode, writeServiceViewMode, type ServiceViewMode } from '@/components/darwin/serviceViewMode'
 import StationDetailField from '@/components/models/StationDetails/StationDetailField'
 import StationSectionTitle from '@/components/models/StationDetails/StationSectionTitle'
 import type { AccountSection } from '@/components/misc/AccountSectionNav/AccountSectionNav'
+import SidebarDropdownSection from '@/components/misc/SidebarDropdownSection/SidebarDropdownSection'
 import type { ServiceDetail } from '@/types/darwin'
 import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
 import { paramAsString } from '@/utils/nextParams'
 import { stopHasPublishedLoading } from '@/utils/darwinCoachLoading'
 import './ServiceDetailPage.css'
 
-const SLOT_KIND: Record<string, 'origin' | 'stop' | 'pass' | 'destination'> = {
-  OR:   'origin', OPOR: 'origin',
-  IP:   'stop',   OPIP: 'stop',
-  PP:   'pass',   OPPP: 'pass',
-  DT:   'destination', OPDT: 'destination',
-}
-const SLOT_KIND_LABEL: Record<'origin' | 'stop' | 'pass' | 'destination', string> = {
-  origin: 'Origin',
-  stop: 'Calling',
-  pass: 'Passing',
-  destination: 'Destination',
-}
-type ViewMode = 'detailed' | 'simple'
 type ServiceSection = 'overview' | 'loading' | 'formation' | 'calling' | 'raw'
 
 const BASE_SERVICE_SECTIONS: AccountSection[] = [
@@ -45,14 +37,6 @@ const BASE_SERVICE_SECTIONS: AccountSection[] = [
 ]
 
 const LOADING_SECTION: AccountSection = { id: 'loading', label: 'Loading capacity', icon: ChartBar }
-
-function StationsTableHead({ label, sticky }: { label: string; sticky?: boolean }) {
-  return (
-    <th className={sticky ? 'stations-table__name' : undefined}>
-      <span className="stations-table__sort-button">{label}</span>
-    </th>
-  )
-}
 
 /**
  * Phrase a Darwin association into a sentence the passenger can act on.
@@ -107,11 +91,6 @@ function formatAge(ms: number | null): string {
   return `${h}h ago`
 }
 
-/** Strip seconds from working times so HH:MM:30 reads as HH:MM. */
-function trimSeconds(t: string | null): string {
-  return t ? t.slice(0, 5) : ''
-}
-
 function formatDateOnly(date: string): string {
   const d = new Date(date)
   if (Number.isNaN(d.getTime())) return date
@@ -145,126 +124,9 @@ function getCurrentRailwayDayIsoUk(now = new Date()): string {
   return railwayOperatingDayIsoFromLondonParts(year, month, day, hour, minute)
 }
 
-function isRawTiplocName(name: string | null | undefined, tpl: string): boolean {
-  if (!name) return true
-  const trimmedName = name.trim()
-  const trimmedTpl = tpl.trim()
-  // Treat as "raw TIPLOC label" only when it is literally the TIPLOC, or a
-  // fully-uppercase TIPLOC-style form. This avoids false positives like
-  // station names such as "Ash" being mistaken for TIPLOC "ASH".
-  if (trimmedName === trimmedTpl) return true
-  return trimmedName === trimmedName.toUpperCase()
-    && trimmedName.toUpperCase() === trimmedTpl.toUpperCase()
-}
-
-function titleCaseWord(word: string): string {
-  if (!word) return word
-  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
-}
-
-function stationLikeNameFromTiploc(tpl: string): string | null {
-  const raw = (tpl || '').trim().toUpperCase()
-  if (!raw) return null
-  // Humanise common TIPLOC forms for stations/passing/junction points.
-  // Examples:
-  //   FAREHAM   -> Fareham
-  //   EASTLEGHJN -> Eastlegh JN
-  //   BSKTBPSS  -> Bskt B Pss
-  if (/^[A-Z0-9]{4,}$/.test(raw)) {
-    const expanded = raw
-      .replace(/JNCT$/g, ' JNCT')
-      .replace(/JCN$/g, ' JCN')
-      .replace(/JN$/g, ' JN')
-      .replace(/PASS$/g, ' PASS')
-      .replace(/PSS$/g, ' PSS')
-      .replace(/HALT$/g, ' HALT')
-      .replace(/(?:\d)(?=[A-Z])/g, '$& ')
-      .replace(/([A-Z])([0-9])/g, '$1 $2')
-      .replace(/\s+/g, ' ')
-      .trim()
-    const words = expanded.split(' ')
-    return words.map((w) => {
-      if (w === 'JN' || w === 'JCN' || w === 'JNCT' || w === 'PSS') return w
-      return titleCaseWord(w)
-    }).join(' ')
-  }
-  return null
-}
-
-function displayStopName(
-  stops: NonNullable<ServiceDetail['stops']>,
-  idx: number,
-  fallbackNameLookup?: {
-    byTiploc: Map<string, string>
-    byCrs: Map<string, string>
-  }
-): string {
-  const stop = stops[idx]
-  if (!stop) return ''
-  const current = stop.name?.trim()
-  if (current && !isRawTiplocName(current, stop.tpl)) return current
-  const byTiplocName = fallbackNameLookup?.byTiploc.get(stop.tpl.toUpperCase())
-  if (byTiplocName) return byTiplocName
-  const byCrsName = stop.crs ? fallbackNameLookup?.byCrs.get(stop.crs.toUpperCase()) : null
-  if (byCrsName) return byCrsName
-  const stationLikeFallback = stationLikeNameFromTiploc(stop.tpl)
-  if (stationLikeFallback) return stationLikeFallback
-  return stop.tpl
-}
-
 function isScheduleDeactivatedReason(reason: string | null | undefined): boolean {
   if (!reason) return false
   return reason.trim().toLowerCase().includes('schedule deactivated')
-}
-
-function platformSourceLabel(src: string | null | undefined): string | null {
-  if (!src) return null
-  if (src === 'A') return 'auto'
-  if (src === 'M') return 'manual'
-  if (src === 'P') return 'planned'
-  return src
-}
-
-function platformSourceClass(label: string): string {
-  if (label === 'auto') return 'svc-platform-badge--auto'
-  if (label === 'manual') return 'svc-platform-badge--manual'
-  if (label === 'planned') return 'svc-platform-badge--planned'
-  return 'svc-platform-badge--default'
-}
-
-function parseHmToMinutes(value: string | null | undefined): number | null {
-  if (!value) return null
-  const m = /^(\d{1,2}):(\d{2})/.exec(value.trim())
-  if (!m) return null
-  const hh = Number(m[1])
-  const mm = Number(m[2])
-  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
-  return hh * 60 + mm
-}
-
-function computeDeltaMinutes(
-  scheduled: string | null | undefined,
-  live: string | null | undefined
-): number | null {
-  const schedMins = parseHmToMinutes(scheduled)
-  const liveMins = parseHmToMinutes(live)
-  if (schedMins == null || liveMins == null) return null
-  let diff = liveMins - schedMins
-  // Prefer the shortest overnight-adjusted distance.
-  if (diff > 720) diff -= 1440
-  if (diff < -720) diff += 1440
-  return diff
-}
-
-function buildDeparturesAnchorTime(
-  stop: NonNullable<ServiceDetail['stops']>[number],
-  kind: 'origin' | 'stop' | 'pass' | 'destination'
-): string | null {
-  // Prefer live time, then public times, then working times. Keep HH:MM only.
-  const live = trimSeconds(stop.liveTime)
-  if (live) return live
-  if (kind === 'pass') return trimSeconds(stop.wtp || stop.wtd || stop.wta || stop.pta || stop.ptd || null) || null
-  return trimSeconds(stop.ptd || stop.pta || stop.wtd || stop.wta || stop.wtp || null) || null
 }
 
 /**
@@ -373,8 +235,17 @@ const ServiceDetailPage: React.FC = () => {
   const location = { pathname, search: searchParams.toString() ? `?${searchParams}` : '', state: null as unknown }
   const router = useRouter()
   const rid = paramAsString(params.rid)
-  const [viewMode, setViewMode] = useState<ViewMode>('detailed')
+  const [viewMode, setViewMode] = useState<ServiceViewMode>('detailed')
   const [section, setSection] = useState<ServiceSection>('overview')
+
+  useEffect(() => {
+    setViewMode(readServiceViewMode())
+  }, [])
+
+  const selectViewMode = (mode: ServiceViewMode) => {
+    setViewMode(mode)
+    writeServiceViewMode(mode)
+  }
 
   const query = useMemo(() => new URLSearchParams(location.search), [location.search])
   const historicalDate = query.get('date') || undefined
@@ -409,19 +280,7 @@ const ServiceDetailPage: React.FC = () => {
     if (section === 'loading' && !hasLoading) setSection('overview')
   }, [section, hasLoading])
 
-  const fallbackStopNameLookup = useMemo(() => {
-    const byTiploc = new Map<string, string>()
-    const byCrs = new Map<string, string>()
-    for (const station of stations) {
-      const stationName = station.stationName?.trim()
-      if (!stationName) continue
-      const tiploc = station.tiploc?.trim().toUpperCase()
-      const crsCode = station.crsCode?.trim().toUpperCase()
-      if (tiploc && !byTiploc.has(tiploc)) byTiploc.set(tiploc, stationName)
-      if (crsCode && !byCrs.has(crsCode)) byCrs.set(crsCode, stationName)
-    }
-    return { byTiploc, byCrs }
-  }, [stations])
+  const fallbackStopNameLookup = useMemo(() => buildStopNameLookup(stations), [stations])
 
   const title = useMemo(() => {
     if (!data) return rid
@@ -445,15 +304,23 @@ const ServiceDetailPage: React.FC = () => {
     return dateText
   }, [status, error, ageMs, historicalMode, futureTimetableMode, data])
 
-  const viewModeSelectedIndex = viewMode === 'detailed' ? 0 : 1
+  const callingCount = data ? data.stops.filter((s) => slotKind(s.slot) !== 'pass').length : 0
+  const passingCount = data ? data.stops.length - callingCount : 0
 
   return (
     <DarwinDetailsLayout
       title={title}
       subtitle={subtitle}
       headerClassName={`service-detail-header service-detail-header--${status}`}
+      sidebarHeader={(
+        <ServiceViewModeToggle
+          className="svc-viewmode-switch--sidebar"
+          viewMode={viewMode}
+          onChange={selectViewMode}
+        />
+      )}
       actionContent={(
-        <div className="station-details-header-actions">
+        <div className="station-details-header-actions service-detail-header-actions">
           <div className="station-details-header-actions__controls">
             <BUTWideButton
               width="hug"
@@ -474,6 +341,11 @@ const ServiceDetailPage: React.FC = () => {
               icon={<ArrowsClockwise size={16} aria-hidden />}
             />
           </div>
+          <ServiceViewModeToggle
+            className="svc-viewmode-switch--header"
+            viewMode={viewMode}
+            onChange={selectViewMode}
+          />
         </div>
       )}
       sections={serviceSections}
@@ -516,51 +388,10 @@ const ServiceDetailPage: React.FC = () => {
         {data && section === 'overview' && (
           <section className="modal-section">
             <StationSectionTitle title="Overview" icon={Info} pageHeading />
-            <section className="svc-viewmode-card" aria-label="View mode">
-              <BUTTwoButtonBar
-                className="svc-viewmode-toggle"
-                colorVariant="accent"
-                selectedIndex={viewModeSelectedIndex}
-                buttons={[
-                  { label: 'Detailed', value: 'detailed' },
-                  { label: 'Simple', value: 'simple' },
-                ]}
-                onChange={(index) => {
-                  if (index === 0) setViewMode('detailed')
-                  if (index === 1) setViewMode('simple')
-                }}
-              />
-            </section>
-
             <section
               className={`svc-summary-card ${data.cancelled ? 'svc-summary-card--cancelled' : ''}`}
               aria-label="Service summary"
             >
-              <div className="modal-details-grid">
-                <StationDetailField label="Operator" value={data.tocName || data.toc} />
-                <StationDetailField label="Headcode" value={data.trainId} />
-                {viewMode === 'detailed' ? (
-                  <StationDetailField label="UID" value={data.uid} />
-                ) : null}
-                {viewMode === 'detailed' ? (
-                  <StationDetailField label="Service date" value={data.ssd} />
-                ) : null}
-                <StationDetailField label="Origin" value={data.originName || data.origin} />
-                <StationDetailField label="Destination" value={data.destinationName || data.destination} />
-                {viewMode === 'detailed' ? (
-                  <StationDetailField
-                    label="Calling pattern"
-                    value={`${data.stops.filter((s) => SLOT_KIND[s.slot] !== 'pass').length} calling · ${data.stops.filter((s) => SLOT_KIND[s.slot] === 'pass').length} passing`}
-                  />
-                ) : null}
-                {viewMode === 'detailed' ? (
-                  <StationDetailField
-                    label="Type"
-                    value={`${data.isPassenger ? 'Passenger' : 'Non-passenger'}${data.trainCat ? ` · ${data.trainCat}` : ''}`}
-                  />
-                ) : null}
-              </div>
-
               {data.cancelled && data.cancellation && (
                 <div className="svc-banner svc-banner--cancel">
                   {isScheduleDeactivatedReason(data.cancellation.reason) ? (
@@ -599,7 +430,6 @@ const ServiceDetailPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Per-service text alerts (e.g. SN bus replacement notes). */}
               {data.alerts && data.alerts.length > 0 && data.alerts.map((al) => (
                 <div key={al.id} className="svc-banner svc-banner--alert">
                   <span className="svc-banner-label">Alert</span>
@@ -608,7 +438,33 @@ const ServiceDetailPage: React.FC = () => {
                 </div>
               ))}
 
+              <div className="modal-details-grid">
+                <StationDetailField label="Operator" value={data.tocName || data.toc} />
+                <StationDetailField label="Headcode" value={data.trainId} />
+                <StationDetailField label="Origin" value={data.originName || data.origin} />
+                <StationDetailField label="Destination" value={data.destinationName || data.destination} />
+              </div>
             </section>
+            {viewMode === 'detailed' && (
+              <SidebarDropdownSection
+                title="Service identity"
+                defaultExpanded
+                className="svc-content-dropdown"
+              >
+                <div className="modal-details-grid">
+                  <StationDetailField label="UID" value={data.uid} />
+                  <StationDetailField label="Service date" value={data.ssd} />
+                  <StationDetailField
+                    label="Calling pattern"
+                    value={`${callingCount} calling · ${passingCount} passing`}
+                  />
+                  <StationDetailField
+                    label="Type"
+                    value={`${data.isPassenger ? 'Passenger' : 'Non-passenger'}${data.trainCat ? ` · ${data.trainCat}` : ''}`}
+                  />
+                </div>
+              </SidebarDropdownSection>
+            )}
             <p className="edit-hint kb-source-hint svc-footer">
               <span>Source: Network Rail Darwin Push Port</span>
               <span className="svc-footer-sep" aria-hidden="true">·</span>
@@ -638,6 +494,8 @@ const ServiceDetailPage: React.FC = () => {
         {data && section === 'formation' && (
             <section className="modal-section svc-formation-section" aria-label="Formation">
               <StationSectionTitle title="Formation" icon={Train} pageHeading />
+              <div className="svc-formation-panel">
+              <SidebarDropdownSection title="Coach map" defaultExpanded>
               <CarriageMap
                 formation={data.formation}
                 consist={data.consist}
@@ -651,215 +509,45 @@ const ServiceDetailPage: React.FC = () => {
                   router.push(`/units/${encodeURIComponent(unitId)}${qp.toString() ? `?${qp.toString()}` : ''}`)
                 }}
               />
-              {/* Service associations: joins (JJ), divides (VV), next portions (NP).
-               * Rendered beneath coach formation so unit/portion context sits
-               * next to consist information. */}
+              </SidebarDropdownSection>
               <ServiceVehicleDetails consist={data.consist} />
-              {data.associations && data.associations.length > 0 && data.associations.map((a) => (
-                <div key={`${a.category}-${a.otherRid}-${a.tiploc}`} className={`svc-banner svc-banner--assoc${a.isCancelled ? ' svc-banner--assoc-cancelled' : ''}`}>
-                  {a.category !== 'NP' && (
-                    <span className="svc-banner-label">
-                      {a.category === 'VV' ? 'Splits' : a.category === 'JJ' ? 'Joins' : 'Associated'}
-                      {a.isCancelled ? ' (cancelled)' : ''} —
-                    </span>
-                  )}{' '}
-                  {describeAssociation(a)}
-                  <BUTBaseButton
-                    variant="chip"
-                    width="hug"
-                    colorVariant="accent"
-                    instantAction
-                    className="svc-banner-link"
-                    onClick={() => {
-                      const next = new URLSearchParams()
-                      if (historicalDate) next.set('date', historicalDate)
-                      if (historicalAt) next.set('at', historicalAt)
-                      if (from) next.set('from', from)
-                      router.push(`/services/${encodeURIComponent(a.otherRid)}${next.toString() ? `?${next.toString()}` : ''}`)
-                    }}
-                  >
-                    View service
-                  </BUTBaseButton>
+              </div>
+              {data.associations && data.associations.length > 0 && (
+                <div className="svc-association-list">
+                  {data.associations.map((a) => {
+                    const next = new URLSearchParams()
+                    if (historicalDate) next.set('date', historicalDate)
+                    if (historicalAt) next.set('at', historicalAt)
+                    if (from) next.set('from', from)
+                    const href = `/services/${encodeURIComponent(a.otherRid)}${next.toString() ? `?${next.toString()}` : ''}`
+                    return (
+                      <TextCard
+                        key={`${a.category}-${a.otherRid}-${a.tiploc}`}
+                        title={describeAssociation(a)}
+                        description={a.isCancelled ? 'Cancelled' : undefined}
+                        state={a.isCancelled ? 'redAction' : 'default'}
+                        to={href}
+                        ariaLabel={`Open associated service ${a.otherTrainId || a.otherRid}`}
+                      />
+                    )
+                  })}
                 </div>
-              ))}
+              )}
             </section>
         )}
 
         {data && section === 'calling' && (
             <section className="modal-section svc-pattern-card" aria-label="Calling pattern">
-              <StationSectionTitle title="Calling pattern" icon={MapPin} pageHeading />
-              <section className="svc-viewmode-card" aria-label="View mode">
-                <BUTTwoButtonBar
-                  className="svc-viewmode-toggle"
-                  colorVariant="accent"
-                  selectedIndex={viewModeSelectedIndex}
-                  buttons={[
-                    { label: 'Detailed', value: 'detailed' },
-                    { label: 'Simple', value: 'simple' },
-                  ]}
-                  onChange={(index) => {
-                    if (index === 0) setViewMode('detailed')
-                    if (index === 1) setViewMode('simple')
-                  }}
-                />
-              </section>
-              <div className="stations-table-panel">
-                <div className="stations-table-wrap">
-                <table className="stations-table svc-calling-table">
-                  <thead>
-                    <tr>
-                      <StationsTableHead label="Type" />
-                      <StationsTableHead label="Location" sticky />
-                      {viewMode === 'detailed' && <StationsTableHead label="PTA" />}
-                      {viewMode === 'detailed' && <StationsTableHead label="PTD" />}
-                      <StationsTableHead label="WTA" />
-                      <StationsTableHead label="WTD/WTP" />
-                      <StationsTableHead label="Δ min" />
-                      <StationsTableHead label="Platform" />
-                      <StationsTableHead label="Live" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                {data.stops.flatMap((s, idx) => {
-                  const stopLabel = displayStopName(data.stops, idx, fallbackStopNameLookup)
-                  const kind = SLOT_KIND[s.slot] || 'stop'
-                  if (viewMode === 'simple' && kind === 'pass') return []
-                  const kindLabel = SLOT_KIND_LABEL[kind]
-                  const pArr = s.pta || null
-                  const pDep = s.ptd || null
-                  const wArr = trimSeconds(s.wta) || null
-                  const wDep = trimSeconds(s.wtd) || null
-                  const wPass = s.wtp ? trimSeconds(s.wtp) : null
-                  const platformValue = s.livePlatform || s.platform || '—'
-                  const showLive = !!s.liveTime && (s.liveKind === 'actual' || s.liveKind === 'est' || s.liveKind === 'actual-arr' || s.liveKind === 'est-arr')
-                  const showExpectedDeparture =
-                    !s.cancelledAtStop
-                    && showLive
-                    && s.liveKind === 'est'
-                    && kind !== 'pass'
-                    && (viewMode === 'simple' || s.liveTime !== pDep)
-                  const passFallback = kind === 'pass' ? (wPass || wDep || null) : null
-                  const platformSource = platformSourceLabel(s.platformSource)
-                  const scheduledForDelta = kind === 'pass'
-                    ? (wPass || wDep || wArr || null)
-                    : (pDep || pArr || wDep || wArr || null)
-                  const deltaMinutes = s.unknownDelay ? null : computeDeltaMinutes(scheduledForDelta, s.liveTime)
-                  const isLate = showLive && (
-                    (s.liveKind?.startsWith('actual') && s.liveTime !== (pDep || pArr || wPass || wDep || wArr)) ||
-                    (s.liveKind?.startsWith('est')    && s.liveTime !== (pDep || pArr || wPass || wDep || wArr))
-                  )
-                  const departuresTargetCode = (s.crs || s.tpl || '').toUpperCase()
-                  const departuresAnchorTime = buildDeparturesAnchorTime(s, kind)
-                  const onNavigateToDepartures = () => {
-                    if (!departuresTargetCode) return
-                    const next = new URLSearchParams()
-                    next.set('hours', '1')
-                    // `at` is honored by departures only when `date` is present.
-                    const targetDate = historicalDate || data.ssd || null
-                    if (targetDate) next.set('date', targetDate)
-                    if (departuresAnchorTime && targetDate) next.set('at', departuresAnchorTime)
-                    next.set('from', `/services/${encodeURIComponent(data.rid)}${location.search || ''}`)
-                    next.set('label', stopLabel)
-                    router.push(`/departures/${encodeURIComponent(departuresTargetCode)}${next.toString() ? `?${next.toString()}` : ''}`)
-                  }
-                  return [(
-                    <tr
-                      key={`${s.tpl}-${idx}`}
-                      className={[
-                        'stations-table__row',
-                        idx % 2 === 1 ? 'stations-table__row--striped' : '',
-                        'svc-stop',
-                        'svc-stop--jump',
-                        `svc-stop--${kind}`,
-                        s.cancelledAtStop ? 'svc-stop--cancelled' : '',
-                        isLate ? 'svc-stop--late' : '',
-                      ].filter(Boolean).join(' ')}
-                      role="button"
-                      tabIndex={0}
-                      onClick={onNavigateToDepartures}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault()
-                          onNavigateToDepartures()
-                        }
-                      }}
-                    >
-                      <td><span className={`svc-kind-badge svc-kind-badge--${kind}`}>{kindLabel}</span></td>
-                      <td className="stations-table__name">
-                        <div className="svc-stop-name">
-                          <span className="svc-stop-name-text">{stopLabel}</span>
-                          {s.crs ? <span className="svc-stop-crs">{s.crs}</span> : null}
-                          {kind !== 'pass' && <ActivityPill activity={s.activity} />}
-                        </div>
-                      </td>
-                      {viewMode === 'detailed' && <td className="svc-mono stations-table__id">{kind === 'pass' ? '—' : (pArr || '—')}</td>}
-                      {viewMode === 'detailed' && <td className="svc-mono stations-table__id">{kind === 'pass' ? '—' : (pDep || '—')}</td>}
-                      <td className="svc-mono stations-table__id">{kind === 'pass' ? '—' : (wArr || '—')}</td>
-                      <td className="svc-mono stations-table__id">{kind === 'pass' ? (wPass || '—') : (wDep || '—')}</td>
-                      <td
-                        className={[
-                          'svc-mono',
-                          'stations-table__id',
-                          deltaMinutes == null
-                            ? ''
-                            : deltaMinutes > 0
-                              ? 'svc-delta svc-delta--late'
-                              : deltaMinutes < 0
-                                ? 'svc-delta svc-delta--early'
-                                : 'svc-delta svc-delta--ontime',
-                        ].filter(Boolean).join(' ')}
-                      >
-                        {deltaMinutes == null ? '—' : (deltaMinutes > 0 ? `+${deltaMinutes}` : String(deltaMinutes))}
-                      </td>
-                      <td className="svc-mono stations-table__id">
-                        <span className="svc-platform-cell">
-                          <span>{platformValue}</span>
-                          {platformValue !== '—' && viewMode === 'detailed' && (
-                            <span className="svc-platform-meta">
-                              {platformSource && (
-                                <span className={`svc-platform-badge ${platformSourceClass(platformSource)}`}>
-                                  {platformSource}
-                                </span>
-                              )}
-                              {s.platformConfirmed && (
-                                <span className="svc-platform-badge svc-platform-badge--confirmed">
-                                  confirmed
-                                </span>
-                              )}
-                            </span>
-                          )}
-                        </span>
-                      </td>
-                      <td className="stations-table__live">
-                        <div className="svc-stop-live">
-                          {s.cancelledAtStop && <span className="svc-pill svc-pill--cancelled">Cancelled</span>}
-                          {!s.cancelledAtStop && s.unknownDelay && <span className="svc-pill svc-pill--late">Delayed{s.liveSource ? ` (${s.liveSource})` : ''}</span>}
-                          {!s.cancelledAtStop && showLive && s.liveKind === 'actual'      && kind !== 'pass' && <span className="svc-pill svc-pill--actual">Departed {s.liveTime}</span>}
-                          {!s.cancelledAtStop && showLive && s.liveKind === 'actual'      && kind === 'pass' && <span className="svc-pill svc-pill--actual">Passed {s.liveTime}</span>}
-                          {!s.cancelledAtStop && showLive && s.liveKind === 'actual-arr'  && <span className="svc-pill svc-pill--actual">Arrived {s.liveTime}</span>}
-                          {showExpectedDeparture && <span className="svc-pill svc-pill--late">Expected {s.liveTime}</span>}
-                          {!s.cancelledAtStop && showLive && s.liveKind === 'est'         && kind === 'pass' && <span className="svc-pill svc-pill--late">Expected pass {s.liveTime}</span>}
-                          {!s.cancelledAtStop && showLive && s.liveKind === 'est-arr'     && <span className="svc-pill">Expected arr {s.liveTime}</span>}
-                          {!s.cancelledAtStop && !showLive && kind === 'pass' && passFallback && (
-                            <span className="svc-pill">Scheduled pass {passFallback}</span>
-                          )}
-                          {!s.cancelledAtStop && !showLive && kind !== 'pass' && (idx === 0 || idx === data.stops.length - 1) && !data.historicalDate && (
-                            <span className="svc-pill svc-pill--ontime">Scheduled</span>
-                          )}
-                          {!s.cancelledAtStop && !showLive && kind !== 'pass' && data.historicalDate && (
-                            <span className="svc-pill">---</span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )]
-                })}
-                  </tbody>
-                </table>
-                </div>
-              </div>
+              <ServiceStopList
+                stops={data.stops}
+                viewMode={viewMode}
+                boardDate={historicalDate || data.ssd || null}
+                historical={!!data.historicalDate}
+                returnTo={`/services/${encodeURIComponent(data.rid)}${location.search || ''}`}
+              />
             </section>
         )}
+
 
         {data && section === 'raw' && (
           <section className="modal-section">

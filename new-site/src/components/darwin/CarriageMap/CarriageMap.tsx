@@ -203,15 +203,17 @@ export const CarriageMap: React.FC<{
           </p>
         </div>
       ) : (
-      <section className="cmap" aria-label="Detailed unit formations">
+      <section className={`cmap${layout === 'stock-only' ? ' cmap--stock' : ''}`} aria-label="Detailed unit formations">
+        {layout !== 'stock-only' && (
         <div className="cmap-header">
           <div className="cmap-title-group">
-            {layout !== 'stock-only' && <h3 className="cmap-title">Detailed unit formations</h3>}
+            <h3 className="cmap-title">Detailed unit formations</h3>
             {reverse && <span className="cmap-tag">↻ Reversed</span>}
           </div>
         </div>
+        )}
 
-        {summaryBits.length > 0 && (
+        {layout !== 'stock-only' && summaryBits.length > 0 && (
           <ul className="cmap-summary">
             {summaryBits.map((b) => (
               <li key={b.label} className="cmap-summary-item">
@@ -692,34 +694,35 @@ function renderPtacStages(
   // later (e.g. 123 becomes 321, rather than being renumbered 123 again).
   const vehicleCoachLabelById = new Map<string, string>()
   return (
-    <div className="cmap-stages">
+    <div className={purpose === 'stock' ? 'cmap-stages cmap-stages--stock' : 'cmap-stages'}>
       {stages.map((stage, sIdx) => {
         const startName = stage.startTpl ? (tiplocName.get(stage.startTpl) || stage.startTpl) : null
         const endName   = stage.endTpl   ? (tiplocName.get(stage.endTpl)   || stage.endTpl)   : null
         const startTime = stage.startDt?.slice(11, 16) || null
         const endTime   = stage.endDt?.slice(11, 16)   || null
         const showStageHeader = stages.length > 1
-        // Restart Darwin overlay position counter per stage; Darwin formation
-        // is only overlaid on the first stage (it's a service-wide snapshot,
-        // not per-stage). For later stages we let class fall back to the
-        // PTAC vehicle's own RegisteredCategory.
+        const prevUnitKey = sIdx > 0
+          ? stages[sIdx - 1].units.map((u) => u.unitId || '').join('|')
+          : ''
+        const thisUnitKey = stage.units.map((u) => u.unitId || '').join('|')
+        const sameUnitsAsPrevious = purpose === 'stock' && prevUnitKey !== '' && prevUnitKey === thisUnitKey
         let running = 0
         return (
           <React.Fragment key={`stage-${sIdx}`}>
             {sIdx > 0 && (() => {
               const kind = classifyStageBoundary(stages[sIdx - 1], stage)
               return (
-                <div className={`cmap-stage-swap cmap-stage-swap--${kind}`}>
+                <p className={`cmap-stage-swap cmap-stage-swap--${kind}${purpose === 'stock' ? ' cmap-stage-swap--quiet' : ''}`}>
                   <span className="cmap-stage-swap-icon" aria-hidden="true">
                     {kind === 'reversal' ? '↻' : '↔'}
                   </span>
                   <span className="cmap-stage-swap-text">
                     {kind === 'reversal'
-                      ? <>Train reverses at <strong>{startName || stage.startTpl}</strong></>
-                      : <>Unit swap at <strong>{startName || stage.startTpl}</strong></>}
+                      ? <>Reverses at <strong>{startName || stage.startTpl}</strong></>
+                      : <>Unit change at <strong>{startName || stage.startTpl}</strong></>}
                     {startTime ? ` · ${startTime}` : ''}
                   </span>
-                </div>
+                </p>
               )
             })()}
             <section className="cmap-stage" aria-label={`Stage ${sIdx + 1}`}>
@@ -741,7 +744,22 @@ function renderPtacStages(
                     className={`cmap-unit${g.reversed ? ' cmap-unit--reversed' : ''}`}
                     key={`${g.unitId}-${g.position}-${idx}`}
                   >
-                    {purpose === 'stock' && (
+                    {purpose === 'stock' && !sameUnitsAsPrevious && (
+                    <div className="cmap-unit-header">
+                      <span className="cmap-unit-name">{g.unitId || '—'}</span>
+                      {g.fleetId && <span className="cmap-unit-fleet">{g.fleetId}</span>}
+                      {g.unitId && onUnitClick && (
+                        <button
+                          type="button"
+                          className="cmap-unit-text-link"
+                          onClick={() => onUnitClick(g.unitId!)}
+                        >
+                          View unit
+                        </button>
+                      )}
+                    </div>
+                    )}
+                    {purpose === 'loading' && (
                     <div className="cmap-unit-header">
                       <span className="cmap-unit-name">{g.unitId || '—'}</span>
                       {g.fleetId && <span className="cmap-unit-fleet">{g.fleetId}</span>}
@@ -759,6 +777,30 @@ function renderPtacStages(
                       )}
                     </div>
                     )}
+                    {purpose === 'stock' ? (
+                    <div className="cmap-loading-bar" role="list" aria-label={`${g.unitId || 'Unit'} coaches`}>
+                      {(g.reversed ? [...g.vehicles].reverse() : g.vehicles).map((v, vIdx, list) => {
+                        running += 1
+                        const darwinCoach = sIdx === 0 ? darwinByPosition.get(running) : undefined
+                        const mappedLabel = v.vehicleId ? vehicleCoachLabelById.get(v.vehicleId) : undefined
+                        const coachLabel = mappedLabel ?? darwinCoach?.number ?? String(running)
+                        if (!mappedLabel && sIdx === 0 && v.vehicleId) {
+                          vehicleCoachLabelById.set(v.vehicleId, coachLabel)
+                        }
+                        return renderVehicleCell(
+                          v,
+                          coachLabel,
+                          darwinCoach,
+                          loadingByCoachNumber,
+                          running,
+                          asPercent,
+                          purpose,
+                          vIdx,
+                          list.length,
+                        )
+                      })}
+                    </div>
+                    ) : (
                     <ol className="cmap-row cmap-row--unit" role="list">
                       {(g.reversed ? [...g.vehicles].reverse() : g.vehicles).map((v) => {
                         running += 1
@@ -779,6 +821,7 @@ function renderPtacStages(
                         )
                       })}
                     </ol>
+                    )}
                   </div>
                 ))}
               </div>
@@ -800,6 +843,36 @@ function renderDarwinOnly(
   purpose: 'loading' | 'stock',
 ): React.ReactNode {
   const coaches = reverseFormation ? [...formation.coaches].reverse() : formation.coaches
+  if (purpose === 'stock') {
+    const count = coaches.length
+    return (
+      <div className="cmap-loading-bar" role="list" aria-label="Coaches">
+        {coaches.map((coach, index) => {
+          const coachClass = (() => {
+            const c = (coach.class || '').toLowerCase()
+            if (c.startsWith('first')) return 'first'
+            if (c.startsWith('standard')) return 'standard'
+            if (c.includes('composite') || c.includes('mixed')) return 'composite'
+            if (c.includes('catering') || c.includes('buffet')) return 'kitchen'
+            return 'unknown'
+          })()
+          return (
+            <span
+              key={coach.number}
+              role="listitem"
+              className={`${loadBarCoachClass(index, count)} cmap-coach--class-${coachClass}`}
+              title={`Coach ${coach.number} (${coach.class || 'unknown class'})`}
+            >
+              <span className="cmap-loading-text">
+                <span className="cmap-loading-num">{coach.number}</span>
+                <span className="cmap-loading-pct">{classAbbrev(coach.class || '?')}</span>
+              </span>
+            </span>
+          )
+        })}
+      </div>
+    )
+  }
   return (
     <ol className="cmap-row" role="list">
       {coaches.map((coach) => {
@@ -823,12 +896,6 @@ function renderDarwinOnly(
             {showLoad && (
               <span className="cmap-coach-load">{loadVal == null ? '—' : formatCoachLoad(loadVal, asPercent)}</span>
             )}
-            {purpose === 'stock' && (coach.toilet || coach.catering) && (
-              <span className="cmap-coach-amenities">
-                {coach.toilet && coach.toilet !== 'None' && <span title={`Toilet: ${coach.toilet}`}>🚻</span>}
-                {coach.catering && <span title={`Catering: ${coach.catering}`}>☕</span>}
-              </span>
-            )}
           </li>
         )
       })}
@@ -848,6 +915,8 @@ function renderVehicleCell(
   runningPosition: number,
   asPercent: boolean,
   purpose: 'loading' | 'stock',
+  barIndex?: number,
+  barCount?: number,
 ): React.ReactNode {
   const cls        = darwinCoach?.class ?? null
   const loadingVal = loadingByCoachNumber.get(coachLabel) ?? loadingByCoachNumber.get(String(runningPosition))
@@ -855,16 +924,42 @@ function renderVehicleCell(
   const loadVal = purpose === 'loading' ? fromCoach : null
   const seats   = v.numberOfSeats
   const defects = v.defects?.length || 0
-  // Multi-source class detection: Darwin formation (most reliable, but rare),
-  // then PTAC SpecificType heuristic. Returns one of:
-  //   'first'       — First-only coach
-  //   'composite'   — Mixed First + Standard  (sometimes called "Composite")
-  //   'kitchen'     — Catering/buffet (often has a First section)
-  //   'standard'    — Standard-only (default)
-  //   'accessible'  — Reduced-capacity Standard with wheelchair / disabled seating
   const coachClass = inferCoachClass(v, cls)
   const classMeta  = COACH_CLASS_META[coachClass]
   const showLoad = purpose === 'loading'
+  const title = [
+        `Coach ${coachLabel}`,
+        purpose === 'stock' && v.vehicleId ? `Vehicle ${v.vehicleId}` : null,
+        purpose === 'stock' && v.specificType ? `(${v.specificType})` : null,
+        `class: ${classMeta.label}`,
+        purpose === 'stock' && seats != null ? `${seats} seats` : null,
+        purpose === 'stock' && v.maximumSpeedMph != null ? `${v.maximumSpeedMph} mph` : null,
+        purpose === 'stock' && v.trainBrakeTypeLabel ? `brake: ${v.trainBrakeTypeLabel}` : null,
+        showLoad && loadVal != null ? `loading: ${formatCoachLoad(loadVal, asPercent)}` : null,
+        showLoad && loadVal == null ? 'no loading data' : null,
+        purpose === 'stock' && defects > 0 ? `${defects} open defect${defects === 1 ? '' : 's'}` : null,
+  ].filter(Boolean).join(' · ')
+
+  if (purpose === 'stock' && barCount != null && barIndex != null) {
+    return (
+      <span
+        key={(v.vehicleId || '') + '-' + runningPosition}
+        role="listitem"
+        className={[
+          loadBarCoachClass(barIndex, barCount),
+          `cmap-coach--class-${coachClass}`,
+          defects > 0 ? 'cmap-coach--defect' : '',
+        ].filter(Boolean).join(' ')}
+        title={title}
+      >
+          <span className="cmap-loading-text">
+            <span className="cmap-loading-num">{coachLabel}</span>
+            <span className="cmap-loading-pct">{classMeta.abbrev}</span>
+          </span>
+      </span>
+    )
+  }
+
   return (
     <li
       key={(v.vehicleId || '') + '-' + runningPosition}
@@ -876,18 +971,7 @@ function renderVehicleCell(
         purpose === 'stock' && defects > 0 ? 'cmap-coach--defect' : '',
       ].filter(Boolean).join(' ')}
       style={showLoad ? { backgroundColor: coachLoadFill(loadVal, asPercent) } : undefined}
-      title={[
-        `Coach ${coachLabel}`,
-        purpose === 'stock' && v.vehicleId ? `Vehicle ${v.vehicleId}` : null,
-        purpose === 'stock' && v.specificType ? `(${v.specificType})` : null,
-        `class: ${classMeta.label}`,
-        purpose === 'stock' && seats != null ? `${seats} seats` : null,
-        purpose === 'stock' && v.maximumSpeedMph != null ? `${v.maximumSpeedMph} mph` : null,
-        purpose === 'stock' && v.trainBrakeTypeLabel ? `brake: ${v.trainBrakeTypeLabel}` : null,
-        showLoad && loadVal != null ? `loading: ${formatCoachLoad(loadVal, asPercent)}` : null,
-        showLoad && loadVal == null ? 'no loading data' : null,
-        purpose === 'stock' && defects > 0 ? `${defects} open defect${defects === 1 ? '' : 's'}` : null,
-      ].filter(Boolean).join(' · ')}
+      title={title}
     >
       <span className="cmap-coach-num">{coachLabel}</span>
       {purpose === 'stock' && <span className="cmap-coach-vid">{v.vehicleId}</span>}
@@ -955,13 +1039,13 @@ function classAbbrev(cls: string): string {
 
 type CoachClass = 'first' | 'composite' | 'kitchen' | 'standard' | 'accessible' | 'unknown'
 
-const COACH_CLASS_META: Record<CoachClass, { label: string; abbrev: string }> = {
-  first:      { label: 'First class',                      abbrev: 'F' },
-  composite:  { label: 'Composite (First + Standard)',     abbrev: 'M' },
-  kitchen:    { label: 'Catering / buffet',                abbrev: 'K' },
-  standard:   { label: 'Standard class',                   abbrev: 'S' },
-  accessible: { label: 'Standard (accessible / wheelchair)', abbrev: 'A' },
-  unknown:    { label: 'Class unknown',                    abbrev: '?' },
+const COACH_CLASS_META: Record<CoachClass, { label: string; shortLabel: string; abbrev: string }> = {
+  first:      { label: 'First class',                       shortLabel: 'First',       abbrev: 'F' },
+  composite:  { label: 'Composite (First + Standard)',      shortLabel: 'Mixed',       abbrev: 'M' },
+  kitchen:    { label: 'Catering / buffet',                 shortLabel: 'Catering',    abbrev: 'K' },
+  standard:   { label: 'Standard class',                    shortLabel: 'Standard',    abbrev: 'S' },
+  accessible: { label: 'Standard (accessible / wheelchair)', shortLabel: 'Accessible',  abbrev: 'A' },
+  unknown:    { label: 'Class unknown',                     shortLabel: 'Unknown',     abbrev: '?' },
 }
 
 function inferCoachClass(v: PtacVehicle, darwinClass: string | null): CoachClass {
@@ -1045,7 +1129,7 @@ const CoachClassLegend: React.FC<{
       {items.map((k) => (
         <li key={k} className="cmap-legend-item">
           <span className={`cmap-coach-class cmap-coach-class--${k}`}>{COACH_CLASS_META[k].abbrev}</span>
-          <span className="cmap-legend-label">{COACH_CLASS_META[k].label}</span>
+          <span className="cmap-legend-label">{COACH_CLASS_META[k].shortLabel}</span>
         </li>
       ))}
     </ul>
