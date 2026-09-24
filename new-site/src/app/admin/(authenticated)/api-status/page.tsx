@@ -82,6 +82,10 @@ type HealthPayload = {
       error?: string | null
     }
     lastLoad?: { source?: string | null; ms?: number | null; at?: string | null; fallback?: boolean }
+    loadBySource?: {
+      json?: CatalogLoadStats | null
+      sqlite?: CatalogLoadStats | null
+    }
   }
   warmup?: {
     enabled?: boolean
@@ -94,6 +98,18 @@ type HealthPayload = {
     errors?: number
   }
   history?: { retentionDays?: number; dates?: string[] }
+}
+
+type CatalogLoadStats = {
+  source?: string
+  at?: string
+  ms?: number
+  units?: number
+  bytes?: number | null
+  blobBytes?: number | null
+  heapMB?: number
+  rssMB?: number
+  error?: string
 }
 
 type HistoryDatesPayload = {
@@ -153,6 +169,17 @@ function formatUptimeFromMs(v: unknown): string {
   if (days > 0) return `${days}d ${hours}h ${mins}m`
   if (hours > 0) return `${hours}h ${mins}m`
   return `${mins}m`
+}
+
+function formatLoadMs(stat?: CatalogLoadStats | null): string {
+  if (!stat) return 'Not measured yet'
+  if (stat.error) return stat.error
+  if (typeof stat.ms !== 'number') return '-'
+  return `${stat.ms.toLocaleString('en-GB')} ms`
+}
+
+function formatLoadMem(v: unknown): string {
+  return typeof v === 'number' ? v.toLocaleString('en-GB') : 'Not measured yet'
 }
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -328,6 +355,14 @@ const ApiStatusPage: React.FC = () => {
           <BUTWideButton width="hug" instantAction onClick={() => void runFetch(false)}>
             Refresh now
           </BUTWideButton>
+          <BUTWideButton
+            width="hug"
+            instantAction
+            disabled={storeBusy || status !== 'ok'}
+            onClick={() => void patchStore({ benchmark: true, reload: false })}
+          >
+            Compare JSON vs SQLite
+          </BUTWideButton>
           {status === 'error' && <p className="api-status-error">{error}</p>}
           {status === 'ok' && error && <p className="api-status-error">{error}</p>}
           {status === 'ok' && <p className="api-status-meta">Last update: {lastUpdatedAt ? displayDateTime(lastUpdatedAt) : '-'}</p>}
@@ -397,10 +432,24 @@ const ApiStatusPage: React.FC = () => {
             <Card title="Last load source">{summary.lastLoadSource}</Card>
             <Card title="Last load time">{summary.lastLoadMs}</Card>
             <Card title="Fell back">{summary.lastLoadFallback}</Card>
+            <Card title="Catalog units">{summary.unitCatalog}</Card>
+            <Card title="Process heap MB">{summary.heap}</Card>
+            <Card title="Process RSS MB">{summary.rss}</Card>
+          </div>
+          <p className="api-panel-subtitle">
+            Process heap/RSS is the whole Darwin daemon (overlays, timetable, Kafka), not just the catalog.
+            The JSON vs SQLite rows below are measured when that copy is loaded or when you press Compare.
+          </p>
+          <div className="api-status-grid">
             <Card title="JSON file">{summary.unitCatalogFileSize}</Card>
+            <Card title="JSON load">{formatLoadMs(catalog?.loadBySource?.json)}</Card>
+            <Card title="JSON heap MB">{formatLoadMem(catalog?.loadBySource?.json?.heapMB)}</Card>
+            <Card title="JSON RSS MB">{formatLoadMem(catalog?.loadBySource?.json?.rssMB)}</Card>
             <Card title="SQLite file">{summary.sqliteFileSize}</Card>
             <Card title="SQLite blob">{summary.sqliteBlobSize}</Card>
-            <Card title="Catalog units">{summary.unitCatalog}</Card>
+            <Card title="SQLite load">{formatLoadMs(catalog?.loadBySource?.sqlite)}</Card>
+            <Card title="SQLite heap MB">{formatLoadMem(catalog?.loadBySource?.sqlite?.heapMB)}</Card>
+            <Card title="SQLite RSS MB">{formatLoadMem(catalog?.loadBySource?.sqlite?.rssMB)}</Card>
           </div>
         </section>
 

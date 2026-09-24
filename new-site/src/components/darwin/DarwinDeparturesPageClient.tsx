@@ -518,9 +518,9 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
         const body: HistoryDatesResponse = await res.json()
         if (cancelled) return
         const dates = (body.dates || [])
-          .filter((d) => d.hasState && d.hasTimetable)
+          .filter((d) => d.hasState)
           .map((d) => d.date)
-          .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= minLookbackDateIso)
+          .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
           .sort((a, b) => b.localeCompare(a))
         setHistoryDates(dates)
       } catch {
@@ -786,7 +786,9 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   }
 
   const availableHistoryDatesSet = useMemo(() => new Set(historyDates), [historyDates])
-  const minPickerDateIso = minLookbackDateIso
+  const minPickerDateIso = historyDates.length
+    ? [...historyDates].sort((a, b) => a.localeCompare(b))[0]
+    : addDaysIsoDate(todayIsoDate, -90)
 
   const applyDateTimeFilter = () => {
     const dateValue = historyDateDraft.trim()
@@ -806,7 +808,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       return
     }
     const lookbackOk = dateValue >= minLookbackDateIso
-    if (dateValue < todayIsoDate && historyDates.length > 0 && !availableHistoryDatesSet.has(dateValue) && !lookbackOk) {
+    if (dateValue < todayIsoDate && !availableHistoryDatesSet.has(dateValue) && !lookbackOk) {
       setHistoryDateError('That date is not available in historical snapshots.')
       return
     }
