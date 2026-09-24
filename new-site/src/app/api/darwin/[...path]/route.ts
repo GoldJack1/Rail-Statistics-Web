@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireDarwinAdmin } from '@/app/api/darwin/_lib/requireDarwinAdmin'
 import { isLocalDarwinOrigin, resolveDarwinApiOrigin } from '@/utils/darwinApiOrigin'
 
 function json(status: number, body: unknown) {
@@ -48,6 +49,13 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
   }
 
   const splat = pathSegments.length > 0 ? pathSegments.join('/') : 'health'
+  const isAdminPath = pathSegments[0] === 'admin'
+  if (isAdminPath) {
+    const gate = await requireDarwinAdmin(request)
+    if (gate && !gate.ok) {
+      return json(401, { error: 'unauthorized', message: gate.error })
+    }
+  }
   const upstream = new URL(`${origin}/api/${splat}${request.nextUrl.search}`)
 
   const headers = new Headers()
