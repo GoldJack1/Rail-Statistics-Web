@@ -518,7 +518,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
         const body: HistoryDatesResponse = await res.json()
         if (cancelled) return
         const dates = (body.dates || [])
-          .filter((d) => d.hasState)
+          .filter((d) => d.hasState || d.hasTimetable)
           .map((d) => d.date)
           .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
           .sort((a, b) => b.localeCompare(a))
