@@ -78,6 +78,7 @@ const Header: React.FC = () => {
   const isDeparturesActive = pathname.startsWith('/departures') || pathname.startsWith('/services')
   const isBashPlannerActive = pathname.startsWith('/bash-planner')
   const isUnitsActive = pathname.startsWith('/units')
+  const isApiStatusActive = pathname.startsWith('/admin/api-status') || pathname === '/api-status'
 
   const isAccountActive = pathname.startsWith('/account') || pathname.startsWith('/leaderboards')
   const showDarwinNav = useDarwinNavPagesVisible()
@@ -94,6 +95,7 @@ const Header: React.FC = () => {
           { to: '/departures', label: 'Departures', active: isDeparturesActive },
           { to: '/bash-planner', label: 'Bash', active: isBashPlannerActive },
           { to: '/units', label: 'Units', active: isUnitsActive },
+          { to: '/admin/api-status', label: 'API Status', active: isApiStatusActive },
         ]
       : []),
     ...(isAccountSystemEnabled

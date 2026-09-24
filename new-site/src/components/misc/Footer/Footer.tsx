@@ -110,6 +110,9 @@ const Footer: React.FC = () => {
                 <BUTFooterLink to="/units">
                   Units
                 </BUTFooterLink>
+                <BUTFooterLink to="/admin/api-status">
+                  API Status
+                </BUTFooterLink>
               </>
             ) : null}
             <BUTFooterLink to="/migration">
@@ -158,9 +161,6 @@ const Footer: React.FC = () => {
               </BUTFooterLink>
               <BUTFooterLink to="/admin/d-payg">
                 D-PAYG
-              </BUTFooterLink>
-              <BUTFooterLink to="/admin/api-status">
-                API Status
               </BUTFooterLink>
               <BUTFooterLink to="/admin/design-system">
                 Design System

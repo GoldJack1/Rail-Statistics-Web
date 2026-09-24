@@ -27,6 +27,7 @@ import { BackIcon } from '@/components/icons'
 import { MFA_AUTOFILL, MFA_OTP_INPUT_NAME } from '@/constants/mfaAutofill'
 import './LoginPage.css'
 import TXTINPBUTWideButton from '@/components/textInputButtons/plain/TXTINPBUTWideButton'
+import { postLoginPath as resolvePostLoginPath } from '@/utils/darwinPreviewAccess'
 
 type LoginStep = 'credentials' | 'verify-email' | 'checking-session' | 'totp-signin' | 'totp-enroll'
 
@@ -38,11 +39,8 @@ export default function LoginPageClient() {
   const redirectedForTotpEnroll = searchParams.get('reason') === 'enroll-totp'
   const redirectedForNotEditor = searchParams.get('reason') === 'not-editor'
 
-  const postLoginPath = () => {
-    const from = searchParams.get('from')
-    if (from && from.startsWith('/')) return from
-    return '/admin/stations'
-  }
+  const nextPath = () =>
+    resolvePostLoginPath(getFirebaseAuth()?.currentUser ?? user, searchParams.get('from'))
 
   const [step, setStep] = useState<LoginStep>('credentials')
   const [email, setEmail] = useState('')
@@ -87,7 +85,7 @@ export default function LoginPageClient() {
         return
       }
 
-      router.replace(postLoginPath())
+      router.replace(nextPath())
     }
 
     void run()
@@ -178,7 +176,7 @@ export default function LoginPageClient() {
           return
         }
 
-        router.replace(postLoginPath())
+        router.replace(nextPath())
       } catch (err: unknown) {
         if (isMultiFactorAuthRequiredError(err)) {
           const resolver = getMultiFactorResolver(auth, err as MultiFactorError)
@@ -231,7 +229,7 @@ export default function LoginPageClient() {
       mfaResolverRef.current = null
       setTotpSignInCode('')
       setStep('checking-session')
-      router.replace(postLoginPath())
+      router.replace(nextPath())
     } catch (err) {
       setError(mapTotpMfaError(err))
     } finally {
@@ -261,7 +259,7 @@ export default function LoginPageClient() {
       setTotpQrDataUrl(null)
       setTotpSecretKeyDisplay(null)
       await reload(u)
-      router.replace(postLoginPath())
+      router.replace(nextPath())
     } catch (err) {
       setError(mapTotpMfaError(err))
     } finally {
@@ -302,7 +300,7 @@ export default function LoginPageClient() {
       if (userMustEnrollTotpMfaOnFirebase(u)) {
         setStep('totp-enroll')
       } else {
-        router.replace(postLoginPath())
+        router.replace(nextPath())
       }
     } catch (err) {
       setError(mapEmailAuthError(err))

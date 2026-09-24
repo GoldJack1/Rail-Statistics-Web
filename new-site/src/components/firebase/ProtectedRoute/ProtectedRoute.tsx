@@ -10,6 +10,7 @@ import {
   STATION_EDITOR_DENIED_MESSAGE,
 } from '@/utils/masterPublishPolicy'
 import { isLocalDevLoginBypassEnabled } from '@/utils/localDevFlags'
+import { canUseDarwinTools, isDarwinPreviewUser } from '@/utils/darwinPreviewAccess'
 
 interface ProtectedRouteProps {
   children: React.ReactNode
@@ -18,6 +19,8 @@ interface ProtectedRouteProps {
    * blocking loader. Redirects still run once auth state is known.
    */
   showShellWhileChecking?: boolean
+  /** Owner or Darwin preview emails — skip station-editor requirement. */
+  requireDarwinTools?: boolean
 }
 
 type ProfileCheck =
@@ -26,15 +29,18 @@ type ProfileCheck =
   | 'ok'
   | 'need-email-verify'
   | 'need-totp-enroll'
-  | 'need-editor'
+    | 'need-editor'
+    | 'need-darwin-tools'
 
 /**
  * Requires a signed-in catalogue user with verified email, TOTP MFA, and station-editor
  * authority (`rs_station_editor` claim or owner email).
+ * Pass `requireDarwinTools` for API status / Darwin tools (preview emails allowed).
  */
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
   showShellWhileChecking = false,
+  requireDarwinTools = false,
 }) => {
   const { user, loading } = useAuth()
   const router = useRouter()
@@ -99,6 +105,15 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
         const emailOk =
           (u.email?.trim().toLowerCase() ?? '') === getMasterPublishEmail()
 
+        if (requireDarwinTools) {
+          if (!canUseDarwinTools(u)) {
+            setProfileCheck('need-darwin-tools')
+            return
+          }
+          setProfileCheck('ok')
+          return
+        }
+
         if (!isEditor && !emailOk && !hasEditorClaim) {
           setProfileCheck('need-editor')
           return
@@ -113,7 +128,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return () => {
       cancelled = true
     }
-  }, [user, loading])
+  }, [user, loading, requireDarwinTools])
 
   useEffect(() => {
     if (isLocalDevLoginBypassEnabled()) return
@@ -137,6 +152,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
     if (profileCheck === 'need-editor') {
       router.replace('/log-in?reason=not-editor')
+      return
+    }
+
+    if (profileCheck === 'need-darwin-tools') {
+      router.replace(isDarwinPreviewUser(user) ? '/departures' : '/log-in?reason=not-editor')
     }
   }, [user, loading, profileCheck, pathname, router])
 
@@ -149,7 +169,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     (!user ||
       profileCheck === 'need-email-verify' ||
       profileCheck === 'need-totp-enroll' ||
-      profileCheck === 'need-editor')
+      profileCheck === 'need-editor' ||
+      profileCheck === 'need-darwin-tools')
 
   if (!showShellWhileChecking && (loading || isRedirecting)) {
     return (
