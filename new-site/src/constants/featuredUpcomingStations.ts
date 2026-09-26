@@ -71,24 +71,6 @@ function createPlaceholderStation({
 export const FEATURED_UPCOMING_STATIONS: FeaturedUpcomingStation[] = [
   createPlaceholderStation({
     id: 'upcoming-1',
-    stationName: 'Balgray',
-    openingStatus: 'Confirmed',
-    toc: 'ScotRail',
-    country: 'Scotland',
-    county: 'East Renfrewshire',
-    dateOpened: '27/09/2027',
-  }),
-  createPlaceholderStation({
-    id: 'upcoming-2',
-    stationName: 'Bristol Brabazon',
-    openingStatus: 'Expected',
-    toc: 'Great Western Railway',
-    country: 'England',
-    county: 'Bristol',
-    dateOpened: 'LATE 2026',
-  }),
-  createPlaceholderStation({
-    id: 'upcoming-3',
     stationName: 'Butetown',
     openingStatus: 'Expected',
     toc: 'Transport for Wales',
@@ -97,7 +79,16 @@ export const FEATURED_UPCOMING_STATIONS: FeaturedUpcomingStation[] = [
     dateOpened: '13/12/2026',
   }),
   createPlaceholderStation({
-    id: 'upcoming-4',
+    id: 'upcoming-2',
+    stationName: 'Bristol Brabazon',
+    openingStatus: 'Expected',
+    toc: 'Great Western Railway',
+    country: 'England',
+    county: 'Bristol',
+    dateOpened: 'LATE 2026/EARLY 2027',
+  }),
+  createPlaceholderStation({
+    id: 'upcoming-3',
     stationName: 'Winslow',
     openingStatus: 'Expected',
     toc: 'Chiltern Railways',
@@ -105,4 +96,13 @@ export const FEATURED_UPCOMING_STATIONS: FeaturedUpcomingStation[] = [
     county: 'Buckinghamshire',
     dateOpened: '2026-2028',
   }),
+  createPlaceholderStation({
+    id: 'upcoming-4',
+    stationName: 'White Rose',
+    openingStatus: 'Expected',
+    toc: 'Northern',
+    country: 'England',
+    county: 'West Yorkshire',
+    dateOpened: '2027-2028',
+  })
 ]
