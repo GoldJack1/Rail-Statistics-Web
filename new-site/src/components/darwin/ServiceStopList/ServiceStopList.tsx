@@ -159,6 +159,18 @@ function buildStopStatus(
   return { verb, time: eventTime, delay, tone }
 }
 
+function isActualLiveKind(kind?: string | null): boolean {
+  return kind === 'actual' || kind === 'actual-arr'
+}
+
+function liveLocationIndex(stops: ServiceStop[]): number | null {
+  let last = -1
+  for (let i = 0; i < stops.length; i++) {
+    if (isActualLiveKind(stops[i].liveKind) && !stops[i].cancelledAtStop) last = i
+  }
+  return last >= 0 ? last : null
+}
+
 function ServiceStopRow({
   stop,
   index,
@@ -233,13 +245,6 @@ function ServiceStopRow({
           <td className="svc-stops-table__kind">{SLOT_KIND_LABEL[kind]}</td>
         )}
         <td className="svc-stops-table__crs">{stop.crs || ''}</td>
-        {detailed && (
-          <td className="svc-stops-table__plat">
-            <span className="svc-stop-row__platform">
-              <span className="svc-mono">{platformValue}</span>
-            </span>
-          </td>
-        )}
         <td className="stations-table__name">
           <button
             type="button"
@@ -258,13 +263,11 @@ function ServiceStopRow({
             </span>
           </button>
         </td>
-        {!detailed && (
-          <td className="svc-stops-table__plat">
-            <span className="svc-stop-row__platform">
-              <span className="svc-mono">{platformValue}</span>
-            </span>
-          </td>
-        )}
+        <td className="svc-stops-table__plat">
+          <span className="svc-stop-row__platform">
+            <span className="svc-mono">{platformValue}</span>
+          </span>
+        </td>
         <td className={`svc-stops-table__status${status.note || status.eta ? ' svc-stops-table__status--note' : ''}`}>
           {status.time ? (
             <>
@@ -424,6 +427,8 @@ export function ServiceStopList({
     return <p className="unit-muted">No calling points on this service.</p>
   }
 
+  const liveIndex = liveLocationIndex(visible.map(({ stop }) => stop))
+
   return (
     <div className="stations-table-panel svc-stops-table-panel">
       <div className="svc-stops-key-wrap">
@@ -441,15 +446,10 @@ export function ServiceStopList({
               <th className="svc-stops-table__crs" scope="col">
                 <span className="stations-table__sort-button">CRS</span>
               </th>
-              {viewMode === 'detailed' && (
-                <th className="svc-stops-table__plat" scope="col"><span className="stations-table__sort-button">Plt</span></th>
-              )}
               <th className="stations-table__name" scope="col">
                 <span className="stations-table__sort-button">Station</span>
               </th>
-              {viewMode !== 'detailed' && (
-                <th className="svc-stops-table__plat" scope="col"><span className="stations-table__sort-button">Plt</span></th>
-              )}
+              <th className="svc-stops-table__plat" scope="col"><span className="stations-table__sort-button">Plt</span></th>
               <th className="svc-stops-table__status" scope="col"><span className="stations-table__sort-button">Status</span></th>
               {viewMode === 'detailed' && (
                 <th scope="col" className="svc-stops-table__expand-head">
@@ -458,10 +458,12 @@ export function ServiceStopList({
               )}
             </tr>
           </thead>
-          <tbody>
-            {visible.map(({ stop, index }, stripeIndex) => (
+          {visible.map(({ stop, index }, stripeIndex) => (
+            <tbody
+              key={`${stop.tpl}-${stop.slot}-${index}`}
+              className={liveIndex === stripeIndex ? 'svc-stop--live-group' : undefined}
+            >
               <ServiceStopRow
-                key={`${stop.tpl}-${stop.slot}-${index}`}
                 stop={stop}
                 index={index}
                 stripeIndex={stripeIndex}
@@ -474,8 +476,8 @@ export function ServiceStopList({
                 delayReason={delayReason}
                 alertText={alertText}
               />
-            ))}
-          </tbody>
+            </tbody>
+          ))}
         </table>
       </div>
     </div>

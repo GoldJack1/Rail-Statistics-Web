@@ -111,6 +111,28 @@ function buildFormation(row: DepartureRow): string | null {
   return units ? `Formed of ${carriagePhrase} by ${units}` : `Formed of ${carriagePhrase}`
 }
 
+function liveClock(row: DepartureRow): string {
+  return row.liveTime ? String(row.liveTime).slice(0, 5) : ''
+}
+
+function earlyLabel(row: DepartureRow, minutes: number, ongoing: boolean): string {
+  const mins = formatDelayAbs(minutes)
+  const time = liveClock(row)
+  const isArrivalEvent = row.movement === 'arrival' || row.liveKind === 'actual-arr' || row.liveKind === 'est-arr'
+  const word = row.isPassing
+    ? ongoing
+      ? 'Passing'
+      : 'Passed'
+    : isArrivalEvent
+      ? ongoing
+        ? 'Arriving'
+        : 'Arrived'
+      : ongoing
+        ? 'Departing'
+        : 'Departed'
+  return time ? `${word} ${mins} early at ${time}` : `${word} ${mins} early`
+}
+
 function delayedWithReasonAndEta(row: DepartureRow): string {
   const reason = (row.delayReason?.reason || '').replace(/\s+/g, ' ').trim()
   const eta = row.liveTime ? String(row.liveTime).slice(0, 5) : ''
@@ -140,7 +162,7 @@ function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: b
   const isActual = row.liveKind === 'actual' || row.liveKind === 'actual-arr'
   if (isActual) {
     if (delayMinutes != null && delayMinutes < 0) {
-      return { tone: 'early', label: `${verb} ${formatDelayAbs(delayMinutes)} early`, mode }
+      return { tone: 'early', label: earlyLabel(row, delayMinutes, false), mode }
     }
     if (delayMinutes != null && delayMinutes > 0) {
       return { tone: punctualityTone(delayMinutes), label: `${verb} ${formatDelayAbs(delayMinutes)} late`, mode }
@@ -161,17 +183,16 @@ function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: b
   }
 
   const expectedOffSchedule =
-    (delayMinutes != null && delayMinutes > 0) ||
+    (delayMinutes != null && delayMinutes !== 0) ||
     ((row.liveKind === 'est' || row.liveKind === 'est-arr') &&
       Boolean(row.liveTime) &&
       row.liveTime !== row.scheduledTime)
 
   if (expectedOffSchedule) {
-    const expected = delayedWithReasonAndEta(row)
     if (delayMinutes != null && delayMinutes < 0) {
-      return { tone: 'early', label: expected, mode }
+      return { tone: 'early', label: earlyLabel(row, delayMinutes, true), mode }
     }
-    return { tone: punctualityTone(delayMinutes), label: expected, mode }
+    return { tone: punctualityTone(delayMinutes), label: delayedWithReasonAndEta(row), mode }
   }
 
   return { tone: 'ontime', label: 'On Time', mode }

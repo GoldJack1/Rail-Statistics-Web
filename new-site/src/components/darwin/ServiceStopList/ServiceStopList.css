@@ -310,16 +310,6 @@
   white-space: nowrap;
 }
 
-.svc-stops-table .svc-stop--pass .svc-stop-name-text,
-.svc-stops-table .svc-stop--pass .svc-stops-table__crs,
-.svc-stops-table .svc-stop--pass .svc-stop-name-crs,
-.svc-stops-table .svc-stop--pass .svc-stops-table__kind,
-.svc-stops-table .svc-stop--pass .svc-stops-table__plat,
-.svc-stops-table .svc-stop--pass .svc-stop-row__platform,
-.svc-stops-table .svc-stop--pass .svc-stop-row__platform .svc-mono {
-  color: var(--text-secondary);
-}
-
 .svc-stops-table .svc-stop--pass .svc-stop-name-text {
   font-weight: 500;
 }
@@ -393,26 +383,49 @@
   transform: rotate(90deg);
 }
 
+.stations-table.svc-stops-table tbody.svc-stop--live-group {
+  position: relative;
+  z-index: 2;
+  outline: 4px solid var(--text-primary);
+  outline-offset: -4px;
+}
+
+.stations-table.svc-stops-table tbody tr.svc-stops-table__detail-row:not(.svc-stops-table__detail-row--open) {
+  pointer-events: none;
+}
+
+.stations-table.svc-stops-table tbody tr.svc-stops-table__detail-row:not(.svc-stops-table__detail-row--open) > td {
+  box-shadow: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.stations-table.svc-stops-table tbody tr:hover {
+  background: transparent;
+}
+
+@media (hover: hover) {
+  .stations-table.svc-stops-table tbody .stations-table__row:hover > td,
+  .stations-table.svc-stops-table tbody .stations-table__row:focus-within > td,
+  .stations-table.svc-stops-table tbody .svc-stops-table__detail-row--open:hover > td,
+  .stations-table.svc-stops-table tbody .svc-stops-table__detail-row--open:focus-within > td {
+    box-shadow: inset 0 0 0 9999px rgb(0 0 0 / 0.15);
+  }
+}
+
 .svc-stops-table__detail-row > td {
   padding: 0;
-  border-bottom: 1px solid var(--stations-table-cell-border, var(--border-color));
-  background-color: var(--stations-table-row-bg, var(--stations-table-row-default, var(--bg-table-a)));
+  border: 0;
+  background-color: transparent;
   white-space: normal;
+  overflow: hidden;
+  line-height: 0;
+  font-size: 0;
 }
 
 .svc-stops-table__detail-row--open > td {
-  background-image: linear-gradient(rgb(0 0 0 / 0.22), rgb(0 0 0 / 0.22));
-}
-
-.svc-stops-table__detail-row:not(.svc-stops-table__detail-row--open) {
-  height: 0;
-  line-height: 0;
-}
-
-.svc-stops-table__detail-row:not(.svc-stops-table__detail-row--open) > td {
-  padding: 0;
-  border: 0;
-  line-height: 0;
+  background-color: transparent;
 }
 
 .svc-stops-table .svc-stop-detail {
@@ -420,6 +433,11 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-md) var(--space-lg);
   padding: var(--space-md) var(--space-lg);
+  font-size: var(--svc-stops-type-size, var(--text-sm));
+  line-height: 1.25;
+  color: inherit;
+  background-color: var(--stations-table-row-bg, var(--stations-table-row-default, var(--bg-table-a)));
+  background-image: linear-gradient(rgb(0 0 0 / 0.22), rgb(0 0 0 / 0.22));
 }
 
 .svc-stops-table .svc-stop-detail__field {
@@ -447,74 +465,99 @@
 
 .svc-stops-table tbody tr.svc-stop--ontime {
   --stations-table-row-bg: var(--cp-ontime-bg);
-  color: var(--cp-ontime-fg);
+  --cp-row-fg: var(--cp-ontime-fg);
+  color: var(--cp-row-fg);
 }
 
 .svc-stops-table tbody tr.svc-stop--early {
   --stations-table-row-bg: var(--cp-early-bg);
-  color: var(--cp-early-fg);
+  --cp-row-fg: var(--cp-early-fg);
+  color: var(--cp-row-fg);
 }
 
 .svc-stops-table tbody tr.svc-stop--delay-1 {
   --stations-table-row-bg: var(--cp-delay-1-bg);
-  color: var(--cp-delay-1-fg);
+  --cp-row-fg: var(--cp-delay-1-fg);
+  color: var(--cp-row-fg);
 }
 
 .svc-stops-table tbody tr.svc-stop--delay-16 {
   --stations-table-row-bg: var(--cp-delay-16-bg);
-  color: var(--cp-delay-16-fg);
+  --cp-row-fg: var(--cp-delay-16-fg);
+  color: var(--cp-row-fg);
 }
 
 .svc-stops-table tbody tr.svc-stop--delay-30 {
   --stations-table-row-bg: var(--cp-delay-30-bg);
-  color: var(--cp-delay-30-fg);
+  --cp-row-fg: var(--cp-delay-30-fg);
+  color: var(--cp-row-fg);
 }
 
 .svc-stops-table tbody tr.svc-stop--delay-60 {
   --stations-table-row-bg: var(--cp-delay-60-bg);
-  color: var(--cp-delay-60-fg);
+  --cp-row-fg: var(--cp-delay-60-fg);
+  color: var(--cp-row-fg);
 }
 
 .svc-stops-table tbody tr.svc-stop--cancelled {
   --stations-table-row-bg: var(--cp-cancelled-bg);
-  color: var(--cp-cancelled-fg);
+  --cp-row-fg: var(--cp-cancelled-fg);
+  color: var(--cp-row-fg);
 }
 
-.svc-stops-table tbody tr.svc-stop--ontime:not(.svc-stop--pass) td,
-.svc-stops-table tbody tr.svc-stop--early:not(.svc-stop--pass) td,
-.svc-stops-table tbody tr.svc-stop--delay-1:not(.svc-stop--pass) td,
-.svc-stops-table tbody tr.svc-stop--delay-16:not(.svc-stop--pass) td,
-.svc-stops-table tbody tr.svc-stop--delay-30:not(.svc-stop--pass) td,
-.svc-stops-table tbody tr.svc-stop--delay-60:not(.svc-stop--pass) td,
-.svc-stops-table tbody tr.svc-stop--cancelled:not(.svc-stop--pass) td,
-.svc-stops-table tbody tr.svc-stop--ontime:not(.svc-stop--pass) .svc-stop-name-text,
-.svc-stops-table tbody tr.svc-stop--early:not(.svc-stop--pass) .svc-stop-name-text,
-.svc-stops-table tbody tr.svc-stop--delay-1:not(.svc-stop--pass) .svc-stop-name-text,
-.svc-stops-table tbody tr.svc-stop--delay-16:not(.svc-stop--pass) .svc-stop-name-text,
-.svc-stops-table tbody tr.svc-stop--delay-30:not(.svc-stop--pass) .svc-stop-name-text,
-.svc-stops-table tbody tr.svc-stop--delay-60:not(.svc-stop--pass) .svc-stop-name-text,
-.svc-stops-table tbody tr.svc-stop--cancelled:not(.svc-stop--pass) .svc-stop-name-text,
-.svc-stops-table tbody tr.svc-stop--ontime:not(.svc-stop--pass) .svc-stops-table__crs,
-.svc-stops-table tbody tr.svc-stop--early:not(.svc-stop--pass) .svc-stops-table__crs,
-.svc-stops-table tbody tr.svc-stop--delay-1:not(.svc-stop--pass) .svc-stops-table__crs,
-.svc-stops-table tbody tr.svc-stop--delay-16:not(.svc-stop--pass) .svc-stops-table__crs,
-.svc-stops-table tbody tr.svc-stop--delay-30:not(.svc-stop--pass) .svc-stops-table__crs,
-.svc-stops-table tbody tr.svc-stop--delay-60:not(.svc-stop--pass) .svc-stops-table__crs,
-.svc-stops-table tbody tr.svc-stop--cancelled:not(.svc-stop--pass) .svc-stops-table__crs,
-.svc-stops-table tbody tr.svc-stop--ontime:not(.svc-stop--pass) .svc-stop-name-crs,
-.svc-stops-table tbody tr.svc-stop--early:not(.svc-stop--pass) .svc-stop-name-crs,
-.svc-stops-table tbody tr.svc-stop--delay-1:not(.svc-stop--pass) .svc-stop-name-crs,
-.svc-stops-table tbody tr.svc-stop--delay-16:not(.svc-stop--pass) .svc-stop-name-crs,
-.svc-stops-table tbody tr.svc-stop--delay-30:not(.svc-stop--pass) .svc-stop-name-crs,
-.svc-stops-table tbody tr.svc-stop--delay-60:not(.svc-stop--pass) .svc-stop-name-crs,
-.svc-stops-table tbody tr.svc-stop--cancelled:not(.svc-stop--pass) .svc-stop-name-crs,
-.svc-stops-table tbody tr.svc-stop--ontime:not(.svc-stop--pass) .svc-stops-table__kind,
-.svc-stops-table tbody tr.svc-stop--early:not(.svc-stop--pass) .svc-stops-table__kind,
-.svc-stops-table tbody tr.svc-stop--delay-1:not(.svc-stop--pass) .svc-stops-table__kind,
-.svc-stops-table tbody tr.svc-stop--delay-16:not(.svc-stop--pass) .svc-stops-table__kind,
-.svc-stops-table tbody tr.svc-stop--delay-30:not(.svc-stop--pass) .svc-stops-table__kind,
-.svc-stops-table tbody tr.svc-stop--delay-60:not(.svc-stop--pass) .svc-stops-table__kind,
-.svc-stops-table tbody tr.svc-stop--cancelled:not(.svc-stop--pass) .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--pass {
+  color: color-mix(in srgb, var(--cp-row-fg) 80%, transparent);
+}
+
+.svc-stops-table tbody tr.svc-stop--ontime td,
+.svc-stops-table tbody tr.svc-stop--early td,
+.svc-stops-table tbody tr.svc-stop--delay-1 td,
+.svc-stops-table tbody tr.svc-stop--delay-16 td,
+.svc-stops-table tbody tr.svc-stop--delay-30 td,
+.svc-stops-table tbody tr.svc-stop--delay-60 td,
+.svc-stops-table tbody tr.svc-stop--cancelled td,
+.svc-stops-table tbody tr.svc-stop--ontime .svc-stop-name-text,
+.svc-stops-table tbody tr.svc-stop--early .svc-stop-name-text,
+.svc-stops-table tbody tr.svc-stop--delay-1 .svc-stop-name-text,
+.svc-stops-table tbody tr.svc-stop--delay-16 .svc-stop-name-text,
+.svc-stops-table tbody tr.svc-stop--delay-30 .svc-stop-name-text,
+.svc-stops-table tbody tr.svc-stop--delay-60 .svc-stop-name-text,
+.svc-stops-table tbody tr.svc-stop--cancelled .svc-stop-name-text,
+.svc-stops-table tbody tr.svc-stop--ontime .svc-stops-table__crs,
+.svc-stops-table tbody tr.svc-stop--early .svc-stops-table__crs,
+.svc-stops-table tbody tr.svc-stop--delay-1 .svc-stops-table__crs,
+.svc-stops-table tbody tr.svc-stop--delay-16 .svc-stops-table__crs,
+.svc-stops-table tbody tr.svc-stop--delay-30 .svc-stops-table__crs,
+.svc-stops-table tbody tr.svc-stop--delay-60 .svc-stops-table__crs,
+.svc-stops-table tbody tr.svc-stop--cancelled .svc-stops-table__crs,
+.svc-stops-table tbody tr.svc-stop--ontime .svc-stop-name-crs,
+.svc-stops-table tbody tr.svc-stop--early .svc-stop-name-crs,
+.svc-stops-table tbody tr.svc-stop--delay-1 .svc-stop-name-crs,
+.svc-stops-table tbody tr.svc-stop--delay-16 .svc-stop-name-crs,
+.svc-stops-table tbody tr.svc-stop--delay-30 .svc-stop-name-crs,
+.svc-stops-table tbody tr.svc-stop--delay-60 .svc-stop-name-crs,
+.svc-stops-table tbody tr.svc-stop--cancelled .svc-stop-name-crs,
+.svc-stops-table tbody tr.svc-stop--ontime .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--early .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--delay-1 .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--delay-16 .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--delay-30 .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--delay-60 .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--cancelled .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--ontime .svc-stop-row__platform,
+.svc-stops-table tbody tr.svc-stop--early .svc-stop-row__platform,
+.svc-stops-table tbody tr.svc-stop--delay-1 .svc-stop-row__platform,
+.svc-stops-table tbody tr.svc-stop--delay-16 .svc-stop-row__platform,
+.svc-stops-table tbody tr.svc-stop--delay-30 .svc-stop-row__platform,
+.svc-stops-table tbody tr.svc-stop--delay-60 .svc-stop-row__platform,
+.svc-stops-table tbody tr.svc-stop--cancelled .svc-stop-row__platform,
+.svc-stops-table tbody tr.svc-stop--ontime .svc-stop-row__platform .svc-mono,
+.svc-stops-table tbody tr.svc-stop--early .svc-stop-row__platform .svc-mono,
+.svc-stops-table tbody tr.svc-stop--delay-1 .svc-stop-row__platform .svc-mono,
+.svc-stops-table tbody tr.svc-stop--delay-16 .svc-stop-row__platform .svc-mono,
+.svc-stops-table tbody tr.svc-stop--delay-30 .svc-stop-row__platform .svc-mono,
+.svc-stops-table tbody tr.svc-stop--delay-60 .svc-stop-row__platform .svc-mono,
+.svc-stops-table tbody tr.svc-stop--cancelled .svc-stop-row__platform .svc-mono,
 .svc-stops-table tbody tr.svc-stop--ontime .svc-allocation-label,
 .svc-stops-table tbody tr.svc-stop--early .svc-allocation-label,
 .svc-stops-table tbody tr.svc-stop--delay-1 .svc-allocation-label,
@@ -537,68 +580,6 @@
 .svc-stops-table tbody tr.svc-stop--delay-60 .svc-allocation-value,
 .svc-stops-table tbody tr.svc-stop--cancelled .svc-allocation-value {
   color: inherit;
-}
-
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled {
-  --text-secondary: hsl(0 0% 100% / 0.8);
-}
-
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime td.svc-stops-table__kind,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early td.svc-stops-table__kind,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 td.svc-stops-table__kind,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 td.svc-stops-table__kind,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 td.svc-stops-table__kind,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 td.svc-stops-table__kind,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled td.svc-stops-table__kind,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime td.svc-stops-table__crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early td.svc-stops-table__crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 td.svc-stops-table__crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 td.svc-stops-table__crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 td.svc-stops-table__crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 td.svc-stops-table__crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled td.svc-stops-table__crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime td.svc-stops-table__plat,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early td.svc-stops-table__plat,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 td.svc-stops-table__plat,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 td.svc-stops-table__plat,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 td.svc-stops-table__plat,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 td.svc-stops-table__plat,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled td.svc-stops-table__plat,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime .svc-stop-row__platform,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early .svc-stop-row__platform,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 .svc-stop-row__platform,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 .svc-stop-row__platform,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 .svc-stop-row__platform,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 .svc-stop-row__platform,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled .svc-stop-row__platform,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime .svc-stop-row__platform .svc-mono,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early .svc-stop-row__platform .svc-mono,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 .svc-stop-row__platform .svc-mono,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 .svc-stop-row__platform .svc-mono,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 .svc-stop-row__platform .svc-mono,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 .svc-stop-row__platform .svc-mono,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled .svc-stop-row__platform .svc-mono,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime .svc-stop-name-crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early .svc-stop-name-crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 .svc-stop-name-crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 .svc-stop-name-crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 .svc-stop-name-crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 .svc-stop-name-crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled .svc-stop-name-crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime .svc-stop-name-text,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early .svc-stop-name-text,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 .svc-stop-name-text,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 .svc-stop-name-text,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 .svc-stop-name-text,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 .svc-stop-name-text,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled .svc-stop-name-text {
-  color: hsl(0 0% 100% / 0.8);
 }
 
 @media (max-width: 1023px) {
@@ -632,7 +613,6 @@
   .svc-stops-table tbody tr.svc-stop--pass .svc-stop-row__platform,
   .svc-stops-table tbody tr.svc-stop--pass .svc-stop-row__platform .svc-mono {
     font-weight: 500;
-    color: var(--text-secondary);
   }
 
   .svc-stops-table .stations-table__name,
@@ -724,8 +704,8 @@
     display: grid;
     grid-template-columns:
       calc(3.75rem + var(--stations-panel-text-inset, var(--space-2xl)))
-      2.15rem
       minmax(0, 1fr)
+      2.15rem
       8.25rem
       calc(2.5rem + var(--stations-panel-text-inset, var(--space-2xl)));
     width: 100%;
@@ -796,11 +776,16 @@
   .stations-table.svc-stops-table.svc-stops-table--detailed tbody tr.svc-stops-table__detail-row {
     display: block;
     width: 100%;
+    line-height: 0;
+    font-size: 0;
   }
 
   .stations-table.svc-stops-table.svc-stops-table--detailed tbody tr.svc-stops-table__detail-row > td {
     display: block;
     width: 100%;
+    padding: 0;
+    line-height: 0;
+    font-size: 0;
   }
 
   .svc-stops-table--simple .svc-stops-table__crs {
@@ -866,8 +851,6 @@
   }
 
   .svc-stops-table tbody tr.svc-stops-table__detail-row:not(.svc-stops-table__detail-row--open) > td {
-    height: 0;
-    padding: 0;
     border: 0;
   }
 
