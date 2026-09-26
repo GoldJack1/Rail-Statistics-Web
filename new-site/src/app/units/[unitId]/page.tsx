@@ -709,6 +709,8 @@ const UnitLookupPage: React.FC = () => {
                         }
                         historical={!!latestService.historicalDate}
                         returnTo={`${pathname}${location.search || ''}`}
+                        delayReason={latestService.delayReason?.reason}
+                        alertText={latestService.alerts?.[0]?.text}
                       />
                     </SidebarDropdownSection>
                   </>

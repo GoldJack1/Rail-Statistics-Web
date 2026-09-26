@@ -1,7 +1,91 @@
+@import '../callingPatternTones.css';
+
 .svc-stops-table-panel {
   min-width: 0;
   container-type: inline-size;
   container-name: svc-stops;
+  gap: 0;
+  --svc-stops-key-pad-x: var(--space-xl);
+  --svc-stops-key-pad-y: var(--space-lg);
+}
+
+.svc-stops-key-wrap {
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--svc-stops-key-pad-y) var(--svc-stops-key-pad-x);
+}
+
+.svc-stops-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.svc-stops-key__item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: min-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 8px 16px;
+  min-height: 35px;
+  border: 0;
+  border-radius: 32px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: default;
+  pointer-events: none;
+  user-select: none;
+}
+
+.svc-stops-key__item--early { background: var(--cp-early-bg); color: var(--cp-early-fg); }
+.svc-stops-key__item--ontime { background: var(--cp-ontime-bg); color: var(--cp-ontime-fg); }
+.svc-stops-key__item--delay-1 { background: var(--cp-delay-1-bg); color: var(--cp-delay-1-fg); }
+.svc-stops-key__item--delay-16 { background: var(--cp-delay-16-bg); color: var(--cp-delay-16-fg); }
+.svc-stops-key__item--delay-30 { background: var(--cp-delay-30-bg); color: var(--cp-delay-30-fg); }
+.svc-stops-key__item--delay-60 { background: var(--cp-delay-60-bg); color: var(--cp-delay-60-fg); }
+.svc-stops-key__item--cancelled { background: var(--cp-cancelled-bg); color: var(--cp-cancelled-fg); }
+
+.svc-stops-table .svc-eta-short { display: none; }
+.svc-stops-table .svc-eta-full { display: inline; }
+
+.svc-stops-table .svc-stops-table__status--note {
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.svc-stops-table .svc-stops-table__status-line {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.svc-stops-table .svc-stops-table__status-sep {
+  flex: 0 0 auto;
+  margin: 0 0.45em;
+  white-space: nowrap;
+}
+
+.svc-stops-table .svc-stops-table__status-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
 }
 
 .svc-stops-table-panel .stations-table-wrap {
@@ -61,9 +145,11 @@
 
 .svc-stops-table .svc-stops-table__status {
   width: 1%;
+  min-width: 0;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   font-size: var(--text-sm);
+  overflow: hidden;
 }
 
 .svc-stops-table .svc-stops-table__status-main,
@@ -155,6 +241,8 @@
     width: 100%;
     max-width: none;
     margin-inline: 0;
+    --svc-stops-key-pad-x: var(--svc-pattern-bleed, var(--space-xl));
+    --svc-stops-key-pad-y: var(--space-lg);
   }
 
   .darwin-details-page .svc-stops-table-panel .stations-table-wrap {
@@ -357,89 +445,158 @@
   border: 0;
 }
 
-.svc-stops-table tbody tr.svc-stop--delayed {
-  --stations-table-row-bg: hsl(53 59% 60%);
-  color: hsl(0 0% 0%);
+.svc-stops-table tbody tr.svc-stop--ontime {
+  --stations-table-row-bg: var(--cp-ontime-bg);
+  color: var(--cp-ontime-fg);
 }
 
 .svc-stops-table tbody tr.svc-stop--early {
-  --stations-table-row-bg: hsl(141 60% 40%);
-  color: hsl(0 0% 100%);
+  --stations-table-row-bg: var(--cp-early-bg);
+  color: var(--cp-early-fg);
+}
+
+.svc-stops-table tbody tr.svc-stop--delay-1 {
+  --stations-table-row-bg: var(--cp-delay-1-bg);
+  color: var(--cp-delay-1-fg);
+}
+
+.svc-stops-table tbody tr.svc-stop--delay-16 {
+  --stations-table-row-bg: var(--cp-delay-16-bg);
+  color: var(--cp-delay-16-fg);
+}
+
+.svc-stops-table tbody tr.svc-stop--delay-30 {
+  --stations-table-row-bg: var(--cp-delay-30-bg);
+  color: var(--cp-delay-30-fg);
+}
+
+.svc-stops-table tbody tr.svc-stop--delay-60 {
+  --stations-table-row-bg: var(--cp-delay-60-bg);
+  color: var(--cp-delay-60-fg);
 }
 
 .svc-stops-table tbody tr.svc-stop--cancelled {
-  --stations-table-row-bg: hsl(0 68% 58%);
-  color: hsl(0 0% 100%);
+  --stations-table-row-bg: var(--cp-cancelled-bg);
+  color: var(--cp-cancelled-fg);
 }
 
-[data-theme='dark'] .svc-stops-table tbody tr.svc-stop--delayed {
-  --stations-table-row-bg: hsl(53 100% 24%);
-  color: hsl(0 0% 100%);
-}
-
-[data-theme='dark'] .svc-stops-table tbody tr.svc-stop--early {
-  --stations-table-row-bg: hsl(141 100% 19%);
-  color: hsl(0 0% 100%);
-}
-
-[data-theme='dark'] .svc-stops-table tbody tr.svc-stop--cancelled {
-  --stations-table-row-bg: hsl(359 100% 25%);
-  color: hsl(0 0% 100%);
-}
-
-.svc-stops-table tbody tr.svc-stop--delayed:not(.svc-stop--pass) td,
+.svc-stops-table tbody tr.svc-stop--ontime:not(.svc-stop--pass) td,
 .svc-stops-table tbody tr.svc-stop--early:not(.svc-stop--pass) td,
+.svc-stops-table tbody tr.svc-stop--delay-1:not(.svc-stop--pass) td,
+.svc-stops-table tbody tr.svc-stop--delay-16:not(.svc-stop--pass) td,
+.svc-stops-table tbody tr.svc-stop--delay-30:not(.svc-stop--pass) td,
+.svc-stops-table tbody tr.svc-stop--delay-60:not(.svc-stop--pass) td,
 .svc-stops-table tbody tr.svc-stop--cancelled:not(.svc-stop--pass) td,
-.svc-stops-table tbody tr.svc-stop--delayed:not(.svc-stop--pass) .svc-stop-name-text,
+.svc-stops-table tbody tr.svc-stop--ontime:not(.svc-stop--pass) .svc-stop-name-text,
 .svc-stops-table tbody tr.svc-stop--early:not(.svc-stop--pass) .svc-stop-name-text,
+.svc-stops-table tbody tr.svc-stop--delay-1:not(.svc-stop--pass) .svc-stop-name-text,
+.svc-stops-table tbody tr.svc-stop--delay-16:not(.svc-stop--pass) .svc-stop-name-text,
+.svc-stops-table tbody tr.svc-stop--delay-30:not(.svc-stop--pass) .svc-stop-name-text,
+.svc-stops-table tbody tr.svc-stop--delay-60:not(.svc-stop--pass) .svc-stop-name-text,
 .svc-stops-table tbody tr.svc-stop--cancelled:not(.svc-stop--pass) .svc-stop-name-text,
-.svc-stops-table tbody tr.svc-stop--delayed:not(.svc-stop--pass) .svc-stops-table__crs,
+.svc-stops-table tbody tr.svc-stop--ontime:not(.svc-stop--pass) .svc-stops-table__crs,
 .svc-stops-table tbody tr.svc-stop--early:not(.svc-stop--pass) .svc-stops-table__crs,
+.svc-stops-table tbody tr.svc-stop--delay-1:not(.svc-stop--pass) .svc-stops-table__crs,
+.svc-stops-table tbody tr.svc-stop--delay-16:not(.svc-stop--pass) .svc-stops-table__crs,
+.svc-stops-table tbody tr.svc-stop--delay-30:not(.svc-stop--pass) .svc-stops-table__crs,
+.svc-stops-table tbody tr.svc-stop--delay-60:not(.svc-stop--pass) .svc-stops-table__crs,
 .svc-stops-table tbody tr.svc-stop--cancelled:not(.svc-stop--pass) .svc-stops-table__crs,
-.svc-stops-table tbody tr.svc-stop--delayed:not(.svc-stop--pass) .svc-stop-name-crs,
+.svc-stops-table tbody tr.svc-stop--ontime:not(.svc-stop--pass) .svc-stop-name-crs,
 .svc-stops-table tbody tr.svc-stop--early:not(.svc-stop--pass) .svc-stop-name-crs,
+.svc-stops-table tbody tr.svc-stop--delay-1:not(.svc-stop--pass) .svc-stop-name-crs,
+.svc-stops-table tbody tr.svc-stop--delay-16:not(.svc-stop--pass) .svc-stop-name-crs,
+.svc-stops-table tbody tr.svc-stop--delay-30:not(.svc-stop--pass) .svc-stop-name-crs,
+.svc-stops-table tbody tr.svc-stop--delay-60:not(.svc-stop--pass) .svc-stop-name-crs,
 .svc-stops-table tbody tr.svc-stop--cancelled:not(.svc-stop--pass) .svc-stop-name-crs,
-.svc-stops-table tbody tr.svc-stop--delayed:not(.svc-stop--pass) .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--ontime:not(.svc-stop--pass) .svc-stops-table__kind,
 .svc-stops-table tbody tr.svc-stop--early:not(.svc-stop--pass) .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--delay-1:not(.svc-stop--pass) .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--delay-16:not(.svc-stop--pass) .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--delay-30:not(.svc-stop--pass) .svc-stops-table__kind,
+.svc-stops-table tbody tr.svc-stop--delay-60:not(.svc-stop--pass) .svc-stops-table__kind,
 .svc-stops-table tbody tr.svc-stop--cancelled:not(.svc-stop--pass) .svc-stops-table__kind,
-.svc-stops-table tbody tr.svc-stop--delayed .svc-allocation-label,
+.svc-stops-table tbody tr.svc-stop--ontime .svc-allocation-label,
 .svc-stops-table tbody tr.svc-stop--early .svc-allocation-label,
+.svc-stops-table tbody tr.svc-stop--delay-1 .svc-allocation-label,
+.svc-stops-table tbody tr.svc-stop--delay-16 .svc-allocation-label,
+.svc-stops-table tbody tr.svc-stop--delay-30 .svc-allocation-label,
+.svc-stops-table tbody tr.svc-stop--delay-60 .svc-allocation-label,
 .svc-stops-table tbody tr.svc-stop--cancelled .svc-allocation-label,
-.svc-stops-table tbody tr.svc-stop--delayed .act-note,
+.svc-stops-table tbody tr.svc-stop--ontime .act-note,
 .svc-stops-table tbody tr.svc-stop--early .act-note,
+.svc-stops-table tbody tr.svc-stop--delay-1 .act-note,
+.svc-stops-table tbody tr.svc-stop--delay-16 .act-note,
+.svc-stops-table tbody tr.svc-stop--delay-30 .act-note,
+.svc-stops-table tbody tr.svc-stop--delay-60 .act-note,
 .svc-stops-table tbody tr.svc-stop--cancelled .act-note,
-.svc-stops-table tbody tr.svc-stop--delayed .svc-allocation-value,
+.svc-stops-table tbody tr.svc-stop--ontime .svc-allocation-value,
 .svc-stops-table tbody tr.svc-stop--early .svc-allocation-value,
+.svc-stops-table tbody tr.svc-stop--delay-1 .svc-allocation-value,
+.svc-stops-table tbody tr.svc-stop--delay-16 .svc-allocation-value,
+.svc-stops-table tbody tr.svc-stop--delay-30 .svc-allocation-value,
+.svc-stops-table tbody tr.svc-stop--delay-60 .svc-allocation-value,
 .svc-stops-table tbody tr.svc-stop--cancelled .svc-allocation-value {
   color: inherit;
 }
 
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delayed,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled {
   --text-secondary: hsl(0 0% 100% / 0.8);
 }
 
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delayed td.svc-stops-table__kind,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime td.svc-stops-table__kind,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early td.svc-stops-table__kind,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 td.svc-stops-table__kind,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 td.svc-stops-table__kind,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 td.svc-stops-table__kind,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 td.svc-stops-table__kind,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled td.svc-stops-table__kind,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delayed td.svc-stops-table__crs,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime td.svc-stops-table__crs,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early td.svc-stops-table__crs,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 td.svc-stops-table__crs,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 td.svc-stops-table__crs,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 td.svc-stops-table__crs,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 td.svc-stops-table__crs,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled td.svc-stops-table__crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delayed td.svc-stops-table__plat,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime td.svc-stops-table__plat,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early td.svc-stops-table__plat,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 td.svc-stops-table__plat,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 td.svc-stops-table__plat,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 td.svc-stops-table__plat,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 td.svc-stops-table__plat,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled td.svc-stops-table__plat,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delayed .svc-stop-row__platform,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime .svc-stop-row__platform,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early .svc-stop-row__platform,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 .svc-stop-row__platform,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 .svc-stop-row__platform,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 .svc-stop-row__platform,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 .svc-stop-row__platform,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled .svc-stop-row__platform,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delayed .svc-stop-row__platform .svc-mono,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime .svc-stop-row__platform .svc-mono,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early .svc-stop-row__platform .svc-mono,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 .svc-stop-row__platform .svc-mono,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 .svc-stop-row__platform .svc-mono,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 .svc-stop-row__platform .svc-mono,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 .svc-stop-row__platform .svc-mono,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled .svc-stop-row__platform .svc-mono,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delayed .svc-stop-name-crs,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime .svc-stop-name-crs,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early .svc-stop-name-crs,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 .svc-stop-name-crs,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 .svc-stop-name-crs,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 .svc-stop-name-crs,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 .svc-stop-name-crs,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled .svc-stop-name-crs,
-.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delayed .svc-stop-name-text,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--ontime .svc-stop-name-text,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--early .svc-stop-name-text,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-1 .svc-stop-name-text,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-16 .svc-stop-name-text,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-30 .svc-stop-name-text,
+.stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--delay-60 .svc-stop-name-text,
 .stations-table.svc-stops-table tbody tr.stations-table__row.svc-stop--pass.svc-stop--cancelled .svc-stop-name-text {
   color: hsl(0 0% 100% / 0.8);
 }
@@ -449,6 +606,8 @@
     width: calc(100% + (2 * var(--stations-panel-text-inset, var(--space-2xl))));
     max-width: none;
     margin-inline: calc(-1 * var(--stations-panel-text-inset, var(--space-2xl)));
+    --svc-stops-key-pad-x: var(--stations-panel-text-inset, var(--space-2xl));
+    --svc-stops-key-pad-y: var(--space-lg);
   }
 
   .svc-stops-table-panel .stations-table-wrap {
@@ -505,16 +664,25 @@
   }
 
   .svc-stops-table .svc-stops-table__status {
-    width: 7.25rem;
-    white-space: normal;
+    width: 8.5rem;
+    min-width: 0;
+    white-space: nowrap;
     line-height: 1.25;
     padding-left: var(--space-sm);
     padding-right: var(--space-xs);
+    overflow: hidden;
+  }
+
+  .svc-stops-table .svc-eta-full { display: none; }
+  .svc-stops-table .svc-eta-short { display: inline; }
+
+  .svc-stops-table .svc-stops-table__status--note {
+    width: 8.5rem;
   }
 
   .svc-stops-table thead th:last-child.svc-stops-table__status,
   .svc-stops-table tbody td:last-child.svc-stops-table__status {
-    width: calc(7.25rem + var(--stations-panel-text-inset, var(--space-2xl)));
+    width: calc(8.5rem + var(--stations-panel-text-inset, var(--space-2xl)));
     padding-right: var(--stations-panel-text-inset, var(--space-2xl));
   }
 
@@ -558,8 +726,8 @@
       calc(3.75rem + var(--stations-panel-text-inset, var(--space-2xl)))
       2.15rem
       minmax(0, 1fr)
-      6.15rem
-      calc(2.35rem + var(--stations-panel-text-inset, var(--space-2xl)));
+      8.25rem
+      calc(2.5rem + var(--stations-panel-text-inset, var(--space-2xl)));
     width: 100%;
     align-items: stretch;
   }
@@ -592,6 +760,10 @@
     margin-left: 0.35em;
   }
 
+  .stations-table.svc-stops-table.svc-stops-table--detailed .svc-stop-name-crs + .act-pill-row {
+    margin-left: 0.35em;
+  }
+
   .stations-table.svc-stops-table.svc-stops-table--detailed thead tr > .svc-stops-table__status,
   .stations-table.svc-stops-table.svc-stops-table--detailed tbody tr.stations-table__row > .svc-stops-table__status {
     overflow: hidden;
@@ -600,6 +772,17 @@
     justify-content: center;
     gap: 0;
     text-align: left;
+    min-width: 0;
+  }
+
+  .stations-table.svc-stops-table.svc-stops-table--detailed tbody tr.stations-table__row > .svc-stops-table__status--note {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .stations-table.svc-stops-table.svc-stops-table--detailed .svc-stops-table__status--note .svc-stops-table__status-main {
+    display: inline;
+    flex: 0 0 auto;
   }
 
   .stations-table.svc-stops-table.svc-stops-table--detailed .svc-stops-table__expand-head,
@@ -695,6 +878,11 @@
 }
 
 @media (max-width: 639px) {
+  .svc-stops-key__item {
+    padding: 7px 14px;
+    font-size: 13px;
+  }
+
   .svc-stops-table:not(.svc-stops-table--detailed) .svc-stops-table__kind {
     width: calc(3.6rem + var(--stations-panel-text-inset, var(--space-lg)));
   }

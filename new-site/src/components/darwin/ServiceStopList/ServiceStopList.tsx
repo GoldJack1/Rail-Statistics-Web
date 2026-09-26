@@ -10,6 +10,7 @@ import { useStations } from '@/hooks/useStations'
 import type { ServiceStop } from '@/types/darwin'
 import { buildStopNameLookup, displayStopName } from '@/components/darwin/serviceStopLabel'
 import type { ServiceViewMode } from '@/components/darwin/serviceViewMode'
+import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
 import '@/components/cards/StationsTableView/StationsTableView.css'
 import './ServiceStopList.css'
 
@@ -98,13 +99,19 @@ function formatDelayLabel(delta: number | null): string {
   return '(0 L)'
 }
 
-type StopTone = 'ontime' | 'early' | 'delayed' | 'cancelled'
+type StopTone = CallingPatternTone
 
 type StopStatus = {
   verb: string
   time: string
   delay: string
   tone: StopTone
+  note?: string
+  eta?: string | null
+}
+
+function delayReasonText(delayReason?: string | null, alertText?: string | null): string {
+  return (delayReason || alertText || '').replace(/\s+/g, ' ').trim()
 }
 
 function buildStopStatus(
@@ -113,9 +120,21 @@ function buildStopStatus(
   deltaMinutes: number | null,
   scheduledTime: string,
   historical: boolean,
+  delayReason?: string | null,
+  alertText?: string | null,
 ): StopStatus {
   if (stop.cancelledAtStop) return { verb: 'Cancelled', time: '', delay: '', tone: 'cancelled' }
-  if (stop.unknownDelay) return { verb: 'Delayed', time: '', delay: '', tone: 'delayed' }
+  if (stop.unknownDelay) {
+    const eta = trimSeconds(stop.liveTime)
+    return {
+      verb: 'Delayed',
+      time: '',
+      delay: '',
+      tone: 'delay-16',
+      note: delayReasonText(delayReason, alertText) || undefined,
+      eta: eta || null,
+    }
+  }
 
   const live = trimSeconds(stop.liveTime)
   const hasActual = stop.liveKind === 'actual' || stop.liveKind === 'actual-arr'
@@ -134,7 +153,7 @@ function buildStopStatus(
 
   const delay = (hasActual || hasEst) ? formatDelayLabel(deltaMinutes) : ''
   const tone: StopTone =
-    deltaMinutes != null && deltaMinutes >= 1 ? 'delayed'
+    deltaMinutes != null && deltaMinutes >= 1 ? delayMinutesTone(deltaMinutes)
       : deltaMinutes != null && deltaMinutes <= -1 ? 'early'
         : 'ontime'
   return { verb, time: eventTime, delay, tone }
@@ -150,6 +169,8 @@ function ServiceStopRow({
   historical,
   returnTo,
   stripeIndex,
+  delayReason,
+  alertText,
 }: {
   stop: ServiceStop
   index: number
@@ -160,6 +181,8 @@ function ServiceStopRow({
   boardDate: string | null
   historical: boolean
   returnTo: string
+  delayReason?: string | null
+  alertText?: string | null
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -176,7 +199,7 @@ function ServiceStopRow({
     : (pDep || pArr || wDep || wArr || null)
   const deltaMinutes = stop.unknownDelay ? null : computeDeltaMinutes(scheduledForDelta, stop.liveTime)
   const time = primaryTime(stop, kind)
-  const status = buildStopStatus(stop, kind, deltaMinutes, time.value, historical)
+  const status = buildStopStatus(stop, kind, deltaMinutes, time.value, historical, delayReason, alertText)
   const code = (stop.crs || stop.tpl || '').toUpperCase()
   const detailed = viewMode === 'detailed'
 
@@ -242,7 +265,7 @@ function ServiceStopRow({
             </span>
           </td>
         )}
-        <td className="svc-stops-table__status">
+        <td className={`svc-stops-table__status${status.note || status.eta ? ' svc-stops-table__status--note' : ''}`}>
           {status.time ? (
             <>
               <span className="svc-stops-table__status-main">
@@ -255,6 +278,24 @@ function ServiceStopRow({
                 {status.delay ? <span className="svc-stops-table__status-delay">{status.delay}</span> : null}
               </span>
             </>
+          ) : status.note || status.eta ? (
+            <span
+              className="svc-stops-table__status-line"
+              title={[status.verb, status.note, status.eta ? `Expected at ${status.eta}` : ''].filter(Boolean).join(' | ')}
+            >
+              <span className="svc-stops-table__status-main">{status.verb}</span>
+              <span className="svc-stops-table__status-sep" aria-hidden="true">|</span>
+              <span className="svc-stops-table__status-note">
+                {status.note ? <span>{status.note}</span> : null}
+                {status.note && status.eta ? <span aria-hidden="true"> · </span> : null}
+                {status.eta ? (
+                  <>
+                    <span className="svc-eta-full">Expected at {status.eta}</span>
+                    <span className="svc-eta-short">exp {status.eta}</span>
+                  </>
+                ) : null}
+              </span>
+            </span>
           ) : (
             <span className="svc-stops-table__status-main">{status.verb}</span>
           )}
@@ -329,12 +370,39 @@ function ServiceStopRow({
   )
 }
 
+const CALLING_COLOUR_KEY: { tone: string; label: string }[] = [
+  { tone: 'early', label: 'Early' },
+  { tone: 'ontime', label: 'On time' },
+  { tone: 'delay-1', label: '1–15 min late' },
+  { tone: 'delay-16', label: '16–29 min late' },
+  { tone: 'delay-30', label: '30–59 min late' },
+  { tone: 'delay-60', label: '60+ min late' },
+  { tone: 'cancelled', label: 'Cancelled' },
+]
+
+function CallingColourKey() {
+  return (
+    <ul className="svc-stops-key" aria-label="Calling pattern colour key">
+      {CALLING_COLOUR_KEY.map((item) => (
+        <li
+          key={item.tone}
+          className={`svc-stops-key__item svc-stops-key__item--${item.tone}`}
+        >
+          {item.label}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function ServiceStopList({
   stops,
   viewMode,
   boardDate,
   historical = false,
   returnTo,
+  delayReason,
+  alertText,
 }: {
   stops: ServiceStop[]
   viewMode: ServiceViewMode
@@ -343,6 +411,8 @@ export function ServiceStopList({
   /** True for a saved historical snapshot, which changes the scheduled pill. */
   historical?: boolean
   returnTo: string
+  delayReason?: string | null
+  alertText?: string | null
 }) {
   const { stations } = useStations()
   const lookup = useMemo(() => buildStopNameLookup(stations), [stations])
@@ -356,6 +426,9 @@ export function ServiceStopList({
 
   return (
     <div className="stations-table-panel svc-stops-table-panel">
+      <div className="svc-stops-key-wrap">
+        <CallingColourKey />
+      </div>
       <div className="stations-table-wrap">
         <table className={`stations-table svc-stops-table svc-stops-table--${viewMode}`}>
           <thead>
@@ -398,6 +471,8 @@ export function ServiceStopList({
                 boardDate={boardDate || null}
                 historical={historical}
                 returnTo={returnTo}
+                delayReason={delayReason}
+                alertText={alertText}
               />
             ))}
           </tbody>

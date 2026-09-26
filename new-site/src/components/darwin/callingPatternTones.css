@@ -1,0 +1,33 @@
+:root {
+  --cp-early-bg: hsl(218 72% 32%);
+  --cp-early-fg: hsl(0 0% 100%);
+  --cp-ontime-bg: hsl(141 60% 40%);
+  --cp-ontime-fg: hsl(0 0% 100%);
+  --cp-delay-1-bg: hsl(48 94% 54%);
+  --cp-delay-1-fg: hsl(0 0% 0%);
+  --cp-delay-16-bg: hsl(38 92% 52%);
+  --cp-delay-16-fg: hsl(0 0% 0%);
+  --cp-delay-30-bg: hsl(28 90% 48%);
+  --cp-delay-30-fg: hsl(0 0% 100%);
+  --cp-delay-60-bg: hsl(22 82% 34%);
+  --cp-delay-60-fg: hsl(0 0% 100%);
+  --cp-cancelled-bg: hsl(0 68% 58%);
+  --cp-cancelled-fg: hsl(0 0% 100%);
+}
+
+[data-theme='dark'] {
+  --cp-early-bg: hsl(218 88% 22%);
+  --cp-early-fg: hsl(0 0% 100%);
+  --cp-ontime-bg: hsl(141 100% 19%);
+  --cp-ontime-fg: hsl(0 0% 100%);
+  --cp-delay-1-bg: hsl(48 90% 28%);
+  --cp-delay-1-fg: hsl(0 0% 100%);
+  --cp-delay-16-bg: hsl(38 88% 30%);
+  --cp-delay-16-fg: hsl(0 0% 100%);
+  --cp-delay-30-bg: hsl(28 90% 28%);
+  --cp-delay-30-fg: hsl(0 0% 100%);
+  --cp-delay-60-bg: hsl(22 86% 22%);
+  --cp-delay-60-fg: hsl(0 0% 100%);
+  --cp-cancelled-bg: hsl(359 100% 25%);
+  --cp-cancelled-fg: hsl(0 0% 100%);
+}

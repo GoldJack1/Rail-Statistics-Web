@@ -11,9 +11,11 @@ import {
   coachLoadValues,
   formatCoachLoad,
 } from '@/utils/darwinCoachLoading'
+import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
 import '../StationCard/StationCard.css'
 import '../StationCardActionBar/StationCardActionBar.css'
 import '@/components/buttons/base/BUTBaseButton/BUTBaseButton.css'
+import '@/components/darwin/callingPatternTones.css'
 import './DarwinServiceCard.css'
 
 type DarwinServiceCardProps = {
@@ -25,14 +27,16 @@ type DarwinServiceCardProps = {
   ariaLabel: string
 }
 
-type StatusTone = 'ontime' | 'delayed' | 'cancelled' | 'snapshot'
+type StatusTone = CallingPatternTone | 'snapshot'
 
-const STATUS_COLOR: Record<StatusTone, ButtonColorVariant> = {
+const STATUS_COLOR: Record<'ontime' | 'delayed' | 'cancelled' | 'snapshot', ButtonColorVariant> = {
   ontime: 'green-action',
   delayed: 'fav-action',
   cancelled: 'red-action',
   snapshot: 'primary',
 }
+
+const COACH_STATUS_COLOR: Record<string, ButtonColorVariant> = STATUS_COLOR
 
 function formatDelayAbs(minutes: number): string {
   return `${Math.abs(minutes)}m`
@@ -107,6 +111,18 @@ function buildFormation(row: DepartureRow): string | null {
   return units ? `Formed of ${carriagePhrase} by ${units}` : `Formed of ${carriagePhrase}`
 }
 
+function delayedWithReasonAndEta(row: DepartureRow): string {
+  const reason = (row.delayReason?.reason || '').replace(/\s+/g, ' ').trim()
+  const eta = row.liveTime ? String(row.liveTime).slice(0, 5) : ''
+  const detail = [reason, eta ? `exp ${eta}` : ''].filter(Boolean).join(' · ')
+  return detail ? `Delayed\u00a0|\u00a0${detail}` : 'Delayed'
+}
+
+function punctualityTone(delayMinutes: number | null, fallback: CallingPatternTone = 'delay-1'): CallingPatternTone {
+  if (delayMinutes != null && delayMinutes >= 1) return delayMinutesTone(delayMinutes)
+  return fallback
+}
+
 function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: boolean): {
   tone: StatusTone
   label: string
@@ -124,16 +140,16 @@ function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: b
   const isActual = row.liveKind === 'actual' || row.liveKind === 'actual-arr'
   if (isActual) {
     if (delayMinutes != null && delayMinutes < 0) {
-      return { tone: 'ontime', label: `${verb} ${formatDelayAbs(delayMinutes)} early`, mode }
+      return { tone: 'early', label: `${verb} ${formatDelayAbs(delayMinutes)} early`, mode }
     }
     if (delayMinutes != null && delayMinutes > 0) {
-      return { tone: 'delayed', label: `${verb} ${formatDelayAbs(delayMinutes)} late`, mode }
+      return { tone: punctualityTone(delayMinutes), label: `${verb} ${formatDelayAbs(delayMinutes)} late`, mode }
     }
     return { tone: 'ontime', label: 'On Time', mode }
   }
 
   if (row.unknownDelay || row.manualUnknownDelay) {
-    return { tone: 'delayed', label: 'Delayed', mode }
+    return { tone: punctualityTone(delayMinutes, 'delay-16'), label: delayedWithReasonAndEta(row), mode }
   }
 
   if (historicalMode && (row.liveKind === 'scheduled' || row.liveKind === 'working')) {
@@ -151,8 +167,11 @@ function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: b
       row.liveTime !== row.scheduledTime)
 
   if (expectedOffSchedule) {
-    const expected = row.liveTime ? `Delayed | Expected at ${row.liveTime}` : 'Delayed'
-    return { tone: 'delayed', label: expected, mode }
+    const expected = delayedWithReasonAndEta(row)
+    if (delayMinutes != null && delayMinutes < 0) {
+      return { tone: 'early', label: expected, mode }
+    }
+    return { tone: punctualityTone(delayMinutes), label: expected, mode }
   }
 
   return { tone: 'ontime', label: 'On Time', mode }
@@ -213,9 +232,9 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
             'rs-button--squared',
             'rs-button--active',
             'rs-button--width-fill',
-            `rs-button--color-${STATUS_COLOR[status.tone]}`,
             'rs-station-card-action-bar__visit',
             'rs-service-card__status',
+            `rs-service-card__status--${status.tone}`,
           ].join(' ')}
         >
           <span className="rs-service-card__status-label">{status.label}</span>
@@ -245,7 +264,7 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
                       className={[
                         coachClassName(index, visibleCoaches),
                         tone
-                          ? `rs-service-card__coach--load-${tone} rs-button--color-${STATUS_COLOR[tone]}`
+                          ? `rs-service-card__coach--load-${tone} rs-button--color-${COACH_STATUS_COLOR[tone] || 'fav-action'}`
                           : '',
                       ]
                         .filter(Boolean)

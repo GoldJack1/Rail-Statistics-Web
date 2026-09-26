@@ -6,7 +6,7 @@ import { ArrowsClockwise, ChartBar, Code, Info, MapPin, Train } from '@phosphor-
 
 import { useServiceDetail } from '@/hooks/useServiceDetail'
 import { useStations } from '@/hooks/useStations'
-import { BUTBaseButton, BUTCircleButton, BUTWideButton } from '@/components/buttons'
+import { BUTBaseButton, BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import { TextCard } from '@/components/cards'
 import { CarriageMap } from '@/components/darwin/CarriageMap'
@@ -83,20 +83,22 @@ function stopTplFromBackLink(from: string, stops: ServiceDetail['stops'], origin
 }
 
 function formatAge(ms: number | null): string {
-  if (ms == null) return '—'
+  if (ms == null) return 'just now'
   const s = Math.floor(ms / 1000)
+  if (s < 5) return 'just now'
   if (s < 60) return `${s}s ago`
   const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
+  if (m < 60) return m === 1 ? '1 min ago' : `${m} min ago`
   const h = Math.floor(m / 60)
-  return `${h}h ago`
+  return h === 1 ? '1 hr ago' : `${h} hr ago`
 }
 
 function formatDateOnly(date: string): string {
-  const d = new Date(date)
+  const d = new Date(`${date}T12:00:00`)
   if (Number.isNaN(d.getTime())) return date
   return d.toLocaleDateString('en-GB', {
-    day: '2-digit',
+    weekday: 'short',
+    day: 'numeric',
     month: 'short',
     year: 'numeric',
   })
@@ -292,14 +294,22 @@ const ServiceDetailPage: React.FC = () => {
   const subtitle = useMemo(() => {
     const serviceDate = data?.ssd ? formatDateOnly(data.ssd) : null
     const histDate = data?.historicalDate ? formatDateOnly(data.historicalDate) : null
-    const dateText = histDate
-      ? `Service date ${serviceDate || '—'} · Viewing ${histDate}`
-      : serviceDate
-        ? `Service date ${serviceDate}`
-        : ''
-    if (status === 'ok')        return `${historicalMode ? 'Historical snapshot' : (futureTimetableMode ? 'Timetable view' : `Live · updated ${formatAge(ageMs)}`)}${dateText ? `\n${dateText}` : ''}`
-    if (status === 'stale')     return `${historicalMode ? 'Historical snapshot' : (futureTimetableMode ? 'Timetable view' : `Stale · ${formatAge(ageMs)}`)}${dateText ? `\n${dateText}` : ''}`
-    if (status === 'loading')   return `Loading service detail…${dateText ? `\n${dateText}` : ''}`
+    const dateText = histDate && serviceDate && histDate !== serviceDate
+      ? `${histDate} · booked ${serviceDate}`
+      : histDate || serviceDate || ''
+    const liveLine = historicalMode
+      ? 'Snapshot'
+      : futureTimetableMode
+        ? 'Timetable'
+        : `Live · ${formatAge(ageMs)}`
+    const staleLine = historicalMode
+      ? 'Snapshot'
+      : futureTimetableMode
+        ? 'Timetable'
+        : `Last update ${formatAge(ageMs)}`
+    if (status === 'ok')        return `${liveLine}${dateText ? `\n${dateText}` : ''}`
+    if (status === 'stale')     return `${staleLine}${dateText ? `\n${dateText}` : ''}`
+    if (status === 'loading')   return `Loading…${dateText ? `\n${dateText}` : ''}`
     if (status === 'error')     return error ? `Error: ${error}` : 'Service unavailable'
     if (status === 'not-found') return 'Service not found'
     return dateText
@@ -334,13 +344,16 @@ const ServiceDetailPage: React.FC = () => {
             >
               Back
             </BUTWideButton>
-            <BUTCircleButton
-              ariaLabel="Refresh service detail"
+            <BUTWideButton
+              width="hug"
               instantAction
               colorVariant="primary"
               onClick={refetch}
               icon={<ArrowsClockwise size={16} aria-hidden />}
-            />
+              ariaLabel="Refresh service detail"
+            >
+              Refresh
+            </BUTWideButton>
           </div>
           <ServiceViewModeToggle
             className="svc-viewmode-switch--header"
@@ -373,9 +386,6 @@ const ServiceDetailPage: React.FC = () => {
           <section className="modal-section">
             <StationSectionTitle title="Service unavailable" icon={Info} pageHeading />
             <p className="edit-hint kb-source-hint">{error}</p>
-            <p className="edit-hint kb-source-hint kb-source-hint--continued">
-              Is the daemon running? Start it with <code>npm run devdarwin</code> from the repo root.
-            </p>
           </section>
         )}
 
@@ -553,6 +563,8 @@ const ServiceDetailPage: React.FC = () => {
                 boardDate={historicalDate || data.ssd || null}
                 historical={!!data.historicalDate}
                 returnTo={`/services/${encodeURIComponent(data.rid)}${location.search || ''}`}
+                delayReason={data.delayReason?.reason}
+                alertText={data.alerts?.[0]?.text}
               />
             </section>
         )}

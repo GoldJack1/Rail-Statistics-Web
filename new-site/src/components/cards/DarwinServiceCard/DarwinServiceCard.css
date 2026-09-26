@@ -115,6 +115,42 @@
   cursor: inherit;
 }
 
+.rs-service-card__status--early {
+  --button-bg-active: var(--cp-early-bg);
+  --button-text-active: var(--cp-early-fg);
+  color: var(--cp-early-fg);
+}
+.rs-service-card__status--ontime {
+  --button-bg-active: var(--cp-ontime-bg);
+  --button-text-active: var(--cp-ontime-fg);
+  color: var(--cp-ontime-fg);
+}
+.rs-service-card__status--delay-1 {
+  --button-bg-active: var(--cp-delay-1-bg);
+  --button-text-active: var(--cp-delay-1-fg);
+  color: var(--cp-delay-1-fg);
+}
+.rs-service-card__status--delay-16 {
+  --button-bg-active: var(--cp-delay-16-bg);
+  --button-text-active: var(--cp-delay-16-fg);
+  color: var(--cp-delay-16-fg);
+}
+.rs-service-card__status--delay-30 {
+  --button-bg-active: var(--cp-delay-30-bg);
+  --button-text-active: var(--cp-delay-30-fg);
+  color: var(--cp-delay-30-fg);
+}
+.rs-service-card__status--delay-60 {
+  --button-bg-active: var(--cp-delay-60-bg);
+  --button-text-active: var(--cp-delay-60-fg);
+  color: var(--cp-delay-60-fg);
+}
+.rs-service-card__status--cancelled {
+  --button-bg-active: var(--cp-cancelled-bg);
+  --button-text-active: var(--cp-cancelled-fg);
+  color: var(--cp-cancelled-fg);
+}
+
 .rs-service-card__status-label,
 .rs-service-card__status-mode {
   position: relative;
@@ -125,10 +161,11 @@
 }
 
 .rs-service-card__status-label {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
-  overflow-wrap: anywhere;
-  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-align: left;
 }
 
