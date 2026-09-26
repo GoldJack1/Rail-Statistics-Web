@@ -11,6 +11,7 @@ export type UnitDetailStatus =
 
 export interface UseUnitDetailOptions {
   unitId: string
+  date?: string
 }
 
 export interface UseUnitDetailResult {
@@ -28,6 +29,10 @@ type UnitDetailCacheEntry = {
 const unitDetailCache = new Map<string, UnitDetailCacheEntry>()
 const UNIT_DETAIL_CACHE_TTL_MS = 5 * 60_000
 
+function unitDetailCacheKey(unitId: string, date?: string): string {
+  return `${unitId}|${date || ''}`
+}
+
 function userMessageForStatus(status: number): string {
   if (status === 401 || status === 403) return 'Access to unit data is currently restricted.'
   if (status === 404) return 'Unit not found.'
@@ -35,7 +40,7 @@ function userMessageForStatus(status: number): string {
   return `Request failed (${status}).`
 }
 
-export function useUnitDetail({ unitId }: UseUnitDetailOptions): UseUnitDetailResult {
+export function useUnitDetail({ unitId, date }: UseUnitDetailOptions): UseUnitDetailResult {
   const [data, setData] = useState<UnitDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<UnitDetailStatus>('idle')
@@ -49,7 +54,8 @@ export function useUnitDetail({ unitId }: UseUnitDetailOptions): UseUnitDetailRe
       return
     }
 
-    const cached = unitDetailCache.get(unitId)
+    const cacheKey = unitDetailCacheKey(unitId, date)
+    const cached = unitDetailCache.get(cacheKey)
     if (cached && Date.now() - cached.cachedAtMs <= UNIT_DETAIL_CACHE_TTL_MS) {
       setData(cached.detail)
       setError(null)
@@ -60,10 +66,11 @@ export function useUnitDetail({ unitId }: UseUnitDetailOptions): UseUnitDetailRe
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
-    setStatus('loading')
+    setStatus((prev) => (prev === 'ok' ? 'ok' : 'loading'))
 
     try {
-      const res = await fetchDarwin(`/api/darwin/unit/${encodeURIComponent(unitId)}`, { signal: ac.signal })
+      const qs = date ? `?date=${encodeURIComponent(date)}` : ''
+      const res = await fetchDarwin(`/api/darwin/unit/${encodeURIComponent(unitId)}${qs}`, { signal: ac.signal })
       if (res.status === 404) {
         const body = await res.json().catch(() => ({}))
         setStatus('not-found')
@@ -73,7 +80,7 @@ export function useUnitDetail({ unitId }: UseUnitDetailOptions): UseUnitDetailRe
       }
       if (!res.ok) throw new Error(userMessageForStatus(res.status))
       const detail: UnitDetail = await res.json()
-      unitDetailCache.set(unitId, { detail, cachedAtMs: Date.now() })
+      unitDetailCache.set(cacheKey, { detail, cachedAtMs: Date.now() })
       setData(detail)
       setError(null)
       setStatus('ok')
@@ -82,7 +89,7 @@ export function useUnitDetail({ unitId }: UseUnitDetailOptions): UseUnitDetailRe
       setError((e as Error)?.message || 'Could not load unit detail.')
       setStatus('error')
     }
-  }, [unitId])
+  }, [unitId, date])
 
   useEffect(() => {
     fetchOnce()
@@ -91,4 +98,3 @@ export function useUnitDetail({ unitId }: UseUnitDetailOptions): UseUnitDetailRe
 
   return { status, data, error, refetch: fetchOnce }
 }
-

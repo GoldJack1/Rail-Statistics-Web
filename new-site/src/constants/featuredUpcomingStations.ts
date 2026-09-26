@@ -94,7 +94,7 @@ export const FEATURED_UPCOMING_STATIONS: FeaturedUpcomingStation[] = [
     toc: 'Transport for Wales',
     country: 'Wales',
     county: 'Cardiff',
-    dateOpened: '2027',
+    dateOpened: '13/12/2026',
   }),
   createPlaceholderStation({
     id: 'upcoming-4',

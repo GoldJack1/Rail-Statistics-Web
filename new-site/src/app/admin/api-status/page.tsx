@@ -69,9 +69,7 @@ type HealthPayload = {
     fileSizeBytes?: number
     fileBytes?: number
     jsonFileBytes?: number
-    store?: 'json' | 'sqlite'
-    jsonWrite?: boolean
-    sqliteWrite?: boolean
+    store?: 'sqlite'
     sqlite?: {
       path?: string
       bytes?: number | null
@@ -81,11 +79,7 @@ type HealthPayload = {
       exists?: boolean
       error?: string | null
     }
-    lastLoad?: { source?: string | null; ms?: number | null; at?: string | null; fallback?: boolean }
-    loadBySource?: {
-      json?: CatalogLoadStats | null
-      sqlite?: CatalogLoadStats | null
-    }
+    lastLoad?: { source?: string | null; ms?: number | null; at?: string | null }
   }
   warmup?: {
     enabled?: boolean
@@ -98,18 +92,6 @@ type HealthPayload = {
     errors?: number
   }
   history?: { retentionDays?: number; dates?: string[] }
-}
-
-type CatalogLoadStats = {
-  source?: string
-  at?: string
-  ms?: number
-  units?: number
-  bytes?: number | null
-  blobBytes?: number | null
-  heapMB?: number
-  rssMB?: number
-  error?: string
 }
 
 type HistoryDatesPayload = {
@@ -239,7 +221,6 @@ const ApiStatusPage: React.FC = () => {
 
   const summary = useMemo(() => {
     const stateBytes = pickNumber(health?.persistence?.fileSizeBytes, health?.persistence?.stateFileBytes)
-    const jsonBytes = pickNumber(health?.unitCatalog?.jsonFileBytes, health?.unitCatalog?.fileSizeBytes, health?.unitCatalog?.fileBytes)
     const sqliteBytes = pickNumber(health?.unitCatalog?.sqlite?.bytes, health?.unitCatalog?.sqlite?.blobBytes)
     const uptimeFromNumericMs = pickNumber(
       health?.uptimeMs,
@@ -285,15 +266,12 @@ const ApiStatusPage: React.FC = () => {
       ptacConsistsToday: formatNum(health?.ptac?.consistsOnLoadedDate),
       kafkaLastMessageAt: health?.kafka?.lastKafkaMsgAt || '-',
       stateCacheFileName: health?.persistence?.stateFile || '-',
-      unitCatalogFileName: health?.unitCatalog?.file || '-',
       stateCacheFileSize: formatBytes(stateBytes),
-      unitCatalogFileSize: formatBytes(jsonBytes),
       sqliteFileSize: formatBytes(sqliteBytes),
       sqliteBlobSize: formatBytes(health?.unitCatalog?.sqlite?.blobBytes),
       lastLoadSource: health?.unitCatalog?.lastLoad?.source || '-',
       lastLoadMs: health?.unitCatalog?.lastLoad?.ms != null ? `${health.unitCatalog.lastLoad.ms} ms` : '-',
       lastLoadAt: health?.unitCatalog?.lastLoad?.at || '-',
-      lastLoadFallback: health?.unitCatalog?.lastLoad?.fallback ? 'Yes' : 'No',
       liveCachesReady: health?.liveCachesReady ? 'Yes' : 'No',
       clientReads: health?.clientReadsAllowed ? 'Yes' : 'No',
       warmup: health?.warmup
@@ -329,13 +307,12 @@ const ApiStatusPage: React.FC = () => {
         <section className="api-panel" aria-label="Unit catalog">
           <h2>Unit catalog</h2>
           <p className="api-panel-subtitle">
-            Stored in SQLite only. The old unit-catalog.json file may still be on disk as a backup and is not updated.
+            Stored in SQLite only.
           </p>
           <div className="api-status-grid">
             <Card title="Store">SQLite</Card>
             <Card title="Last load source">{summary.lastLoadSource}</Card>
             <Card title="Last load time">{summary.lastLoadMs}</Card>
-            <Card title="Fell back">{summary.lastLoadFallback}</Card>
             <Card title="SQLite file">{summary.sqliteFileSize}</Card>
             <Card title="SQLite blob">{summary.sqliteBlobSize}</Card>
             <Card title="Catalog units">{summary.unitCatalog}</Card>
@@ -396,12 +373,11 @@ const ApiStatusPage: React.FC = () => {
 
         <section className="api-panel" aria-label="Cache file details">
           <h2>Cache files</h2>
-          <p className="api-panel-subtitle">On-disk footprint for live state and the SQLite unit catalog. unit-catalog.json is a leftover backup if present.</p>
+          <p className="api-panel-subtitle">On-disk footprint for live state and the SQLite unit catalog.</p>
           <div className="api-status-grid">
             <Card title="State cache filename">{summary.stateCacheFileName}</Card>
             <Card title="State cache file">{summary.stateCacheFileSize}</Card>
             <Card title="SQLite catalog">{summary.sqliteFileSize}</Card>
-            <Card title="Leftover JSON backup">{summary.unitCatalogFileSize}</Card>
           </div>
         </section>
 

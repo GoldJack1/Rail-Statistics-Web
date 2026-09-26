@@ -25,6 +25,7 @@ import { paramAsString } from '@/utils/nextParams'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { peekHotHealth, peekHotHistoryDates } from '@/utils/darwinHotCache'
 import { prefetchDarwinService } from '@/hooks/useServiceDetail'
+import { formatLmTocName } from '@/utils/formatLmTocName'
 import { isoDateToDdMmYyyy } from '@/utils/dateDdMmYyyy'
 import {
   filterStationsLikeFaresSearch,
@@ -336,7 +337,7 @@ const BOARD_MODE_LABELS: Record<BoardModeFilter, string> = {
 const UNKNOWN_TOC_LABEL = 'Unknown'
 
 function tocFilterLabel(row: DepartureRow): string {
-  const label = row.tocName || row.toc
+  const label = formatLmTocName(row.tocName, row.toc, row.originCrs, row.destinationCrs)
   return label && label.trim() ? label : UNKNOWN_TOC_LABEL
 }
 
@@ -674,7 +675,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
 
   const loadingOverlays = useBoardCoachLoading(
     activeFilteredRows,
-    hasStationSelected && showFormation && !futureTimetableMode,
+    hasStationSelected && showFormation && !futureTimetableMode && !historicalMode,
     historicalMode ? historyDate : undefined,
     historicalMode ? historyTime : undefined,
   )
@@ -686,7 +687,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
 
   useEffect(() => {
     if (!historicalMode || boardRows.length === 0) return
-    for (const row of boardRows.slice(0, 8)) {
+    for (const row of boardRows.slice(0, 2)) {
       prefetchDarwinService(row.rid, historyDate || undefined, historyTime || undefined)
     }
   }, [historicalMode, historyDate, historyTime, boardRows])

@@ -24,6 +24,7 @@ import SidebarDropdownSection from '@/components/misc/SidebarDropdownSection/Sid
 import type { ServiceDetail } from '@/types/darwin'
 import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
 import { paramAsString } from '@/utils/nextParams'
+import { formatLmTocName } from '@/utils/formatLmTocName'
 import { stopHasPublishedLoading } from '@/utils/darwinCoachLoading'
 import './ServiceDetailPage.css'
 
@@ -439,7 +440,15 @@ const ServiceDetailPage: React.FC = () => {
               ))}
 
               <div className="modal-details-grid">
-                <StationDetailField label="Operator" value={data.tocName || data.toc} />
+                <StationDetailField
+                  label="Operator"
+                  value={formatLmTocName(
+                    data.tocName,
+                    data.toc,
+                    data.stops[0]?.crs,
+                    data.stops[data.stops.length - 1]?.crs,
+                  )}
+                />
                 <StationDetailField label="Headcode" value={data.trainId} />
                 <StationDetailField label="Origin" value={data.originName || data.origin} />
                 <StationDetailField label="Destination" value={data.destinationName || data.destination} />

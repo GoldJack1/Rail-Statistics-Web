@@ -19,13 +19,13 @@ describe('featured newest mainline station', () => {
 
   it('links to its station detail page', () => {
     expect(buildStationPath(FEATURED_NEWEST_MAINLINE_STATION)).toBe(
-      'gb-national-rail/okehampton-interchange'
+      'gb-national-rail/balgray'
     )
   })
 
   it('has the locale fields the card location line needs', () => {
     expect(formatStationLocationDisplay(FEATURED_NEWEST_MAINLINE_STATION)).toBe(
-      'West Devon, Devon, England'
+      'East Renfrewshire, Scotland'
     )
   })
 

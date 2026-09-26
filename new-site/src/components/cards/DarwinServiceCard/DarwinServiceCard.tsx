@@ -3,6 +3,7 @@
 import React from 'react'
 import type { ButtonColorVariant } from '@/components/buttons'
 import type { DepartureRow } from '@/types/darwin'
+import { formatLmTocName } from '@/utils/formatLmTocName'
 import {
   coachCountFromRow,
   coachLoadTone,
@@ -41,6 +42,9 @@ function carriageCount(row: DepartureRow): number | null {
   return coachCountFromRow(row)
 }
 
+function formatOperatorLabel(row: DepartureRow): string {
+  return formatLmTocName(row.tocName, row.toc, row.originCrs, row.destinationCrs)
+}
 function formatUnitList(unitIds: string[]): string {
   if (unitIds.length <= 2) return unitIds.join(' & ')
   const head = unitIds.slice(0, -1).join(', ')
@@ -117,14 +121,6 @@ function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: b
     return { tone: 'cancelled', label: 'Cancelled', mode }
   }
 
-  if (historicalMode && (row.liveKind === 'scheduled' || row.liveKind === 'working')) {
-    return { tone: 'snapshot', label: 'Snapshot', mode }
-  }
-
-  if (row.unknownDelay || row.manualUnknownDelay) {
-    return { tone: 'delayed', label: 'Delayed', mode }
-  }
-
   const isActual = row.liveKind === 'actual' || row.liveKind === 'actual-arr'
   if (isActual) {
     if (delayMinutes != null && delayMinutes < 0) {
@@ -134,6 +130,18 @@ function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: b
       return { tone: 'delayed', label: `${verb} ${formatDelayAbs(delayMinutes)} late`, mode }
     }
     return { tone: 'ontime', label: 'On Time', mode }
+  }
+
+  if (row.unknownDelay || row.manualUnknownDelay) {
+    return { tone: 'delayed', label: 'Delayed', mode }
+  }
+
+  if (historicalMode && (row.liveKind === 'scheduled' || row.liveKind === 'working')) {
+    const scheduledAt = Date.parse(row.scheduledAt)
+    const alreadyRun = Number.isFinite(scheduledAt) && scheduledAt < Date.now() - 60_000
+    if (alreadyRun) {
+      return { tone: 'ontime', label: verb, mode }
+    }
   }
 
   const expectedOffSchedule =
@@ -168,7 +176,7 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
   onClick,
   ariaLabel,
 }) => {
-  const operator = row.tocName || row.toc || 'Unknown Operator'
+  const operator = formatOperatorLabel(row)
   const headline = buildHeadline(row)
   const meta = buildMeta(row, detailedInfo, historicalMode)
   const formation = buildFormation(row)

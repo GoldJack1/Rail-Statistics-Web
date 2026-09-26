@@ -458,6 +458,7 @@ export interface UnitDetail {
   endOfDayMileageByDate?: Record<string, number>;
   lastEndOfDayMiles?: number | null;
   updatedAt: string;
+  latestService?: ServiceDetail | null;
   services: Array<{
     rid: string;
     headcode: string | null;

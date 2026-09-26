@@ -14,20 +14,20 @@ import type { Station } from '@/types'
 
 /** GB National Rail id 2598. */
 export const FEATURED_NEWEST_MAINLINE_STATION: Station = {
-  id: '2598',
-  stationName: 'Okehampton Interchange',
-  crsCode: 'OKI',
-  tiploc: 'OKHMPIC',
-  latitude: 50.74343489687478,
-  longitude: -3.9759564428719645,
-  country: 'England',
-  county: 'Devon',
-  borough: 'West Devon',
-  toc: 'Great Western Railway',
+  id: '2599',
+  stationName: 'Balgray',
+  crsCode: '',
+  tiploc: '',
+  latitude: 0,
+  longitude: 0,
+  country: 'Scotland',
+  county: 'East Renfrewshire',
+  borough: '',
+  toc: 'ScotRail',
   stnarea: 'GBNR',
-  urlSlug: 'okehampton-interchange',
+  urlSlug: 'balgray',
   sourceCollectionId: 'stations_gbnr',
-  dateOpened: '01/08/2025',
+  dateOpened: '27/09/2026',
   yearlyPassengers: null,
 }
 

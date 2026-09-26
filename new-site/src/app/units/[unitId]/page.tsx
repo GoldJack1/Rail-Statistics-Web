@@ -126,7 +126,8 @@ const UnitLookupPage: React.FC = () => {
   const todayUk = useMemo(() => getTodayUkDateYmd(), [])
   const hasUnitDayQuery = query.has('unitDay')
   const selectedDay = query.get('unitDay') || todayUk
-  const { status, data, error } = useUnitDetail({ unitId })
+  const unitDateParam = selectedDay !== 'all' ? selectedDay : undefined
+  const { status, data, error } = useUnitDetail({ unitId, date: unitDateParam })
   const [latestService, setLatestService] = useState<ServiceDetail | null>(null)
   const [latestServiceError, setLatestServiceError] = useState<string | null>(null)
   const [snapshotMileageByDay, setSnapshotMileageByDay] = useState<Record<string, number>>({})
@@ -302,9 +303,14 @@ const UnitLookupPage: React.FC = () => {
 
   useEffect(() => {
     if (!shouldFetchLatestService) return
-    setLatestServiceError(null)
     const rid = latestRidForSelection
     if (!rid) return
+    if (data?.latestService?.rid === rid) {
+      setLatestService(data.latestService)
+      setLatestServiceError(null)
+      return
+    }
+    setLatestServiceError(null)
 
     const ac = new AbortController()
     const dateFromDay = selectedDay !== 'all' ? selectedDay : darwinRidToIsoDate(rid)
@@ -330,7 +336,7 @@ const UnitLookupPage: React.FC = () => {
       })
 
     return () => ac.abort()
-  }, [latestRidForSelection, selectedDay, shouldFetchLatestService])
+  }, [latestRidForSelection, selectedDay, shouldFetchLatestService, data?.latestService])
 
   useEffect(() => {
     setActiveTab('overview')
@@ -342,25 +348,20 @@ const UnitLookupPage: React.FC = () => {
   useEffect(() => {
     if (!unitId || status !== 'ok' || !data) return
     const ac = new AbortController()
-    const t = window.setTimeout(() => {
-      fetchDarwin('/api/darwin/units/catalog', { signal: ac.signal })
-        .then((res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          return res.json()
-        })
-        .then((payload: UnitCatalogResponse) => {
-          const units = Array.isArray(payload.units) ? payload.units : []
-          const match = units.find((u) => (u.unitId || '').trim().toUpperCase() === unitId)
-          setCatalogUnit(match || null)
-        })
-        .catch((e) => {
-          if ((e as Error)?.name === 'AbortError') return
-        })
-    }, 900)
-    return () => {
-      window.clearTimeout(t)
-      ac.abort()
-    }
+    fetchDarwin('/api/darwin/units/catalog', { signal: ac.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
+      .then((payload: UnitCatalogResponse) => {
+        const units = Array.isArray(payload.units) ? payload.units : []
+        const match = units.find((u) => (u.unitId || '').trim().toUpperCase() === unitId)
+        setCatalogUnit(match || null)
+      })
+      .catch((e) => {
+        if ((e as Error)?.name === 'AbortError') return
+      })
+    return () => ac.abort()
   }, [unitId, status, data])
 
   useEffect(() => {
