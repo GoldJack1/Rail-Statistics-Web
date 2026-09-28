@@ -646,7 +646,7 @@
   .svc-stops-table .svc-stops-table__status {
     width: 8.5rem;
     min-width: 0;
-    white-space: nowrap;
+    white-space: normal;
     line-height: 1.25;
     padding-left: var(--space-sm);
     padding-right: var(--space-xs);
@@ -654,10 +654,31 @@
   }
 
   .svc-stops-table .svc-eta-full { display: none; }
-  .svc-stops-table .svc-eta-short { display: inline; }
+  .svc-stops-table .svc-eta-short { display: block; }
 
   .svc-stops-table .svc-stops-table__status--note {
     width: 8.5rem;
+    white-space: normal;
+    overflow: visible;
+  }
+
+  .svc-stops-table .svc-stops-table__status-line {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    overflow: visible;
+    white-space: normal;
+  }
+
+  .svc-stops-table .svc-stops-table__status-sep {
+    display: none;
+  }
+
+  .svc-stops-table .svc-stops-table__status-note {
+    overflow: visible;
+    text-overflow: unset;
+    white-space: nowrap;
   }
 
   .svc-stops-table thead th:last-child.svc-stops-table__status,
@@ -756,12 +777,13 @@
   }
 
   .stations-table.svc-stops-table.svc-stops-table--detailed tbody tr.stations-table__row > .svc-stops-table__status--note {
-    flex-direction: row;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
   }
 
   .stations-table.svc-stops-table.svc-stops-table--detailed .svc-stops-table__status--note .svc-stops-table__status-main {
-    display: inline;
+    display: block;
     flex: 0 0 auto;
   }
 

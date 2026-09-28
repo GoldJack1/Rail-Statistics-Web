@@ -98,10 +98,13 @@ function buildMeta(row: DepartureRow, detailedInfo: boolean, historicalMode: boo
   return parts.length > 0 ? parts.join(' | ') : null
 }
 
-function buildFormation(row: DepartureRow): string | null {
+function buildFormation(row: DepartureRow, historicalMode: boolean): string | null {
   const count = carriageCount(row)
   const units = unitLabel(row)
-  if (count == null) return null
+  if (count == null) {
+    if (!historicalMode || !units) return null
+    return row.cancelled ? `Was formed of ${units}` : `Formed of ${units}`
+  }
   const carriagePhrase = `${count} carriage${count === 1 ? '' : 's'}`
   if (row.cancelled) {
     return units
@@ -219,12 +222,13 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
   const operator = formatOperatorLabel(row)
   const headline = buildHeadline(row)
   const meta = buildMeta(row, detailedInfo, historicalMode)
-  const formation = buildFormation(row)
+  const formation = buildFormation(row, historicalMode)
   const status = buildStatus(row, historicalMode, detailedInfo)
   const coachCount = carriageCount(row)
   const visibleCoaches = coachCount != null ? Math.min(coachCount, MAX_COACH_PILLS) : 0
   const loadValues = visibleCoaches > 0 ? coachLoadValues(row, visibleCoaches) : []
   const loadAsPercent = coachLoadUsesPercent(row, loadValues)
+  const showHistFormation = historicalMode && Boolean(formation)
 
   return (
     <article
@@ -298,9 +302,11 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
                     />
                   )
                 })
-              : <span className="rs-service-card__coach" />}
+              : historicalMode
+                ? null
+                : <span className="rs-service-card__coach" />}
           </div>
-          {detailedInfo ? (
+          {detailedInfo || showHistFormation ? (
             <p className="rs-service-card__formation">{formation || '\u00a0'}</p>
           ) : null}
         </section>

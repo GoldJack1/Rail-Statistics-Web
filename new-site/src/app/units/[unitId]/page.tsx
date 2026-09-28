@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter, usePathname, useSearchParams, useParams } from 'next/navigation'
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { CalendarBlank, Info, Train, WarningCircle } from '@phosphor-icons/react'
 
 import { BUTBaseButton, BUTWideButton } from '@/components/buttons'
@@ -25,6 +25,7 @@ import { useUnitDetail } from '@/hooks/useUnitDetail'
 import type { ServiceDetail } from '@/types/darwin'
 import { paramAsString } from '@/utils/nextParams'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
+import { peekHotUnitsCatalog } from '@/utils/darwinHotCache'
 import { stopHasPublishedLoading } from '@/utils/darwinCoachLoading'
 import { isPlausibleUnitOperatingDay, ukCalendarYmd } from '@/utils/unitOperatingDay'
 import './UnitLookupPage.css'
@@ -132,7 +133,6 @@ const UnitLookupPage: React.FC = () => {
   const [latestServiceError, setLatestServiceError] = useState<string | null>(null)
   const [snapshotMileageByDay, setSnapshotMileageByDay] = useState<Record<string, number>>({})
   const [catalogUnit, setCatalogUnit] = useState<UnitCatalogItem | null>(null)
-  const snapshotPrefetchAttemptedDaysRef = useRef<Set<string>>(new Set())
 
   const updateQuery = (updater: (next: URLSearchParams) => void) => {
     const next = new URLSearchParams(location.search)
@@ -215,26 +215,6 @@ const UnitLookupPage: React.FC = () => {
     return data.services.filter((svc) => (svc.start || '').slice(0, 10) === selectedDay)
   }, [data, selectedDay])
 
-  const latestRidByDay = useMemo(() => {
-    const byDay = new Map<string, string>()
-    const allServices = [
-      ...(data?.services || []),
-      ...(catalogUnit?.services || []).map((svc) => ({
-        rid: svc.rid || null,
-        start: svc.start || null,
-      })),
-    ]
-    const servicesByNewest = allServices
-      .slice()
-      .sort((a, b) => String(b.start || '').localeCompare(String(a.start || '')))
-    for (const svc of servicesByNewest) {
-      const day = (svc.start || '').slice(0, 10)
-      if (!day || !svc.rid) continue
-      if (!byDay.has(day)) byDay.set(day, svc.rid)
-    }
-    return byDay
-  }, [data?.services, catalogUnit?.services])
-
   const latestRidForSelection = useMemo(() => {
     if (!data) return null
     if (selectedDay === 'all') return data.lastSeenRid
@@ -305,11 +285,7 @@ const UnitLookupPage: React.FC = () => {
     if (!shouldFetchLatestService) return
     const rid = latestRidForSelection
     if (!rid) return
-    if (data?.latestService?.rid === rid) {
-      setLatestService(data.latestService)
-      setLatestServiceError(null)
-      return
-    }
+    setLatestService(null)
     setLatestServiceError(null)
 
     const ac = new AbortController()
@@ -336,17 +312,22 @@ const UnitLookupPage: React.FC = () => {
       })
 
     return () => ac.abort()
-  }, [latestRidForSelection, selectedDay, shouldFetchLatestService, data?.latestService])
+  }, [latestRidForSelection, selectedDay, shouldFetchLatestService])
 
   useEffect(() => {
     setActiveTab('overview')
     setSnapshotMileageByDay({})
     setCatalogUnit(null)
-    snapshotPrefetchAttemptedDaysRef.current = new Set()
   }, [unitId])
 
   useEffect(() => {
-    if (!unitId || status !== 'ok' || !data) return
+    if (!unitId) return
+    const pick = (units: UnitCatalogItem[]) =>
+      units.find((u) => (u.unitId || '').trim().toUpperCase() === unitId) || null
+    const hot = peekHotUnitsCatalog()
+    if (Array.isArray(hot?.units)) {
+      setCatalogUnit(pick(hot.units as UnitCatalogItem[]))
+    }
     const ac = new AbortController()
     fetchDarwin('/api/darwin/units/catalog', { signal: ac.signal })
       .then((res) => {
@@ -355,14 +336,13 @@ const UnitLookupPage: React.FC = () => {
       })
       .then((payload: UnitCatalogResponse) => {
         const units = Array.isArray(payload.units) ? payload.units : []
-        const match = units.find((u) => (u.unitId || '').trim().toUpperCase() === unitId)
-        setCatalogUnit(match || null)
+        setCatalogUnit(pick(units))
       })
       .catch((e) => {
         if ((e as Error)?.name === 'AbortError') return
       })
     return () => ac.abort()
-  }, [unitId, status, data])
+  }, [unitId])
 
   useEffect(() => {
     if (selectedDay === 'all') return
@@ -372,58 +352,6 @@ const UnitLookupPage: React.FC = () => {
       return { ...prev, [selectedDay]: snapshotMileageFallback }
     })
   }, [selectedDay, snapshotMileageFallback])
-
-  useEffect(() => {
-    if (!data?.unitId) return
-    const knownCatalogDays = new Set(mileageRows.map((row) => row.day))
-    const daysToFetch = availableDays.filter((day) => {
-      if (knownCatalogDays.has(day)) return false
-      if (snapshotPrefetchAttemptedDaysRef.current.has(day)) return false
-      return latestRidByDay.has(day)
-    })
-    if (daysToFetch.length === 0) return
-
-    for (const day of daysToFetch) snapshotPrefetchAttemptedDaysRef.current.add(day)
-
-    const ac = new AbortController()
-    let cancelled = false
-    const unitKey = data.unitId.trim().toUpperCase()
-
-    const loadSnapshotMileage = async () => {
-      for (const day of daysToFetch) {
-        if (cancelled) return
-        const rid = latestRidByDay.get(day)
-        if (!rid) continue
-        try {
-          const qp = new URLSearchParams({ date: day })
-          const res = await fetchDarwin(
-            `/api/darwin/service/${encodeURIComponent(rid)}?${qp.toString()}`,
-            { signal: ac.signal }
-          )
-          if (!res.ok) continue
-          const detail = (await res.json()) as ServiceDetail
-          const miles = (detail.consist?.allocations || [])
-            .flatMap((a) => a.resourceGroups || [])
-            .filter((g) => (g.unitId || '').trim().toUpperCase() === unitKey)
-            .map((g) => g.endOfDayMiles)
-            .find((m): m is number => typeof m === 'number' && Number.isFinite(m))
-          if (miles == null) continue
-          setSnapshotMileageByDay((prev) => {
-            if (prev[day] === miles) return prev
-            return { ...prev, [day]: miles }
-          })
-        } catch (e) {
-          if ((e as Error)?.name === 'AbortError') return
-        }
-      }
-    }
-
-    void loadSnapshotMileage()
-    return () => {
-      cancelled = true
-      ac.abort()
-    }
-  }, [data?.unitId, availableDays, mileageRows, latestRidByDay])
 
   useEffect(() => {
     if (availableDays.length === 0) {

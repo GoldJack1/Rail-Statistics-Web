@@ -325,6 +325,7 @@ const SERVICE_TYPE_LABELS: Record<DepartureServiceType, string> = {
   'rail-replacement': 'Rail replacement',
   other: 'Other',
 }
+const ALL_SERVICE_TYPES = Object.keys(SERVICE_TYPE_LABELS) as DepartureServiceType[]
 const STOP_MODE_OPTIONS: StopModeFilter[] = ['calling', 'passing']
 const STOP_MODE_LABELS: Record<StopModeFilter, string> = {
   calling: 'Stopping',
@@ -398,8 +399,8 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   const [searchMode, setSearchMode] = useState<StationSearchMode>('name')
   const [searchError, setSearchError] = useState<string | null>(null)
   const [historyDateError, setHistoryDateError] = useState<string | null>(null)
-  const [selectedTocs, setSelectedTocs] = useState<string[]>([])
-  const [selectedServiceTypes, setSelectedServiceTypes] = useState<DepartureServiceType[]>([])
+  const [tocSelection, setTocSelection] = useState<string[] | null>(null)
+  const [typeSelection, setTypeSelection] = useState<DepartureServiceType[] | null>(null)
   const [selectedStopModes, setSelectedStopModes] = useState<StopModeFilter[]>(STOP_MODE_OPTIONS)
   const [showDetailedInfo, setShowDetailedInfo] = useState(false)
   const [showFormation, setShowFormation] = useState(true)
@@ -623,21 +624,15 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
   }, [data, snapshotMovementRows])
 
-  const serviceTypeOptions = useMemo(() => {
-    if (!data) return []
-    const inFeedOrder = snapshotMovementRows
-      .map((row) => row.serviceType || 'other')
-      .filter((value, index, arr): value is DepartureServiceType => arr.indexOf(value) === index)
-    return inFeedOrder.sort((a, b) => SERVICE_TYPE_LABELS[a].localeCompare(SERVICE_TYPE_LABELS[b]))
-  }, [data, snapshotMovementRows])
+  const serviceTypeOptions = ALL_SERVICE_TYPES
+
+  const selectedTocs = tocSelection ?? tocOptions
+  const selectedServiceTypes = typeSelection ?? serviceTypeOptions
 
   useEffect(() => {
-    setSelectedTocs(tocOptions)
-  }, [tocOptions])
-
-  useEffect(() => {
-    setSelectedServiceTypes(serviceTypeOptions)
-  }, [serviceTypeOptions])
+    setTocSelection(null)
+    setTypeSelection(null)
+  }, [code, hours, historyDate, historyTime])
 
   useEffect(() => {
     setSelectedStopModes(STOP_MODE_OPTIONS)
@@ -686,7 +681,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   }, [activeFilteredRows, loadingOverlays])
 
   useEffect(() => {
-    if (!historicalMode || boardRows.length === 0) return
+    if (historicalMode || boardRows.length === 0) return
     for (const row of boardRows.slice(0, 2)) {
       prefetchDarwinService(row.rid, historyDate || undefined, historyTime || undefined)
     }
@@ -1103,7 +1098,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                         .map((toc) => tocOptions.indexOf(toc))
                         .filter((index) => index >= 0)}
                       onSelectionChanged={(_, selectedItems) => {
-                        setSelectedTocs(selectedItems)
+                        setTocSelection(selectedItems)
                       }}
                       colorVariant="primary"
                     />
@@ -1122,7 +1117,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                         const selected = selectedItems
                           .map((label) => serviceTypeOptions.find((type) => SERVICE_TYPE_LABELS[type] === label))
                           .filter((value): value is DepartureServiceType => Boolean(value))
-                        setSelectedServiceTypes(selected)
+                        setTypeSelection(selected)
                       }}
                       colorVariant="primary"
                     />
