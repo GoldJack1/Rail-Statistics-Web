@@ -329,7 +329,7 @@ const UnitLookupPage: React.FC = () => {
       setCatalogUnit(pick(hot.units as UnitCatalogItem[]))
     }
     const ac = new AbortController()
-    fetchDarwin('/api/darwin/units/catalog', { signal: ac.signal })
+    fetchDarwin(`/api/darwin/units/catalog?q=${encodeURIComponent(unitId)}&limit=8`, { signal: ac.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()

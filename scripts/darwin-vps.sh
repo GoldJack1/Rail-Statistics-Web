@@ -5,6 +5,7 @@ set -euo pipefail
 
 HOST="${DARWIN_VPS_HOST:-netcup-darwin}"
 SERVICE="${DARWIN_VPS_SERVICE:-darwin}"
+HEAVY_SERVICE="${DARWIN_VPS_HEAVY_SERVICE:-darwin-heavy}"
 REMOTE_DIR="${DARWIN_VPS_DIR:-/home/darwin/darwin-local-test}"
 
 usage() {
@@ -19,10 +20,10 @@ This script SSHs to host alias `netcup-darwin` for you.
   status      Service, memory, disk, local ping
   logs [N]    Last N journal lines (default 80)
   follow      Live daemon logs
-  start       Start darwin
-  stop        Stop darwin
-  restart     Restart darwin
-  health      Local /api/ping and a short /api/health
+  start       Start darwin + darwin-heavy
+  stop        Stop darwin + darwin-heavy
+  restart     Restart darwin + darwin-heavy
+  health      Local /api/ping on :4001 and :4002; short /api/health on :4002
   data        Disk use, history days, unit-catalog days
   fetch       Download today's PPTimetable files from GCS now
   reboot      Reboot the VPS (asks yes first)
@@ -59,44 +60,56 @@ case "$cmd" in
   status)
     need_host
     remote "set -e
-sudo systemctl status ${SERVICE} --no-pager -l | head -35
+sudo systemctl status ${SERVICE} --no-pager -l | head -20
 echo
-echo \"caddy: \$(systemctl is-active caddy 2>/dev/null || echo unknown)  darwin: \$(systemctl is-active ${SERVICE})\"
+sudo systemctl status ${HEAVY_SERVICE} --no-pager -l | head -20
+echo
+echo \"caddy: \$(systemctl is-active caddy 2>/dev/null || echo unknown)  live: \$(systemctl is-active ${SERVICE})  heavy: \$(systemctl is-active ${HEAVY_SERVICE})\"
 echo
 free -h
 echo
 df -h /
 echo
-curl -fsS --max-time 3 http://127.0.0.1:4001/api/ping || echo 'ping: not ready'"
+echo '--- live ping :4001 ---'
+curl -fsS --max-time 3 http://127.0.0.1:4001/api/ping || echo 'ping: not ready'
+echo
+echo '--- heavy ping :4002 ---'
+curl -fsS --max-time 3 http://127.0.0.1:4002/api/ping || echo 'ping: not ready'"
     ;;
   logs)
     need_host
     n="${1:-80}"
-    remote "sudo journalctl -u ${SERVICE} -n ${n} --no-pager"
+    remote "sudo journalctl -u ${SERVICE} -u ${HEAVY_SERVICE} -n ${n} --no-pager"
     ;;
   follow)
     need_host
-    remote_tty "sudo journalctl -u ${SERVICE} -f"
+    remote_tty "sudo journalctl -u ${SERVICE} -u ${HEAVY_SERVICE} -f"
     ;;
   start)
     need_host
-    remote "sudo systemctl start ${SERVICE} && systemctl is-active ${SERVICE}"
+    remote "sudo systemctl start ${SERVICE} ${HEAVY_SERVICE} && systemctl is-active ${SERVICE} ${HEAVY_SERVICE}"
     ;;
   stop)
     need_host
-    remote "sudo systemctl stop ${SERVICE} && systemctl is-active ${SERVICE} || true"
+    remote "sudo systemctl stop ${SERVICE} ${HEAVY_SERVICE} && systemctl is-active ${SERVICE} ${HEAVY_SERVICE} || true"
     ;;
   restart)
     need_host
-    remote "sudo systemctl restart ${SERVICE} && systemctl is-active ${SERVICE}"
+    remote "sudo systemctl restart ${SERVICE} ${HEAVY_SERVICE} && systemctl is-active ${SERVICE} ${HEAVY_SERVICE}"
     ;;
   health)
     need_host
-    remote "echo '--- ping ---'
+    remote "echo '--- live ping :4001 ---'
 curl -fsS --max-time 5 http://127.0.0.1:4001/api/ping || echo not-ready
 echo
-echo '--- health (truncated) ---'
-curl -fsS --max-time 12 http://127.0.0.1:4001/api/health | head -c 2000
+echo '--- heavy ping :4002 ---'
+curl -fsS --max-time 5 http://127.0.0.1:4002/api/ping || echo not-ready
+echo
+echo '--- window :4001 ---'
+curl -fsS --max-time 5 http://127.0.0.1:4001/api/window || echo not-ready
+echo
+echo '--- health :4002 (truncated) ---'
+curl -fsS --max-time 12 http://127.0.0.1:4002/api/health | head -c 2000
 echo"
     ;;
   data)

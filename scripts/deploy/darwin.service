@@ -1,0 +1,23 @@
+# Live Darwin (Kafka, live boards). Pair with darwin-heavy.service.
+[Unit]
+Description=Darwin live daemon (Kafka + boards)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=darwin
+Group=darwin
+WorkingDirectory=/home/darwin/darwin-local-test
+Environment=TZ=Europe/London
+Environment=DARWIN_ROLE=live
+Environment=DAEMON_PORT=4001
+EnvironmentFile=-/home/darwin/darwin-local-test/.env
+ExecStart=/usr/bin/node departures-daemon.mjs
+Restart=always
+RestartSec=5
+MemoryHigh=8G
+MemoryMax=10G
+
+[Install]
+WantedBy=multi-user.target

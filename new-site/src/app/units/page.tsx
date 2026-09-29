@@ -10,32 +10,29 @@ import { UnitCatalogCard } from '@/components/cards'
 import { PageTopHeader, SidebarDropdownSection, SidebarPanel } from '@/components/misc'
 import TXTINPBUTIconWideButtonSearch from '@/components/textInputButtons/special/TXTINPBUTIconWideButtonSearch'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
-import { peekHotUnitsCatalog } from '@/utils/darwinHotCache'
+import { useDebounce } from '@/hooks/useDebounce'
 import { isPlausibleUnitOperatingDay, ukCalendarYmd } from '@/utils/unitOperatingDay'
 import '@/styles/browsePageLayout.css'
 import './UnitsInServicePage.css'
 
-type UnitCatalogItem = {
+type LeanUnit = {
   unitId: string
   fleetId: string | null
-  endOfDayMileageByDate?: Record<string, number>
-  services?: Array<{ start?: string | null }>
+  serviceCount?: number
+  dayMiles?: number | null
+  lastEndOfDayMiles?: number | null
 }
 
-type UnitCatalogResponse = {
-  units: UnitCatalogItem[]
+type CatalogPage = {
+  units: LeanUnit[]
+  total?: number
+  nextCursor?: number | null
   updatedAt?: string
 }
 
-type UnitCatalogCacheEntry = {
-  data: UnitCatalogItem[]
-  updatedAt?: string
-  cachedAtMs: number
-}
+type FleetRow = { fleetId: string; unitCount: number }
 
-const unitsCatalogSWRCache = new Map<string, UnitCatalogCacheEntry>()
-const CATALOG_CACHE_KEY = 'units-catalog'
-const CATALOG_CACHE_MAX_AGE_MS = 5 * 60_000
+const PAGE_SIZE = 80
 const ALL_DAYS_LABEL = 'All units in collection'
 
 function formatDayLabel(isoDate: string): string {
@@ -44,25 +41,34 @@ function formatDayLabel(isoDate: string): string {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-function unitSubtitle(unit: UnitCatalogItem, selectedDay: string): string {
-  const mileageMap = unit.endOfDayMileageByDate || {}
-  if (selectedDay !== 'all' && selectedDay in mileageMap) {
-    const miles = mileageMap[selectedDay]
-    if (typeof miles === 'number') {
-      return `${miles.toLocaleString('en-GB')} miles on ${formatDayLabel(selectedDay)}`
-    }
+function unitSubtitle(unit: LeanUnit, selectedDay: string): string {
+  if (selectedDay !== 'all' && typeof unit.dayMiles === 'number') {
+    return `${unit.dayMiles.toLocaleString('en-GB')} miles on ${formatDayLabel(selectedDay)}`
   }
-  const serviceCount = (unit.services || []).length
+  const serviceCount = unit.serviceCount || 0
   if (selectedDay !== 'all') {
-    const dayServices = (unit.services || []).filter((svc) => (svc?.start || '').slice(0, 10) === selectedDay)
-    return `${dayServices.length} service${dayServices.length === 1 ? '' : 's'} on ${formatDayLabel(selectedDay)}`
+    return `${serviceCount} service${serviceCount === 1 ? '' : 's'} on ${formatDayLabel(selectedDay)}`
   }
   if (serviceCount > 0) return `${serviceCount} service${serviceCount === 1 ? '' : 's'} in collection`
-  const latestMileage = Object.entries(mileageMap).sort((a, b) => b[0].localeCompare(a[0]))[0]
-  if (latestMileage && typeof latestMileage[1] === 'number') {
-    return `${latestMileage[1].toLocaleString('en-GB')} miles · ${formatDayLabel(latestMileage[0])}`
+  if (typeof unit.lastEndOfDayMiles === 'number') {
+    return `${unit.lastEndOfDayMiles.toLocaleString('en-GB')} miles`
   }
   return 'In collection'
+}
+
+function catalogQuery(params: {
+  q: string
+  fleet: string | null
+  day: string
+  cursor: number
+}): string {
+  const qs = new URLSearchParams()
+  if (params.q) qs.set('q', params.q)
+  if (params.fleet) qs.set('fleet', params.fleet)
+  if (params.day && params.day !== 'all') qs.set('day', params.day)
+  qs.set('limit', String(PAGE_SIZE))
+  if (params.cursor) qs.set('cursor', String(params.cursor))
+  return `/api/darwin/units/catalog?${qs.toString()}`
 }
 
 const UnitsInServicePage: React.FC = () => {
@@ -70,19 +76,20 @@ const UnitsInServicePage: React.FC = () => {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const location = { pathname, search: searchParams.toString() ? `?${searchParams}` : '', state: null as unknown }
-  const [catalog, setCatalog] = useState<UnitCatalogItem[]>(() => {
-    const hot = peekHotUnitsCatalog()
-    return Array.isArray(hot?.units) ? (hot.units as UnitCatalogItem[]) : []
-  })
-  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>(() => (
-    peekHotUnitsCatalog()?.units ? 'ok' : 'loading'
-  ))
+  const [units, setUnits] = useState<LeanUnit[]>([])
+  const [total, setTotal] = useState(0)
+  const [nextCursor, setNextCursor] = useState<number | null>(null)
+  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
+  const [fleets, setFleets] = useState<FleetRow[]>([])
+  const [availableDays, setAvailableDays] = useState<string[]>([])
   const [selectedFleet, setSelectedFleet] = useState<string | null>(null)
   const query = useMemo(() => new URLSearchParams(location.search), [location.search])
   const selectedDay = query.get('unitDay') || 'all'
   const [searchInput, setSearchInput] = useState('')
+  const searchNeedle = useDebounce(searchInput.trim().toUpperCase(), 300)
   const [reloadToken, setReloadToken] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   const updateQuery = (updater: (next: URLSearchParams) => void) => {
     const next = new URLSearchParams(location.search)
@@ -103,21 +110,6 @@ const UnitsInServicePage: React.FC = () => {
     router.push(unitHref(next))
   }
 
-  const availableDays = useMemo(() => {
-    const todayYmd = ukCalendarYmd()
-    const dates = new Set<string>()
-    for (const unit of catalog) {
-      for (const d of Object.keys(unit.endOfDayMileageByDate || {})) {
-        if (isPlausibleUnitOperatingDay(d, todayYmd)) dates.add(d.slice(0, 10))
-      }
-      for (const svc of unit.services || []) {
-        const start = (svc?.start || '').slice(0, 10)
-        if (isPlausibleUnitOperatingDay(start, todayYmd)) dates.add(start)
-      }
-    }
-    return [...dates].sort((a, b) => b.localeCompare(a))
-  }, [catalog])
-
   const dayItems = useMemo(
     () => [ALL_DAYS_LABEL, ...availableDays.map((d) => formatDayLabel(d))],
     [availableDays]
@@ -129,112 +121,87 @@ const UnitsInServicePage: React.FC = () => {
     return idx >= 0 ? idx + 1 : 0
   }, [availableDays, selectedDay])
 
-  const dayFilteredCatalog = useMemo(() => {
-    const todayYmd = ukCalendarYmd()
-    const recentCatalog = catalog.filter((unit) => {
-      const mileageDays = Object.keys(unit.endOfDayMileageByDate || {})
-      const serviceDays = (unit.services || []).map((svc) => (svc?.start || '').slice(0, 10)).filter(Boolean)
-      const allDays = [...mileageDays, ...serviceDays]
-      if (allDays.length === 0) return true
-      return allDays.some((d) => isPlausibleUnitOperatingDay(d, todayYmd))
-    })
-    if (selectedDay === 'all') return recentCatalog
-    return recentCatalog.filter((unit) => {
-      if (unit.endOfDayMileageByDate && selectedDay in unit.endOfDayMileageByDate) return true
-      return (unit.services || []).some((svc) => (svc?.start || '').slice(0, 10) === selectedDay)
-    })
-  }, [catalog, selectedDay])
-
-  const searchNeedle = searchInput.trim().toUpperCase()
-
-  const visibleCatalog = useMemo(() => {
-    if (!searchNeedle) return dayFilteredCatalog
-    return dayFilteredCatalog.filter((unit) => unit.unitId.toUpperCase().includes(searchNeedle))
-  }, [dayFilteredCatalog, searchNeedle])
-
-  const totalUnitsForSelectedDay = dayFilteredCatalog.length
-
-  const groups = useMemo(() => {
-    const map = new Map<string, UnitCatalogItem[]>()
-    for (const unit of visibleCatalog) {
-      const fleetId = (unit.fleetId || 'Unknown').trim() || 'Unknown'
-      const existing = map.get(fleetId)
-      if (existing) existing.push(unit)
-      else map.set(fleetId, [unit])
-    }
-
-    return [...map.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
-      .map(([fleetId, units]) => ({
-        fleetId,
-        units: units
-          .slice()
-          .sort((a, b) => a.unitId.localeCompare(b.unitId, undefined, { numeric: true })),
-      }))
-  }, [visibleCatalog])
-
-  const selectedUnits = useMemo(() => {
-    if (!selectedFleet) return []
-    return groups.find((g) => g.fleetId === selectedFleet)?.units || []
-  }, [groups, selectedFleet])
-
   const classItems = useMemo(
-    () => groups.map((group) => `${group.fleetId} (${group.units.length})`),
-    [groups]
+    () => fleets.map((group) => `${group.fleetId} (${group.unitCount})`),
+    [fleets]
   )
 
   const selectedFleetIndex = useMemo(
-    () => groups.findIndex((group) => group.fleetId === selectedFleet),
-    [groups, selectedFleet]
+    () => fleets.findIndex((group) => group.fleetId === selectedFleet),
+    [fleets, selectedFleet]
   )
 
   useEffect(() => {
     const ac = new AbortController()
-    const cached = unitsCatalogSWRCache.get(CATALOG_CACHE_KEY)
-    const hot = peekHotUnitsCatalog()
-    if (cached && Date.now() - cached.cachedAtMs <= CATALOG_CACHE_MAX_AGE_MS) {
-      setCatalog(cached.data)
-      setStatus('ok')
-      setError(null)
-    } else if (Array.isArray(hot?.units) && hot.units.length > 0) {
-      const next = hot.units as UnitCatalogItem[]
-      unitsCatalogSWRCache.set(CATALOG_CACHE_KEY, {
-        data: next,
-        updatedAt: hot.updatedAt,
-        cachedAtMs: Date.now(),
-      })
-      setCatalog(next)
-      setStatus('ok')
-      setError(null)
-    } else {
-      setStatus('loading')
-      setError(null)
-    }
-    fetchDarwin('/api/darwin/units/catalog', { signal: ac.signal })
+    fetchDarwin('/api/darwin/units/days', { signal: ac.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        return res.json()
+        return res.json() as Promise<{ days?: string[] }>
       })
-      .then((payload: UnitCatalogResponse) => {
-        const next = Array.isArray(payload.units) ? payload.units : []
-        unitsCatalogSWRCache.set(CATALOG_CACHE_KEY, {
-          data: next,
-          updatedAt: payload.updatedAt,
-          cachedAtMs: Date.now(),
+      .then((payload) => {
+        const todayYmd = ukCalendarYmd()
+        const days = (payload.days || []).filter((d) => isPlausibleUnitOperatingDay(d, todayYmd))
+        setAvailableDays(days)
+      })
+      .catch(() => {
+        if (ac.signal.aborted) return
+        setAvailableDays([])
+      })
+    return () => ac.abort()
+  }, [reloadToken])
+
+  useEffect(() => {
+    const ac = new AbortController()
+    const qs = selectedDay !== 'all' ? `?day=${encodeURIComponent(selectedDay)}` : ''
+    fetchDarwin(`/api/darwin/units/fleets${qs}`, { signal: ac.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json() as Promise<{ fleets?: FleetRow[] }>
+      })
+      .then((payload) => {
+        const rows = Array.isArray(payload.fleets) ? payload.fleets : []
+        setFleets(rows)
+        setSelectedFleet((prev) => {
+          if (prev && rows.some((r) => r.fleetId === prev)) return prev
+          return rows[0]?.fleetId || null
         })
-        setCatalog(next)
+      })
+      .catch(() => {
+        if (ac.signal.aborted) return
+        setFleets([])
+      })
+    return () => ac.abort()
+  }, [reloadToken, selectedDay])
+
+  useEffect(() => {
+    const ac = new AbortController()
+    setStatus('loading')
+    setError(null)
+    fetchDarwin(catalogQuery({
+      q: searchNeedle,
+      fleet: searchNeedle ? null : selectedFleet,
+      day: selectedDay,
+      cursor: 0,
+    }), {
+      signal: ac.signal,
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json() as Promise<CatalogPage>
+      })
+      .then((payload) => {
+        setUnits(Array.isArray(payload.units) ? payload.units : [])
+        setTotal(payload.total || 0)
+        setNextCursor(payload.nextCursor ?? null)
         setStatus('ok')
       })
       .catch((e) => {
         if ((e as Error)?.name === 'AbortError') return
-        const hasCached = unitsCatalogSWRCache.has(CATALOG_CACHE_KEY)
-        if (!hasCached) {
-          setStatus('error')
-          setError((e as Error)?.message || 'Could not load units catalog.')
-        }
+        setStatus('error')
+        setError((e as Error)?.message || 'Could not load units catalog.')
       })
     return () => ac.abort()
-  }, [reloadToken])
+  }, [reloadToken, selectedFleet, selectedDay, searchNeedle])
 
   useEffect(() => {
     if (availableDays.length === 0) {
@@ -252,15 +219,28 @@ const UnitsInServicePage: React.FC = () => {
     }
   }, [availableDays, selectedDay])
 
-  useEffect(() => {
-    if (groups.length === 0) {
-      setSelectedFleet(null)
-      return
-    }
-    if (!selectedFleet || !groups.some((g) => g.fleetId === selectedFleet)) {
-      setSelectedFleet(groups[0].fleetId)
-    }
-  }, [groups, selectedFleet])
+  const loadMore = () => {
+    if (nextCursor == null || loadingMore) return
+    setLoadingMore(true)
+    fetchDarwin(catalogQuery({
+      q: searchNeedle,
+      fleet: searchNeedle ? null : selectedFleet,
+      day: selectedDay,
+      cursor: nextCursor,
+    }))
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json() as Promise<CatalogPage>
+      })
+      .then((payload) => {
+        const extra = Array.isArray(payload.units) ? payload.units : []
+        setUnits((prev) => [...prev, ...extra])
+        setTotal(payload.total || 0)
+        setNextCursor(payload.nextCursor ?? null)
+      })
+      .catch(() => {})
+      .finally(() => setLoadingMore(false))
+  }
 
   return (
     <div className="browse-page units-service-shell">
@@ -296,7 +276,7 @@ const UnitsInServicePage: React.FC = () => {
                     items={dayItems}
                     filterName="Day"
                     selectionMode="single"
-                    selectedPositions={status === 'ok' ? [selectedDayIndex] : []}
+                    selectedPositions={status === 'ok' || availableDays.length > 0 ? [selectedDayIndex] : []}
                     onSelectionChanged={(selectedPositions) => {
                       const idx = selectedPositions[0]
                       if (typeof idx !== 'number') return
@@ -319,7 +299,7 @@ const UnitsInServicePage: React.FC = () => {
                     onSelectionChanged={(selectedPositions) => {
                       const idx = selectedPositions[0]
                       if (typeof idx !== 'number') return
-                      const selected = groups[idx]
+                      const selected = fleets[idx]
                       if (!selected) return
                       setSelectedFleet(selected.fleetId)
                     }}
@@ -329,8 +309,8 @@ const UnitsInServicePage: React.FC = () => {
                 </div>
                 {status === 'ok' && (
                   <p className="units-service-total">
-                    Total units: <strong>{totalUnitsForSelectedDay}</strong>
-                    {searchNeedle ? ` · ${visibleCatalog.length} matching` : ''}
+                    Total units: <strong>{total}</strong>
+                    {searchNeedle ? ` · ${units.length} loaded` : ''}
                   </p>
                 )}
               </SidebarDropdownSection>
@@ -362,27 +342,41 @@ const UnitsInServicePage: React.FC = () => {
             {status === 'ok' && (
               <>
                 <header className="units-service-content-head">
-                  <h2>{selectedFleet ? `Class ${selectedFleet}` : searchNeedle ? 'No matching units' : 'Select a class'}</h2>
-                  {selectedFleet && (
+                  <h2>{searchNeedle ? 'Matching units' : selectedFleet ? `Class ${selectedFleet}` : 'Select a class'}</h2>
+                  {selectedFleet && !searchNeedle && (
                     <p>
-                      {selectedUnits.length} unit{selectedUnits.length === 1 ? '' : 's'}
+                      {units.length} unit{units.length === 1 ? '' : 's'} loaded
                       {selectedDay !== 'all' ? ` on ${formatDayLabel(selectedDay)}` : ' in collection'}
                     </p>
                   )}
                 </header>
 
-                {selectedFleet && selectedUnits.length > 0 ? (
-                  <div className="units-service-unit-grid">
-                    {selectedUnits.map((unit) => (
-                      <UnitCatalogCard
-                        key={unit.unitId}
-                        unitId={unit.unitId}
-                        fleetId={unit.fleetId || selectedFleet}
-                        subtitle={unitSubtitle(unit, selectedDay)}
-                        onClick={() => router.push(unitHref(unit.unitId))}
-                      />
-                    ))}
-                  </div>
+                {units.length > 0 ? (
+                  <>
+                    <div className="units-service-unit-grid">
+                      {units.map((unit) => (
+                        <UnitCatalogCard
+                          key={unit.unitId}
+                          unitId={unit.unitId}
+                          fleetId={unit.fleetId || selectedFleet || ''}
+                          subtitle={unitSubtitle(unit, selectedDay)}
+                          onClick={() => router.push(unitHref(unit.unitId))}
+                        />
+                      ))}
+                    </div>
+                    {nextCursor != null && (
+                      <div className="units-service-load-more">
+                        <BUTWideButton
+                          width="hug"
+                          instantAction
+                          colorVariant="primary"
+                          onClick={loadMore}
+                        >
+                          {loadingMore ? 'Loading…' : 'Load more'}
+                        </BUTWideButton>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <p className="units-service-muted">
                     {searchNeedle

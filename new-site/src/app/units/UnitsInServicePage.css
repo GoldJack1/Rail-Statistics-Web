@@ -95,6 +95,10 @@
   color: var(--text-secondary);
 }
 
+.units-service-load-more {
+  margin-top: var(--space-lg);
+}
+
 @media (max-width: 639px) {
   .units-service-content-head {
     flex-direction: column;

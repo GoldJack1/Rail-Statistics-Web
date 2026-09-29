@@ -477,8 +477,13 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     if (!boardReady) return
     let cancelled = false
     const loadWindow = async () => {
+      const hot = peekHotHealth()?.timetableWindow?.maxDate
+      if (hot && /^\d{4}-\d{2}-\d{2}$/.test(hot)) {
+        if (!cancelled) setMaxFutureDateIso(hot)
+        return
+      }
       try {
-        const res = await fetchDarwin('/api/darwin/health')
+        const res = await fetchDarwin('/api/darwin/window')
         if (!res.ok) return
         const body = await res.json() as { timetableWindow?: { maxDate?: string } }
         const max = body?.timetableWindow?.maxDate

@@ -1,0 +1,23 @@
+[Unit]
+Description=Darwin heavy daemon (units catalog, bash, history)
+After=network-online.target darwin.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=darwin
+Group=darwin
+WorkingDirectory=/home/darwin/darwin-local-test
+Environment=TZ=Europe/London
+Environment=DARWIN_ROLE=heavy
+Environment=DAEMON_PORT=4002
+Environment=DARWIN_BASH_MAX_INFLIGHT=2
+EnvironmentFile=-/home/darwin/darwin-local-test/.env
+ExecStart=/usr/bin/node departures-daemon.mjs
+Restart=always
+RestartSec=5
+MemoryHigh=5G
+MemoryMax=7G
+
+[Install]
+WantedBy=multi-user.target

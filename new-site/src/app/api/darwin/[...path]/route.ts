@@ -30,6 +30,27 @@ function historicalCacheControl(request: NextRequest, pathSegments: string[]): s
   return 'public, s-maxage=60, stale-while-revalidate=300'
 }
 
+function listCacheControl(request: NextRequest, pathSegments: string[]): string | null {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null
+  const kind = pathSegments[0]
+  const sub = pathSegments[1]
+  if (kind === 'window' || kind === 'health') return 'public, s-maxage=30, stale-while-revalidate=60'
+  if (kind === 'history' && sub === 'dates') return 'public, s-maxage=60, stale-while-revalidate=300'
+  if (kind === 'units' && (sub === 'catalog' || sub === 'fleets' || sub === 'days')) {
+    return 'public, s-maxage=45, stale-while-revalidate=180'
+  }
+  return null
+}
+
+function darwinUpstreamTimeoutMs(request: NextRequest, pathSegments: string[]): number {
+  const kind = pathSegments[0]
+  if (kind === 'plan') return 90_000
+  if (kind === 'health' || kind === 'units' || kind === 'unit' || kind === 'history') return 45_000
+  const date = request.nextUrl.searchParams.get('date') || ''
+  if ((kind === 'departures' || kind === 'service') && /^\d{4}-\d{2}-\d{2}$/.test(date)) return 45_000
+  return 8_000
+}
+
 function detectCountryCode(request: NextRequest): string | null {
   const candidates = [
     request.headers.get('x-country'),
@@ -91,6 +112,7 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
       method: request.method,
       headers,
       body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
+      signal: AbortSignal.timeout(darwinUpstreamTimeoutMs(request, pathSegments)),
       // @ts-expect-error duplex required for streaming bodies in Node 18+
       duplex: 'half',
     })
@@ -101,7 +123,8 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
     const contentType = upstreamRes.headers.get('content-type')
     if (contentType) responseHeaders.set('content-type', contentType)
     const historicalCache = upstreamRes.ok ? historicalCacheControl(request, pathSegments) : null
-    const cacheControl = historicalCache || upstreamRes.headers.get('cache-control')
+    const listCache = upstreamRes.ok ? listCacheControl(request, pathSegments) : null
+    const cacheControl = historicalCache || listCache || upstreamRes.headers.get('cache-control')
     if (cacheControl) responseHeaders.set('cache-control', cacheControl)
 
     return new NextResponse(upstreamRes.body, {
@@ -109,13 +132,16 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
       headers: responseHeaders,
     })
   } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      return json(504, { error: 'upstream_timeout', message: 'Darwin upstream timed out' })
+    }
     const cause = err instanceof Error ? err.cause : null
     const code = cause && typeof cause === 'object' && 'code' in cause ? String((cause as { code?: string }).code) : ''
     if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || code === 'ETIMEDOUT') {
       return json(503, {
         error: 'starting',
         retryAfterSec: 3,
-        message: 'Darwin daemon is not reachable on :4001',
+        message: 'Darwin daemon is not reachable',
       })
     }
     throw err

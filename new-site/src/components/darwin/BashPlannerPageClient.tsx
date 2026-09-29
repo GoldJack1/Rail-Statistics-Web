@@ -212,7 +212,7 @@ const BashPlannerPageClient: React.FC = () => {
     let cancelled = false
     const loadWindow = async () => {
       try {
-        const res = await fetchDarwin('/api/darwin/health')
+        const res = await fetchDarwin('/api/darwin/window')
         if (!res.ok) return
         const body = await res.json() as { timetableWindow?: { maxDate?: string } }
         const max = body?.timetableWindow?.maxDate

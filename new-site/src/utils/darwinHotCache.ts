@@ -119,11 +119,11 @@ export function startDarwinHotCache() {
       for (const crs of recentCrs()) {
         await prefetchBoard(crs, 1)
       }
-      const [health, dates] = await Promise.all([
-        prefetchJson<{ timetableWindow?: { maxDate?: string } }>('/api/darwin/health'),
+      const [windowBody, dates] = await Promise.all([
+        prefetchJson<{ timetableWindow?: { maxDate?: string } }>('/api/darwin/window'),
         prefetchJson<HistoryDatesResponse>('/api/darwin/history/dates'),
       ])
-      if (health) healthPayload = health
+      if (windowBody) healthPayload = windowBody
       if (dates?.dates) {
         historyDates = dates.dates
           .filter((d) => d.hasState && d.hasTimetable)
