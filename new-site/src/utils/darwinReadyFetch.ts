@@ -31,6 +31,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  */
 export async function fetchDarwin(input: string, init?: RequestInit): Promise<Response> {
   const deadline = Date.now() + MAX_STARTUP_WAIT_MS
+  const softDeadline = Date.now() + 20_000
   let lastRes: Response | null = null
 
   while (Date.now() < deadline) {
@@ -39,18 +40,26 @@ export async function fetchDarwin(input: string, init?: RequestInit): Promise<Re
     const res = await fetch(input, init)
     lastRes = res
 
-    if (res.status !== 503) return res
+    if (res.status !== 503 && res.status !== 429) return res
 
     let retryMs = 3000
+    let kind: 'startup' | 'soft' | 'other' = 'other'
     try {
       const body = await res.clone().json() as { error?: string; retryAfterSec?: number }
-      if (body?.error !== 'starting') return res
+      const err = body?.error || ''
+      if (err === 'starting' || err === 'reloading') kind = 'startup'
+      else if (err === 'overlay_busy' || err === 'rate_limited') kind = 'soft'
+      else return res
       if (typeof body.retryAfterSec === 'number' && Number.isFinite(body.retryAfterSec)) {
         retryMs = Math.min(15_000, Math.max(800, body.retryAfterSec * 1000))
+      } else if (kind === 'soft') {
+        retryMs = 2000
       }
     } catch {
       return res
     }
+
+    if (kind === 'soft' && Date.now() >= softDeadline) return res
 
     await sleep(retryMs, init?.signal ?? undefined)
   }

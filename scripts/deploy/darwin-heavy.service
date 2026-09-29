@@ -12,6 +12,14 @@ Environment=TZ=Europe/London
 Environment=DARWIN_ROLE=heavy
 Environment=DAEMON_PORT=4002
 Environment=DARWIN_BASH_MAX_INFLIGHT=2
+Environment=HIST_OVERLAY_MAX_QUEUE=2
+Environment=HIST_OVERLAY_MAX_WAITERS_PER_KEY=8
+Environment=HIST_OVERLAY_MAX_WAITERS_GLOBAL=24
+Environment=HIST_CONTEXT_CACHE_MAX=4
+Environment=DARWIN_RATE_LIMIT=1
+Environment=DARWIN_RATE_WINDOW_MS=1000
+Environment=DARWIN_RATE_MAX=8
+Environment=DARWIN_RATE_GLOBAL_MAX=40
 Environment=NODE_OPTIONS=--max-old-space-size=5120
 EnvironmentFile=-/home/darwin/darwin-local-test/.env
 ExecStart=/usr/bin/node departures-daemon.mjs
