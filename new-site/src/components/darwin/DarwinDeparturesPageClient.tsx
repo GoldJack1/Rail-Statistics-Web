@@ -426,11 +426,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     }
     return historyDate
   }, [historyDate, historyTime, todayIsoDate])
-  const hoursQuery = query.get('hours')
-  const hoursFromQuery = Number(
-    hoursQuery
-    || (historyDate && historyDate < todayIsoDate ? 12 : WINDOW_OPTIONS[0].value),
-  )
+  const hoursFromQuery = Number(query.get('hours') || WINDOW_OPTIONS[0].value)
   const hours = WINDOW_VALUES.has(hoursFromQuery) ? hoursFromQuery : WINDOW_OPTIONS[0].value
   const historicalMode = Boolean(historyDate && operatingDayForMode < todayIsoDate)
   const timedCurrentDayMode = Boolean(historyDate && operatingDayForMode === todayIsoDate && Boolean(historyTime))
@@ -786,22 +782,16 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     ? [...historyDates].sort((a, b) => a.localeCompare(b))[0]
     : addDaysIsoDate(todayIsoDate, -90)
 
-  const applyDateTimeFilter = (
-    dateRaw = historyDateDraft,
-    timeRaw = historyTimeDraft,
-    opts: { includeTime?: boolean } = {},
-  ) => {
+  const applyDateTimeFilter = (dateRaw = historyDateDraft, timeRaw = historyTimeDraft) => {
     const dateValue = dateRaw.trim()
     const normalizedTime = normalizeTimeInput(timeRaw)
     const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(dateValue)
-    const pastDate = dateOk && dateValue < todayIsoDate
-    const includeTime = opts.includeTime ?? !pastDate
     const timeOk = normalizedTime !== null
     if (!dateOk) {
       setHistoryDateError('Choose a date.')
       return
     }
-    if (includeTime && !timeOk) {
+    if (!timeOk) {
       setHistoryDateError('Choose a time.')
       return
     }
@@ -817,11 +807,8 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     setHistoryDateError(null)
     updateQuery((next) => {
       next.set('date', dateValue)
-      if (includeTime && normalizedTime) next.set('at', normalizedTime)
+      if (normalizedTime) next.set('at', normalizedTime)
       else next.delete('at')
-      if (pastDate && (!next.get('hours') || next.get('hours') === '1')) {
-        next.set('hours', '12')
-      }
     })
   }
 
@@ -1027,7 +1014,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                           const nextDate = event.target.value
                           setHistoryDateDraft(nextDate)
                           if (historyDateError) setHistoryDateError(null)
-                          applyDateTimeFilter(nextDate, historyTimeDraft, { includeTime: false })
+                          applyDateTimeFilter(nextDate, historyTimeDraft)
                         }}
                       />
                     </div>
@@ -1042,7 +1029,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                       onChange={(value) => {
                         setHistoryTimeDraft(value)
                         if (historyDateError) setHistoryDateError(null)
-                        applyDateTimeFilter(historyDateDraft, value, { includeTime: true })
+                        applyDateTimeFilter(historyDateDraft, value)
                       }}
                       showClear={false}
                       ariaLabel="Time"
@@ -1054,9 +1041,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                       width="fill"
                       instantAction
                       colorVariant="primary"
-                      onClick={() => applyDateTimeFilter(undefined, undefined, {
-                        includeTime: !(historyDateDraft < todayIsoDate),
-                      })}
+                      onClick={() => applyDateTimeFilter()}
                     >
                       Apply date/time
                     </BUTWideButton>
