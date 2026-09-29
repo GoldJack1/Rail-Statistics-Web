@@ -1,11 +1,12 @@
 # api-raildata.railstatistics.co.uk
-# Live :4001 — live boards, ping/station/messages/window
+# Live :4001 — live boards, ping/station/messages/window (Kafka on /api/ping)
 # Heavy :4002 — units/unit/history/health/bash, plus dated departures/service
 # Browser on railstatistics.co.uk talks here (not Netlify). Caddy injects X-API-Key.
 # Set CORS_ORIGIN on the daemons to include https://railstatistics.co.uk
 # Cloudflare can orange-cloud this hostname later (physical machine).
 #
-# Caddy systemd: EnvironmentFile=/etc/caddy/darwin.env  (INTERNAL_API_KEY=...)
+# Cloudflare Cache Rule (dashboard): Eligible for cache, 120s edge TTL,
+# full query string in cache key. See scripts/deploy/cloudflare-hist-cache-rule.json
 
 (darwin_cors) {
 	@preflight {
@@ -24,6 +25,12 @@
 }
 
 (darwin_split) {
+	@livePing path /api/ping
+	handle @livePing {
+		reverse_proxy 127.0.0.1:4001 {
+			header_up X-API-Key {$INTERNAL_API_KEY}
+		}
+	}
 	@heavy path /api/units* /api/unit/* /api/history* /api/health /api/plan/bash
 	handle @heavy {
 		reverse_proxy 127.0.0.1:4002 {
@@ -37,6 +44,8 @@
 	handle @dated {
 		reverse_proxy 127.0.0.1:4002 {
 			header_up X-API-Key {$INTERNAL_API_KEY}
+			header_down Cache-Control "public, max-age=0, s-maxage=120, stale-while-revalidate=600"
+			header_down CDN-Cache-Control "public, s-maxage=120, stale-while-revalidate=600"
 		}
 	}
 	handle {

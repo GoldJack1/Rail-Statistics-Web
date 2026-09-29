@@ -281,9 +281,22 @@ const ApiStatusPage: React.FC = () => {
   const runFetch = async (isInitial = false) => {
     if (isInitial) setStatus('loading')
     try {
-      const res = await fetchDarwin('/api/darwin/health')
+      const [res, pingRes] = await Promise.all([
+        fetchDarwin('/api/darwin/health'),
+        fetchDarwin('/api/darwin/ping'),
+      ])
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const next: HealthPayload = await res.json()
+      if (pingRes.ok) {
+        try {
+          const pingBody = await pingRes.json() as { role?: string; kafka?: HealthPayload['kafka'] }
+          if (pingBody.role === 'live' && pingBody.kafka) {
+            next.kafka = { ...next.kafka, ...pingBody.kafka }
+          }
+        } catch {
+          /* keep health kafka */
+        }
+      }
       setHealth(next)
       const now = Date.now()
       setLastUpdatedAt(new Date(now).toISOString())
