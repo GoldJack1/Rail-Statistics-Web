@@ -8,6 +8,7 @@ type UnitCatalogCardProps = {
   fleetId: string
   subtitle: string
   onClick: () => void
+  eyebrow?: string
 }
 
 const UnitCatalogCard: React.FC<UnitCatalogCardProps> = ({
@@ -15,6 +16,7 @@ const UnitCatalogCard: React.FC<UnitCatalogCardProps> = ({
   fleetId,
   subtitle,
   onClick,
+  eyebrow,
 }) => {
   return (
     <article className="rs-station-card-stack">
@@ -29,9 +31,9 @@ const UnitCatalogCard: React.FC<UnitCatalogCardProps> = ({
             onClick()
           }
         }}
-        aria-label={`Open unit ${unitId}`}
+        aria-label={`Open ${unitId}`}
       >
-        <p className="rs-station-operator">Class {fleetId}</p>
+        <p className="rs-station-operator">{eyebrow || `Class ${fleetId}`}</p>
         <h2 className="rs-station-name">{unitId}</h2>
         <p className="rs-station-location">{subtitle}</p>
       </section>

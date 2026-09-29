@@ -1028,24 +1028,25 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                       colorVariant="primary"
                     />
                   </div>
-                  <BUTTwoButtonBar
-                    className="dep-datetime-mode"
-                    colorVariant="primary"
-                    selectedIndex={historyDate ? 0 : 1}
-                    buttons={[
-                      { label: 'Apply date/time', value: 'apply' },
-                      { label: 'Live now', value: 'live' },
-                    ]}
-                    onChange={(_, value) => {
-                      if (value === 'live') {
-                        resetToLiveNow()
-                        return
-                      }
-                      if (value === 'apply' || Boolean(historyDate)) {
-                        applyDateTimeFilter()
-                      }
-                    }}
-                  />
+                  <div className="dep-datetime-actions">
+                    <BUTWideButton
+                      width="fill"
+                      instantAction
+                      colorVariant="primary"
+                      onClick={applyDateTimeFilter}
+                    >
+                      Apply date/time
+                    </BUTWideButton>
+                    <BUTWideButton
+                      width="fill"
+                      instantAction
+                      colorVariant="primary"
+                      state={historyDate ? 'active' : 'pressed'}
+                      onClick={resetToLiveNow}
+                    >
+                      Live now
+                    </BUTWideButton>
+                  </div>
                   {historyDateError && (
                     <p className="dep-history-inline-error" role="alert">{historyDateError}</p>
                   )}

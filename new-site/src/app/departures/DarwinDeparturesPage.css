@@ -158,6 +158,13 @@
   min-width: 0;
 }
 
+.dep-datetime-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  width: 100%;
+}
+
 .dep-native-picker-input {
   position: absolute;
   inset: 0;

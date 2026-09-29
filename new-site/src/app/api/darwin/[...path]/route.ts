@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireDarwinAdmin } from '@/app/api/darwin/_lib/requireDarwinAdmin'
-import { isLocalDarwinOrigin, resolveDarwinApiOrigin } from '@/utils/darwinApiOrigin'
+import { isLocalDarwinOrigin, resolveDarwinApiOrigin, resolveDarwinHeavyOrigin, shouldUseDirectHeavyOrigin } from '@/utils/darwinApiOrigin'
 
 function json(status: number, body: unknown) {
   return NextResponse.json(body, { status })
@@ -17,6 +17,24 @@ function londonYmdNow(): string {
     month: '2-digit',
     day: '2-digit',
   }).format(new Date())
+}
+
+function isPastBoardDate(request: NextRequest): boolean {
+  const date = request.nextUrl.searchParams.get('date') || ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false
+  return date < londonYmdNow()
+}
+
+function resolveUpstreamOrigin(request: NextRequest, pathSegments: string[]): string {
+  const origin = resolveDarwinApiOrigin()
+  const heavy = resolveDarwinHeavyOrigin(origin)
+  if (!shouldUseDirectHeavyOrigin(origin, heavy)) return origin
+  const kind = pathSegments[0]
+  if (kind === 'units' || kind === 'unit' || kind === 'history' || kind === 'health' || kind === 'plan') {
+    return heavy
+  }
+  if ((kind === 'departures' || kind === 'service') && isPastBoardDate(request)) return heavy
+  return origin
 }
 
 function historicalCacheControl(request: NextRequest, pathSegments: string[]): string | null {
@@ -66,12 +84,13 @@ function detectCountryCode(request: NextRequest): string | null {
 }
 
 async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promise<NextResponse> {
-  const origin = resolveDarwinApiOrigin()
+  const origin = resolveUpstreamOrigin(request, pathSegments)
   const apiKey = process.env.DARWIN_API_KEY || ''
+  const liveOrigin = resolveDarwinApiOrigin()
   const ukOnly = boolEnv(process.env.DARWIN_UK_ONLY)
   const ukAllowedCountries = new Set(['GB', 'UK'])
 
-  if (!apiKey && !isLocalDarwinOrigin(origin)) {
+  if (!apiKey && !isLocalDarwinOrigin(origin) && !isLocalDarwinOrigin(liveOrigin)) {
     return json(500, { error: 'DARWIN_API_KEY is not configured' })
   }
 
@@ -147,6 +166,8 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
     throw err
   }
 }
+
+export const maxDuration = 60
 
 export async function GET(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params

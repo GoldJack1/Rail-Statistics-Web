@@ -1,21 +1,14 @@
 # Snippet for api-raildata.railstatistics.co.uk
-# Live :4001 — boards/service/ping/station/messages/window
-# Heavy :4002 — units/unit/history/health/bash and dated boards/services
+# Live :4001 — live boards, timed today/future (date >= today), ping/station/messages/window
+# Heavy :4002 — units/unit/history/health/bash
+# Past-date boards: Caddy sends them to live, which proxies to :4002.
 
-@darwin_heavy {
-	path /api/units* /api/unit/* /api/history* /api/health /api/plan/bash
-}
-@darwin_hist {
-	path /api/departures/* /api/service/*
-	query date=*
-}
-
-handle @darwin_heavy {
-	reverse_proxy 127.0.0.1:4002
-}
-handle @darwin_hist {
-	reverse_proxy 127.0.0.1:4002
-}
-handle /api/* {
-	reverse_proxy 127.0.0.1:4001
+(darwin_split) {
+	@heavy path /api/units* /api/unit/* /api/history* /api/health /api/plan/bash
+	handle @heavy {
+		reverse_proxy 127.0.0.1:4002
+	}
+	handle {
+		reverse_proxy 127.0.0.1:4001
+	}
 }

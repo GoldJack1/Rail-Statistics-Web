@@ -28,6 +28,7 @@ import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { peekHotUnitsCatalog } from '@/utils/darwinHotCache'
 import { stopHasPublishedLoading } from '@/utils/darwinCoachLoading'
 import { isPlausibleUnitOperatingDay, ukCalendarYmd } from '@/utils/unitOperatingDay'
+import { withUnitDay } from '@/utils/unitClassBands'
 import './UnitLookupPage.css'
 import '../../services/[rid]/ServiceDetailPage.css'
 
@@ -385,7 +386,11 @@ const UnitLookupPage: React.FC = () => {
               width="hug"
               instantAction
               icon={<BackIcon />}
-              onClick={() => router.push(`/units${location.search || ''}`)}
+              onClick={() => {
+                const fleet = (data?.fleetId || catalogUnit?.fleetId || '').trim()
+                const day = selectedDay && selectedDay !== 'all' ? selectedDay : 'all'
+                router.push(fleet ? withUnitDay(`/units/class/${encodeURIComponent(fleet)}`, day) : '/units')
+              }}
             >
               Back
             </BUTWideButton>

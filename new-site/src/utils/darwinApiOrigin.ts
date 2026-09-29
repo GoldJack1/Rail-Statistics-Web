@@ -24,3 +24,22 @@ export function resolveDarwinApiOrigin(): string {
 export function isLocalDarwinOrigin(origin: string): boolean {
   return /127\.0\.0\.1|localhost|::1/.test(origin)
 }
+
+export function resolveDarwinHeavyOrigin(liveOrigin = resolveDarwinApiOrigin()): string {
+  const fromEnv = (process.env.DARWIN_HEAVY_ORIGIN || '').trim().replace(/\/$/, '')
+  if (fromEnv) return fromEnv
+  try {
+    const url = new URL(liveOrigin)
+    if (url.port === '4001') {
+      url.port = '4002'
+      return url.origin
+    }
+  } catch {
+    /* keep live origin */
+  }
+  return liveOrigin
+}
+
+export function shouldUseDirectHeavyOrigin(liveOrigin: string, heavyOrigin: string): boolean {
+  return Boolean(heavyOrigin && heavyOrigin !== liveOrigin)
+}
