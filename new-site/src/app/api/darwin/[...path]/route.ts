@@ -172,7 +172,6 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
       body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
       signal: AbortSignal.timeout(darwinUpstreamTimeoutMs(request, pathSegments)),
       dispatcher: darwinUpstreamAgent,
-      // @ts-expect-error duplex required for streaming bodies in Node 18+
       duplex: 'half',
     } as RequestInit)
 
