@@ -1036,7 +1036,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                       width="fill"
                       instantAction
                       colorVariant="primary"
-                      onClick={applyDateTimeFilter}
+                      onClick={() => applyDateTimeFilter()}
                     >
                       Apply date/time
                     </BUTWideButton>
