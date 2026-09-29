@@ -1,0 +1,26 @@
+{
+  "description": "Cache dated Darwin boards/services at Cloudflare (not on the VPS). Cache key includes the full query string (date + at + hours).",
+  "expression": "(http.host eq \"api-raildata.railstatistics.co.uk\") and (http.request.method eq \"GET\") and (starts_with(http.request.uri.path, \"/api/departures/\") or starts_with(http.request.uri.path, \"/api/service/\")) and (http.request.uri.query contains \"date=\")",
+  "action": "set_cache_settings",
+  "action_parameters": {
+    "cache": true,
+    "edge_ttl": {
+      "mode": "override_origin",
+      "default": 120,
+      "status_code_ttl": [
+        { "status_code": 200, "value": 120 },
+        { "status_code_range": { "from": 400 }, "value": -1 }
+      ]
+    },
+    "browser_ttl": {
+      "mode": "override_origin",
+      "default": 0
+    },
+    "cache_key": {
+      "ignore_query_strings_order": true,
+      "custom_key": {
+        "query_string": { "include": ["*"] }
+      }
+    }
+  }
+}

@@ -172,6 +172,7 @@ const stats = {
 }
 
 const lastRidsByCrs = new Map()
+const lastHistDateByCrs = new Map()
 let unitIds = []
 let stopping = false
 
@@ -244,7 +245,10 @@ async function hitHist(crs) {
   const withAt = Math.random() < 0.35
   const qs = withAt ? `hours=1&date=${date}&at=12:00` : `hours=1&date=${date}`
   const res = await request('hist', `${root}/departures/${crs}?${qs}`, { headers: headers() })
-  if (res.ok && res.body) rememberRids(crs, res.body)
+  if (res.ok && res.body) {
+    rememberRids(crs, res.body)
+    lastHistDateByCrs.set(crs, date)
+  }
   return res
 }
 
@@ -255,7 +259,7 @@ async function hitService(crs, historical) {
     rid = ridsFor(crs)[0]
   }
   if (!rid) return
-  const date = historical ? pick(histDays.length ? histDays : [addDays(today, -1)]) : ''
+  const date = historical ? (lastHistDateByCrs.get(crs) || '') : ''
   const qs = date ? `?date=${date}` : ''
   await request('service', `${root}/service/${encodeURIComponent(rid)}${qs}`, { headers: headers() })
 }
@@ -281,7 +285,8 @@ async function hitCatalog() {
 
 async function hitUnit() {
   if (!unitIds.length) await hitCatalog()
-  const id = pick(unitIds.length ? unitIds : ['390001'])
+  if (!unitIds.length) return
+  const id = pick(unitIds)
   const dated = Math.random() < 0.4 && histDays.length
   const qs = dated ? `?date=${pick(histDays)}` : ''
   await request('unit', `${root}/unit/${encodeURIComponent(id)}${qs}`, { headers: headers() })
