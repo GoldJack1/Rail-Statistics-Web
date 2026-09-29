@@ -16,7 +16,7 @@ import { ServiceStopList, slotKind } from '@/components/darwin/ServiceStopList/S
 import { ServiceVehicleDetails } from '@/components/darwin/ServiceVehicleDetails'
 import { buildStopNameLookup, displayStopName } from '@/components/darwin/serviceStopLabel'
 import { ServiceViewModeToggle } from '@/components/darwin/ServiceViewModeToggle'
-import { readServiceViewMode, writeServiceViewMode, type ServiceViewMode } from '@/components/darwin/serviceViewMode'
+import { useServiceViewMode } from '@/components/darwin/serviceViewMode'
 import StationDetailField from '@/components/models/StationDetails/StationDetailField'
 import StationSectionTitle from '@/components/models/StationDetails/StationSectionTitle'
 import type { AccountSection } from '@/components/misc/AccountSectionNav/AccountSectionNav'
@@ -238,17 +238,8 @@ const ServiceDetailPage: React.FC = () => {
   const location = { pathname, search: searchParams.toString() ? `?${searchParams}` : '', state: null as unknown }
   const router = useRouter()
   const rid = paramAsString(params.rid)
-  const [viewMode, setViewMode] = useState<ServiceViewMode>('detailed')
+  const [viewMode, selectViewMode] = useServiceViewMode()
   const [section, setSection] = useState<ServiceSection>('overview')
-
-  useEffect(() => {
-    setViewMode(readServiceViewMode())
-  }, [])
-
-  const selectViewMode = (mode: ServiceViewMode) => {
-    setViewMode(mode)
-    writeServiceViewMode(mode)
-  }
 
   const query = useMemo(() => new URLSearchParams(location.search), [location.search])
   const historicalDate = query.get('date') || undefined
@@ -262,7 +253,7 @@ const ServiceDetailPage: React.FC = () => {
     rid,
     date: historicalDate,
     at: historicalAt,
-    pollMs: historicalMode || futureTimetableMode ? 0 : 15_000,
+    pollMs: historicalMode || futureTimetableMode || viewMode === 'simple' ? 0 : 15_000,
   })
   const { stations } = useStations()
   const loadingTpl = useMemo(

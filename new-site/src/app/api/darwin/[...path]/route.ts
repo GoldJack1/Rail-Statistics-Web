@@ -10,6 +10,26 @@ function boolEnv(value: string | undefined): boolean {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase())
 }
 
+function londonYmdNow(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+function historicalCacheControl(request: NextRequest, pathSegments: string[]): string | null {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null
+  const kind = pathSegments[0]
+  if (kind !== 'departures' && kind !== 'service') return null
+  const date = request.nextUrl.searchParams.get('date') || ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
+  if (date >= londonYmdNow()) return null
+  if (kind === 'departures') return 'public, s-maxage=120, stale-while-revalidate=600'
+  return 'public, s-maxage=60, stale-while-revalidate=300'
+}
+
 function detectCountryCode(request: NextRequest): string | null {
   const candidates = [
     request.headers.get('x-country'),
@@ -80,7 +100,8 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
     const responseHeaders = new Headers()
     const contentType = upstreamRes.headers.get('content-type')
     if (contentType) responseHeaders.set('content-type', contentType)
-    const cacheControl = upstreamRes.headers.get('cache-control')
+    const historicalCache = upstreamRes.ok ? historicalCacheControl(request, pathSegments) : null
+    const cacheControl = historicalCache || upstreamRes.headers.get('cache-control')
     if (cacheControl) responseHeaders.set('cache-control', cacheControl)
 
     return new NextResponse(upstreamRes.body, {

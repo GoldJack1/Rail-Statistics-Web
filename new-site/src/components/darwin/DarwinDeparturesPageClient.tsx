@@ -13,6 +13,8 @@ import { useStations } from '@/hooks/useStations'
 import { BackIcon } from '@/components/icons'
 import { PageTopHeader, SidebarDropdownSection, SidebarPanel } from '@/components/misc'
 import { BUTBaseButton, BUTCircleButton, BUTOperatorChip, BUTTwoButtonBar, BUTWideButton, TOGToggleVisited } from '@/components/buttons'
+import { ServiceViewModeToggle } from '@/components/darwin/ServiceViewModeToggle'
+import { useServiceViewMode } from '@/components/darwin/serviceViewMode'
 import BUTDDMList from '@/components/buttons/ddm/BUTDDMList'
 import BUTDDMListActionDual from '@/components/buttons/ddm/BUTDDMListActionDual'
 import { DarwinServiceCard } from '@/components/cards'
@@ -178,26 +180,7 @@ function addDaysIsoDate(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
-const DETAILED_INFO_STORAGE_KEY = 'rs.darwin.showDetailedInfo'
 const FORMATION_STORAGE_KEY = 'rs.darwin.showFormation'
-
-function readDetailedInfoPreference(): boolean {
-  if (typeof window === 'undefined') return false
-  try {
-    return window.localStorage.getItem(DETAILED_INFO_STORAGE_KEY) === '1'
-  } catch {
-    return false
-  }
-}
-
-function writeDetailedInfoPreference(enabled: boolean): void {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(DETAILED_INFO_STORAGE_KEY, enabled ? '1' : '0')
-  } catch {
-    /* quota / private mode */
-  }
-}
 
 function readFormationPreference(): boolean {
   if (typeof window === 'undefined') return true
@@ -271,7 +254,9 @@ const DarwinDepartureRowCard = React.memo(function DarwinDepartureRowCard({
   return (
     <div
       role="listitem"
-      onPointerEnter={() => prefetchDarwinService(row.rid, historyDate || undefined, historyTime || undefined)}
+      onPointerEnter={() => {
+        if (detailedInfo) prefetchDarwinService(row.rid, historyDate || undefined, historyTime || undefined)
+      }}
     >
       <DarwinServiceCard
         row={row}
@@ -402,7 +387,8 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   const [tocSelection, setTocSelection] = useState<string[] | null>(null)
   const [typeSelection, setTypeSelection] = useState<DepartureServiceType[] | null>(null)
   const [selectedStopModes, setSelectedStopModes] = useState<StopModeFilter[]>(STOP_MODE_OPTIONS)
-  const [showDetailedInfo, setShowDetailedInfo] = useState(false)
+  const [viewMode, setViewMode] = useServiceViewMode()
+  const showDetailedInfo = viewMode === 'detailed'
   const [showFormation, setShowFormation] = useState(true)
   const [boardMode, setBoardMode] = useState<BoardModeFilter>('departures')
   const [historyDates, setHistoryDates] = useState<string[]>(() => peekHotHistoryDates() || [])
@@ -414,7 +400,6 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   }, [])
 
   useEffect(() => {
-    setShowDetailedInfo(readDetailedInfoPreference())
     setShowFormation(readFormationPreference())
   }, [])
 
@@ -673,6 +658,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     hasStationSelected && showFormation && !futureTimetableMode && !historicalMode,
     historicalMode ? historyDate : undefined,
     historicalMode ? historyTime : undefined,
+    { poll: showDetailedInfo },
   )
 
   const boardRows = useMemo(() => {
@@ -681,11 +667,11 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   }, [activeFilteredRows, loadingOverlays])
 
   useEffect(() => {
-    if (historicalMode || boardRows.length === 0) return
+    if (!showDetailedInfo || historicalMode || boardRows.length === 0) return
     for (const row of boardRows.slice(0, 2)) {
       prefetchDarwinService(row.rid, historyDate || undefined, historyTime || undefined)
     }
-  }, [historicalMode, historyDate, historyTime, boardRows])
+  }, [showDetailedInfo, historicalMode, historyDate, historyTime, boardRows])
 
   const filteredCounts = useMemo(
     () => ({ rows: activeFilteredRows.length }),
@@ -861,15 +847,10 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   }}
                 />
                 <div className="dep-detail-toggle">
-                  <span className="dep-filter-label dep-detail-toggle__label">Show detailed info</span>
-                  <TOGToggleVisited
-                    checked={showDetailedInfo}
-                    onChange={(next) => {
-                      setShowDetailedInfo(next)
-                      writeDetailedInfoPreference(next)
-                    }}
-                    ariaLabel="Show detailed info on service cards"
-                    className="dep-detail-toggle__control"
+                  <ServiceViewModeToggle
+                    className="dep-detail-toggle__viewmode"
+                    viewMode={viewMode}
+                    onChange={setViewMode}
                   />
                 </div>
                 <div className="dep-detail-toggle">

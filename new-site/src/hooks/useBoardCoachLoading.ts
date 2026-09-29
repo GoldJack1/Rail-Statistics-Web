@@ -17,8 +17,14 @@ export type BoardFormationOverlay = {
   unitIds: string[] | null
 }
 
-const FETCH_CONCURRENCY = 4
+const FETCH_CONCURRENCY = 2
 const POLL_MS = 15_000
+const BACKGROUND_START_MS = 400
+
+export type BoardCoachLoadingOptions = {
+  /** When false, fetch once after idle and do not keep polling. */
+  poll?: boolean
+}
 
 function serviceUrl(rid: string, date?: string, at?: string): string {
   const qs = new URLSearchParams()
@@ -87,7 +93,9 @@ export function useBoardCoachLoading(
   enabled: boolean,
   date?: string,
   at?: string,
+  options?: BoardCoachLoadingOptions,
 ): Map<string, BoardFormationOverlay> {
+  const poll = options?.poll !== false
   const [detailsByRid, setDetailsByRid] = useState<Record<string, ServiceDetail>>({})
   const detailsByRidRef = useRef(detailsByRid)
   detailsByRidRef.current = detailsByRid
@@ -139,17 +147,29 @@ export function useBoardCoachLoading(
       await Promise.all(workers)
     }
 
-    void fetchRids(ridsNeedingFetch, false)
-    const poll = window.setInterval(() => {
-      if (document.visibilityState !== 'visible' || cancelled) return
-      void fetchRids(ridsRef.current, true)
-    }, POLL_MS)
+    const start = () => {
+      if (cancelled) return
+      void fetchRids(ridsNeedingFetch, false)
+    }
+    const idleId = window.requestIdleCallback
+      ? window.requestIdleCallback(start, { timeout: BACKGROUND_START_MS })
+      : window.setTimeout(start, BACKGROUND_START_MS)
+
+    let interval: number | undefined
+    if (poll) {
+      interval = window.setInterval(() => {
+        if (document.visibilityState !== 'visible' || cancelled) return
+        void fetchRids(ridsRef.current, true)
+      }, POLL_MS)
+    }
 
     return () => {
       cancelled = true
-      window.clearInterval(poll)
+      if (window.cancelIdleCallback) window.cancelIdleCallback(idleId)
+      window.clearTimeout(idleId)
+      if (interval) window.clearInterval(interval)
     }
-  }, [enabled, ridsNeedingFetch, date, at])
+  }, [enabled, ridsNeedingFetch, date, at, poll])
 
   return useMemo(() => {
     const overlays = new Map<string, BoardFormationOverlay>()
