@@ -68,15 +68,6 @@ export function rememberRecentCrs(code: string) {
   }
 }
 
-function recentCrs(): string[] {
-  try {
-    const prev = JSON.parse(localStorage.getItem(RECENT_CRS_KEY) || '[]') as string[]
-    return prev.filter((c) => /^[A-Z]{3}$/.test(c)).slice(0, MAX_RECENT)
-  } catch {
-    return []
-  }
-}
-
 export function peekHotHealth(): { timetableWindow?: { maxDate?: string } } | null {
   return healthPayload
 }
@@ -116,9 +107,6 @@ export function startDarwinHotCache() {
   started = true
   const run = async () => {
     try {
-      for (const crs of recentCrs()) {
-        await prefetchBoard(crs, 1)
-      }
       const [windowBody, dates] = await Promise.all([
         prefetchJson<{ timetableWindow?: { maxDate?: string } }>('/api/darwin/window'),
         prefetchJson<HistoryDatesResponse>('/api/darwin/history/dates'),

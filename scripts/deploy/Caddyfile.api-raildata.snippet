@@ -1,14 +1,38 @@
-# Snippet for api-raildata.railstatistics.co.uk
-# Live :4001 — live boards, timed today/future (date >= today), ping/station/messages/window
+# api-raildata.railstatistics.co.uk
+# Live :4001 — live boards, ping/station/messages/window
 # Heavy :4002 — units/unit/history/health/bash
-# Past-date boards: Caddy sends them to live, which proxies to :4002.
+# Browser on railstatistics.co.uk talks here (not Netlify). Caddy injects X-API-Key.
+# Set CORS_ORIGIN on the daemons to include https://railstatistics.co.uk
+# Cloudflare can orange-cloud this hostname later (physical machine).
+#
+# Caddy systemd: EnvironmentFile=/etc/caddy/darwin.env  (INTERNAL_API_KEY=...)
+
+(darwin_cors) {
+	@preflight {
+		method OPTIONS
+		header Origin https://railstatistics.co.uk
+		header Origin https://www.railstatistics.co.uk
+	}
+	handle @preflight {
+		header Access-Control-Allow-Origin "{http.request.header.Origin}"
+		header Access-Control-Allow-Methods "GET, POST, OPTIONS"
+		header Access-Control-Allow-Headers "Content-Type"
+		header Access-Control-Max-Age "86400"
+		header Vary Origin
+		respond 204
+	}
+}
 
 (darwin_split) {
 	@heavy path /api/units* /api/unit/* /api/history* /api/health /api/plan/bash
 	handle @heavy {
-		reverse_proxy 127.0.0.1:4002
+		reverse_proxy 127.0.0.1:4002 {
+			header_up X-API-Key {$INTERNAL_API_KEY}
+		}
 	}
 	handle {
-		reverse_proxy 127.0.0.1:4001
+		reverse_proxy 127.0.0.1:4001 {
+			header_up X-API-Key {$INTERNAL_API_KEY}
+		}
 	}
 }

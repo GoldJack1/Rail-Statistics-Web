@@ -504,6 +504,11 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     if (!boardReady) return
     let cancelled = false
     const load = async () => {
+      const hot = peekHotHistoryDates()
+      if (hot?.length) {
+        if (!cancelled) setHistoryDates(hot)
+        return
+      }
       try {
         const res = await fetchDarwin('/api/darwin/history/dates')
         if (!res.ok) throw new Error(`Request failed (${res.status})`)

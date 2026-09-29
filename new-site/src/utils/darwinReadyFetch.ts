@@ -1,12 +1,17 @@
 /**
  * Darwin daemon may return 503 { error: 'starting' } while caches restore after restart.
  * This wrapper waits with backoff instead of hammering the VM or surfacing a hard error.
+ *
+ * On railstatistics.co.uk the browser calls api-raildata directly (EU VPS / later Cloudflare).
+ * Localhost and Netlify previews keep using same-origin `/api/darwin` (Next proxy).
  */
 
 const MAX_STARTUP_WAIT_MS = Math.max(
   60_000,
   Number(process.env.NEXT_PUBLIC_DARWIN_STARTUP_MAX_WAIT_MS || 600_000),
 )
+
+const PRODUCTION_DARWIN_ORIGIN = 'https://api-raildata.railstatistics.co.uk'
 
 function abortError(): Error {
   const e = new Error('Aborted')
@@ -26,10 +31,27 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   })
 }
 
+function shouldUseDirectDarwinHost(): boolean {
+  if (typeof window === 'undefined') return false
+  const host = window.location.hostname
+  if (host === 'railstatistics.co.uk' || host === 'www.railstatistics.co.uk') return true
+  return Boolean((process.env.NEXT_PUBLIC_DARWIN_BROWSER_ORIGIN || '').trim())
+}
+
+/** Map `/api/darwin/...` to the public Darwin host in the production browser. */
+export function resolveDarwinBrowserUrl(input: string): string {
+  if (!input.startsWith('/api/darwin')) return input
+  if (input.startsWith('/api/darwin/admin')) return input
+  if (!shouldUseDirectDarwinHost()) return input
+  const origin = (process.env.NEXT_PUBLIC_DARWIN_BROWSER_ORIGIN || PRODUCTION_DARWIN_ORIGIN).replace(/\/$/, '')
+  return origin + input.replace(/^\/api\/darwin(?=\/|$)/, '/api')
+}
+
 /**
  * GET helper for `/api/darwin/*`. Retries on 503 starting until deadline or signal abort.
  */
 export async function fetchDarwin(input: string, init?: RequestInit): Promise<Response> {
+  const url = resolveDarwinBrowserUrl(input)
   const deadline = Date.now() + MAX_STARTUP_WAIT_MS
   const softDeadline = Date.now() + 20_000
   let lastRes: Response | null = null
@@ -37,7 +59,7 @@ export async function fetchDarwin(input: string, init?: RequestInit): Promise<Re
   while (Date.now() < deadline) {
     if (init?.signal?.aborted) throw abortError()
 
-    const res = await fetch(input, init)
+    const res = await fetch(url, init)
     lastRes = res
 
     if (res.status !== 503 && res.status !== 429) return res
@@ -64,5 +86,5 @@ export async function fetchDarwin(input: string, init?: RequestInit): Promise<Re
     await sleep(retryMs, init?.signal ?? undefined)
   }
 
-  return lastRes ?? fetch(input, init)
+  return lastRes ?? fetch(url, init)
 }

@@ -1,6 +1,14 @@
+import { Agent } from 'undici'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireDarwinAdmin } from '@/app/api/darwin/_lib/requireDarwinAdmin'
 import { isLocalDarwinOrigin, resolveDarwinApiOrigin, resolveDarwinHeavyOrigin, shouldUseDirectHeavyOrigin } from '@/utils/darwinApiOrigin'
+
+/** Reuse TLS to the VPS across warm Netlify isolates (Ohio→Germany was ~8s per live board). */
+const darwinUpstreamAgent = new Agent({
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 60_000,
+  connections: 32,
+})
 
 function json(status: number, body: unknown) {
   return NextResponse.json(body, { status })
@@ -30,26 +38,53 @@ function resolveUpstreamOrigin(request: NextRequest, pathSegments: string[]): st
   const heavy = resolveDarwinHeavyOrigin(origin)
   if (!shouldUseDirectHeavyOrigin(origin, heavy)) return origin
   const kind = pathSegments[0]
-  if (kind === 'units' || kind === 'unit' || kind === 'history' || kind === 'health' || kind === 'plan') {
+  if (kind === 'units' || kind === 'unit' || kind === 'history' || kind === 'plan') {
     return heavy
   }
   if ((kind === 'departures' || kind === 'service') && isPastBoardDate(request)) return heavy
   return origin
 }
 
-function historicalCacheControl(request: NextRequest, pathSegments: string[]): string | null {
-  if (request.method !== 'GET' && request.method !== 'HEAD') return null
+function applyDarwinCacheHeaders(
+  responseHeaders: Headers,
+  request: NextRequest,
+  pathSegments: string[],
+  ok: boolean,
+) {
+  const noStore = () => {
+    responseHeaders.set('Cache-Control', 'private, no-store')
+    responseHeaders.set('CDN-Cache-Control', 'no-store')
+    responseHeaders.set('Netlify-CDN-Cache-Control', 'no-store')
+  }
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    noStore()
+    return
+  }
+  if (!ok) {
+    noStore()
+    return
+  }
   const kind = pathSegments[0]
-  if (kind !== 'departures' && kind !== 'service') return null
   const date = request.nextUrl.searchParams.get('date') || ''
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
-  if (date >= londonYmdNow()) return null
-  // Timed historical boards must not be CDN-cached: Netlify can reuse a previous
-  // `date=` response while `at=` changes, so the live site looks stuck.
-  const at = (request.nextUrl.searchParams.get('at') || '').trim()
-  if (at) return 'private, no-store'
-  if (kind === 'departures') return 'public, s-maxage=120, stale-while-revalidate=600'
-  return 'public, s-maxage=60, stale-while-revalidate=300'
+  const past = /^\d{4}-\d{2}-\d{2}$/.test(date) && date < londonYmdNow()
+  // Historical boards must never hit the CDN: Netlify reused date-only bodies for ?at=.
+  if ((kind === 'departures' || kind === 'service') && past) {
+    noStore()
+    return
+  }
+  if (kind === 'departures' && !date) {
+    const live = 'public, s-maxage=3, stale-while-revalidate=15'
+    responseHeaders.set('Cache-Control', live)
+    responseHeaders.set('CDN-Cache-Control', live)
+    responseHeaders.set('Netlify-CDN-Cache-Control', live)
+    return
+  }
+  const list = listCacheControl(request, pathSegments)
+  if (list) {
+    responseHeaders.set('Cache-Control', list)
+    responseHeaders.set('CDN-Cache-Control', list)
+    responseHeaders.set('Netlify-CDN-Cache-Control', list)
+  }
 }
 
 function listCacheControl(request: NextRequest, pathSegments: string[]): string | null {
@@ -70,7 +105,7 @@ function darwinUpstreamTimeoutMs(request: NextRequest, pathSegments: string[]): 
   if (kind === 'health' || kind === 'units' || kind === 'unit' || kind === 'history') return 45_000
   const date = request.nextUrl.searchParams.get('date') || ''
   if ((kind === 'departures' || kind === 'service') && /^\d{4}-\d{2}-\d{2}$/.test(date)) return 45_000
-  return 8_000
+  return 12_000
 }
 
 function detectCountryCode(request: NextRequest): string | null {
@@ -136,19 +171,17 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
       headers,
       body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
       signal: AbortSignal.timeout(darwinUpstreamTimeoutMs(request, pathSegments)),
+      dispatcher: darwinUpstreamAgent,
       // @ts-expect-error duplex required for streaming bodies in Node 18+
       duplex: 'half',
-    })
+    } as RequestInit)
 
-    // Node decompresses the body. Do not forward hop-by-hop / encoding headers
-    // (Caddy gzip + transfer-encoding made Safari show "Load failed").
     const responseHeaders = new Headers()
     const contentType = upstreamRes.headers.get('content-type')
     if (contentType) responseHeaders.set('content-type', contentType)
-    const historicalCache = upstreamRes.ok ? historicalCacheControl(request, pathSegments) : null
-    const listCache = upstreamRes.ok ? listCacheControl(request, pathSegments) : null
-    const cacheControl = historicalCache || listCache || upstreamRes.headers.get('cache-control')
-    if (cacheControl) responseHeaders.set('cache-control', cacheControl)
+    applyDarwinCacheHeaders(responseHeaders, request, pathSegments, upstreamRes.ok)
+    const retryAfter = upstreamRes.headers.get('retry-after')
+    if (retryAfter) responseHeaders.set('Retry-After', retryAfter)
 
     return new NextResponse(upstreamRes.body, {
       status: upstreamRes.status,
