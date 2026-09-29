@@ -660,10 +660,10 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
 
   const loadingOverlays = useBoardCoachLoading(
     activeFilteredRows,
-    hasStationSelected && showFormation && !futureTimetableMode && !historicalMode,
+    hasStationSelected && showFormation && !futureTimetableMode,
     historicalMode ? historyDate : undefined,
     historicalMode ? historyTime : undefined,
-    { poll: showDetailedInfo },
+    { poll: !historicalMode && showDetailedInfo },
   )
 
   const boardRows = useMemo(() => {
@@ -777,9 +777,9 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     ? [...historyDates].sort((a, b) => a.localeCompare(b))[0]
     : addDaysIsoDate(todayIsoDate, -90)
 
-  const applyDateTimeFilter = () => {
-    const dateValue = historyDateDraft.trim()
-    const normalizedTime = normalizeTimeInput(historyTimeDraft)
+  const applyDateTimeFilter = (dateRaw = historyDateDraft, timeRaw = historyTimeDraft) => {
+    const dateValue = dateRaw.trim()
+    const normalizedTime = normalizeTimeInput(timeRaw)
     const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(dateValue)
     const timeOk = normalizedTime !== null
     if (!dateOk) {
@@ -1006,8 +1006,10 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                         max={maxFutureDateIso}
                         aria-label="Choose date"
                         onChange={(event) => {
-                          setHistoryDateDraft(event.target.value)
+                          const nextDate = event.target.value
+                          setHistoryDateDraft(nextDate)
                           if (historyDateError) setHistoryDateError(null)
+                          applyDateTimeFilter(nextDate, historyTimeDraft)
                         }}
                       />
                     </div>
@@ -1022,6 +1024,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                       onChange={(value) => {
                         setHistoryTimeDraft(value)
                         if (historyDateError) setHistoryDateError(null)
+                        applyDateTimeFilter(historyDateDraft, value)
                       }}
                       showClear={false}
                       ariaLabel="Time"

@@ -12,12 +12,13 @@ Environment=TZ=Europe/London
 Environment=DARWIN_ROLE=heavy
 Environment=DAEMON_PORT=4002
 Environment=DARWIN_BASH_MAX_INFLIGHT=2
+Environment=NODE_OPTIONS=--max-old-space-size=5120
 EnvironmentFile=-/home/darwin/darwin-local-test/.env
 ExecStart=/usr/bin/node departures-daemon.mjs
 Restart=always
 RestartSec=5
 MemoryHigh=5G
-MemoryMax=7G
+MemoryMax=6G
 
 [Install]
 WantedBy=multi-user.target

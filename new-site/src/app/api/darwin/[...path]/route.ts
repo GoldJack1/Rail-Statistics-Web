@@ -44,6 +44,10 @@ function historicalCacheControl(request: NextRequest, pathSegments: string[]): s
   const date = request.nextUrl.searchParams.get('date') || ''
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
   if (date >= londonYmdNow()) return null
+  // Timed historical boards must not be CDN-cached: Netlify can reuse a previous
+  // `date=` response while `at=` changes, so the live site looks stuck.
+  const at = (request.nextUrl.searchParams.get('at') || '').trim()
+  if (at) return 'private, no-store'
   if (kind === 'departures') return 'public, s-maxage=120, stale-while-revalidate=600'
   return 'public, s-maxage=60, stale-while-revalidate=300'
 }
