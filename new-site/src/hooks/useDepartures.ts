@@ -191,6 +191,22 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
         setStatus('not-found')
         return
       }
+      if (!res.ok) {
+        let busy: { error?: string } | null = null
+        try {
+          busy = await res.clone().json() as { error?: string }
+        } catch {
+          busy = null
+        }
+        if (
+          date
+          && (res.status === 503 || res.status === 429)
+          && (busy?.error === 'overlay_busy' || busy?.error === 'rate_limited')
+        ) {
+          await delay(1500, signal)
+          res = await fetchDarwin(url, { signal })
+        }
+      }
       if (!res.ok) throw new Error(userMessageForStatus(res.status))
       const snap: DeparturesSnapshot = await res.json()
       putCache(key, snap)
