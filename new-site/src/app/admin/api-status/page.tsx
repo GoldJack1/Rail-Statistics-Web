@@ -278,23 +278,10 @@ const ApiStatusPage: React.FC = () => {
   const [firebaseCounts, setFirebaseCounts] = useState<FirebaseCounts | null>(null)
   const [firebaseError, setFirebaseError] = useState<string | null>(null)
 
-  const editorAuthHeaders = async (): Promise<HeadersInit> => {
-    try {
-      const firebase = await import('@/services/firebase')
-      await firebase.initializeFirebase()
-      const user = firebase.getFirebaseAuth()?.currentUser
-      if (!user) return {}
-      const token = await user.getIdToken()
-      return { Authorization: `Bearer ${token}` }
-    } catch {
-      return {}
-    }
-  }
-
   const runFetch = async (isInitial = false) => {
     if (isInitial) setStatus('loading')
     try {
-      const res = await fetch('/api/darwin/health', { headers: await editorAuthHeaders() })
+      const res = await fetchDarwin('/api/darwin/health')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const next: HealthPayload = await res.json()
       setHealth(next)

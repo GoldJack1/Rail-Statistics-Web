@@ -22,6 +22,7 @@ import StationSectionTitle from '@/components/models/StationDetails/StationSecti
 import type { AccountSection } from '@/components/misc/AccountSectionNav/AccountSectionNav'
 import SidebarDropdownSection from '@/components/misc/SidebarDropdownSection/SidebarDropdownSection'
 import type { ServiceDetail } from '@/types/darwin'
+import { resolveDarwinBrowserUrl } from '@/utils/darwinReadyFetch'
 import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
 import { paramAsString } from '@/utils/nextParams'
 import { formatLmTocName } from '@/utils/formatLmTocName'
@@ -162,7 +163,9 @@ const RawDataDump: React.FC<{ data: ServiceDetail }> = ({ data }) => {
   const qp = new URLSearchParams()
   if (data.historicalDate) qp.set('date', data.historicalDate)
   if (data.historicalAt) qp.set('at', data.historicalAt)
-  const apiUrl = `/api/darwin/service/${encodeURIComponent(data.rid)}${qp.toString() ? `?${qp.toString()}` : ''}`
+  const apiUrl = resolveDarwinBrowserUrl(
+    `/api/darwin/service/${encodeURIComponent(data.rid)}${qp.toString() ? `?${qp.toString()}` : ''}`,
+  )
   return (
     <details className="svc-rawdump" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
       <summary className="svc-rawdump-summary">

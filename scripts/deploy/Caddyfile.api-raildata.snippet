@@ -1,6 +1,6 @@
 # api-raildata.railstatistics.co.uk
 # Live :4001 — live boards, ping/station/messages/window
-# Heavy :4002 — units/unit/history/health/bash
+# Heavy :4002 — units/unit/history/health/bash, plus dated departures/service
 # Browser on railstatistics.co.uk talks here (not Netlify). Caddy injects X-API-Key.
 # Set CORS_ORIGIN on the daemons to include https://railstatistics.co.uk
 # Cloudflare can orange-cloud this hostname later (physical machine).
@@ -26,6 +26,15 @@
 (darwin_split) {
 	@heavy path /api/units* /api/unit/* /api/history* /api/health /api/plan/bash
 	handle @heavy {
+		reverse_proxy 127.0.0.1:4002 {
+			header_up X-API-Key {$INTERNAL_API_KEY}
+		}
+	}
+	@dated {
+		path /api/departures/* /api/service/*
+		query date=*
+	}
+	handle @dated {
 		reverse_proxy 127.0.0.1:4002 {
 			header_up X-API-Key {$INTERNAL_API_KEY}
 		}

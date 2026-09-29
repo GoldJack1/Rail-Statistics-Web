@@ -2,8 +2,8 @@
  * Darwin daemon may return 503 { error: 'starting' } while caches restore after restart.
  * This wrapper waits with backoff instead of hammering the VM or surfacing a hard error.
  *
- * On railstatistics.co.uk the browser calls api-raildata directly (EU VPS / later Cloudflare).
- * Localhost and Netlify previews keep using same-origin `/api/darwin` (Next proxy).
+ * Off localhost the production site calls api-raildata (Cloudflare → Caddy). Local `next dev`
+ * still uses same-origin `/api/darwin`. Admin routes stay on the Next proxy.
  */
 
 const MAX_STARTUP_WAIT_MS = Math.max(
@@ -11,7 +11,11 @@ const MAX_STARTUP_WAIT_MS = Math.max(
   Number(process.env.NEXT_PUBLIC_DARWIN_STARTUP_MAX_WAIT_MS || 600_000),
 )
 
-const PRODUCTION_DARWIN_ORIGIN = 'https://api-raildata.railstatistics.co.uk'
+export const PUBLIC_DARWIN_ORIGIN = 'https://api-raildata.railstatistics.co.uk'
+
+function isLocalHostname(host: string): boolean {
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1'
+}
 
 function abortError(): Error {
   const e = new Error('Aborted')
@@ -32,18 +36,21 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 function shouldUseDirectDarwinHost(): boolean {
-  if (typeof window === 'undefined') return false
-  const host = window.location.hostname
-  if (host === 'railstatistics.co.uk' || host === 'www.railstatistics.co.uk') return true
-  return Boolean((process.env.NEXT_PUBLIC_DARWIN_BROWSER_ORIGIN || '').trim())
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname
+    if (isLocalHostname(host)) return false
+    if (host === 'railstatistics.co.uk' || host === 'www.railstatistics.co.uk') return true
+    return Boolean((process.env.NEXT_PUBLIC_DARWIN_BROWSER_ORIGIN || '').trim())
+  }
+  return process.env.NODE_ENV === 'production'
 }
 
-/** Map `/api/darwin/...` to the public Darwin host in the production browser. */
+/** Map `/api/darwin/...` to the public Darwin host (Cloudflare) off localhost. */
 export function resolveDarwinBrowserUrl(input: string): string {
   if (!input.startsWith('/api/darwin')) return input
   if (input.startsWith('/api/darwin/admin')) return input
   if (!shouldUseDirectDarwinHost()) return input
-  const origin = (process.env.NEXT_PUBLIC_DARWIN_BROWSER_ORIGIN || PRODUCTION_DARWIN_ORIGIN).replace(/\/$/, '')
+  const origin = (process.env.NEXT_PUBLIC_DARWIN_BROWSER_ORIGIN || PUBLIC_DARWIN_ORIGIN).replace(/\/$/, '')
   return origin + input.replace(/^\/api\/darwin(?=\/|$)/, '/api')
 }
 

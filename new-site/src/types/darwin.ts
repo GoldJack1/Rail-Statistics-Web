@@ -3,7 +3,8 @@
  * Single source of truth for both the React side and (informally) the daemon.
  *
  * Wire path during local dev:
- *   browser  →  http://localhost:3000/api/darwin/*  (Vite proxy)
+ *   production browser  →  https://api-raildata.railstatistics.co.uk/api/*  (Cloudflare)
+ *   localhost           →  http://localhost:3000/api/darwin/*  (Next proxy)
  *                                  ↓
  *   daemon   ←  http://localhost:4001/api/*
  */

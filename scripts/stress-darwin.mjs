@@ -14,7 +14,10 @@
  *   history   mostly dated boards/services
  *   pages     departures, arrivals, service detail, units catalog, unit detail, bash
  *
- * Website:
+ * Production site (browser Darwin host — Caddy / Cloudflare, not Netlify /api/darwin):
+ *   node scripts/stress-darwin.mjs --origin https://api-raildata.railstatistics.co.uk --mix history --users 450 --seconds 40
+ *
+ * Netlify Darwin proxy (previews / admin fallback only):
  *   node scripts/stress-darwin.mjs --site --origin https://railstatistics.co.uk --mix history --users 450 --seconds 40
  */
 
@@ -138,9 +141,16 @@ const users = Math.max(1, Number(arg('users', '40')))
 const seconds = Math.max(5, Number(arg('seconds', '20')))
 const pollMs = Math.max(250, Number(arg('poll-ms', '10000')))
 const key = process.env.INTERNAL_API_KEY || process.env.DARWIN_API_KEY || ''
+let originHost = ''
+try {
+  originHost = new URL(origin).hostname
+} catch {
+  originHost = ''
+}
+const publicDarwinHost = originHost === 'api-raildata.railstatistics.co.uk'
 
-if (!viaProxy && !key) {
-  console.error('Set INTERNAL_API_KEY (or DARWIN_API_KEY), or pass --site / --proxy.')
+if (!viaProxy && !key && !publicDarwinHost) {
+  console.error('Set INTERNAL_API_KEY (or DARWIN_API_KEY), or pass --site / --proxy, or --origin https://api-raildata.railstatistics.co.uk')
   process.exit(1)
 }
 
@@ -167,7 +177,7 @@ let stopping = false
 
 function headers(jsonBody) {
   const h = { accept: 'application/json' }
-  if (!viaProxy) h['X-API-Key'] = key
+  if (!viaProxy && key) h['X-API-Key'] = key
   if (jsonBody) h['Content-Type'] = 'application/json'
   return h
 }
@@ -185,7 +195,11 @@ function ridsFor(crs) {
 async function request(kind, url, init = {}) {
   const t0 = performance.now()
   try {
-    const res = await fetch(url, { cache: 'no-store', ...init })
+    const res = await fetch(url, {
+      cache: 'no-store',
+      ...init,
+      signal: init.signal || AbortSignal.timeout(30_000),
+    })
     const buf = await res.arrayBuffer()
     const ms = performance.now() - t0
     stats.bytes += buf.byteLength

@@ -1,4 +1,4 @@
-import { Agent } from 'undici'
+import { Agent, fetch as undiciFetch } from 'undici'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireDarwinAdmin } from '@/app/api/darwin/_lib/requireDarwinAdmin'
 import { isLocalDarwinOrigin, resolveDarwinApiOrigin, resolveDarwinHeavyOrigin, shouldUseDirectHeavyOrigin } from '@/utils/darwinApiOrigin'
@@ -166,14 +166,16 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
 
   try {
     headers.set('Accept-Encoding', 'identity')
-    const upstreamRes = await fetch(upstream, {
-      method: request.method,
+    const method = request.method
+    const hasBody = method !== 'GET' && method !== 'HEAD'
+    const upstreamRes = await undiciFetch(upstream, {
+      method,
       headers,
-      body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
+      body: hasBody ? (request.body as never) : undefined,
       signal: AbortSignal.timeout(darwinUpstreamTimeoutMs(request, pathSegments)),
       dispatcher: darwinUpstreamAgent,
-      duplex: 'half',
-    } as RequestInit)
+      ...(hasBody ? { duplex: 'half' as const } : {}),
+    })
 
     const responseHeaders = new Headers()
     const contentType = upstreamRes.headers.get('content-type')
@@ -182,7 +184,7 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
     const retryAfter = upstreamRes.headers.get('retry-after')
     if (retryAfter) responseHeaders.set('Retry-After', retryAfter)
 
-    return new NextResponse(upstreamRes.body, {
+    return new NextResponse(upstreamRes.body as BodyInit | null, {
       status: upstreamRes.status,
       headers: responseHeaders,
     })
@@ -199,7 +201,8 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
         message: 'Darwin daemon is not reachable',
       })
     }
-    throw err
+    const message = err instanceof Error ? err.message : 'Darwin upstream fetch failed'
+    return json(500, { error: 'upstream_fetch_failed', message })
   }
 }
 
