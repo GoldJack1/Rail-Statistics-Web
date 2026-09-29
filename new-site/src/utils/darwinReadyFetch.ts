@@ -11,6 +11,9 @@ const MAX_STARTUP_WAIT_MS = Math.max(
   Number(process.env.NEXT_PUBLIC_DARWIN_STARTUP_MAX_WAIT_MS || 600_000),
 )
 
+const GATEWAY_RETRY_DELAY_MS = 1_500
+const MAX_GATEWAY_RETRIES = 5
+
 export const PUBLIC_DARWIN_ORIGIN = 'https://api-raildata.railstatistics.co.uk'
 
 function isLocalHostname(host: string): boolean {
@@ -63,11 +66,21 @@ export async function fetchDarwin(input: string, init?: RequestInit): Promise<Re
   const softDeadline = Date.now() + 20_000
   let lastRes: Response | null = null
 
+  let gatewayRetries = 0
+
   while (Date.now() < deadline) {
     if (init?.signal?.aborted) throw abortError()
 
     const res = await fetch(url, init)
     lastRes = res
+
+    // Caddy kills slow overlay rebuilds at ~25s TTFB. The daemon often finishes
+    // shortly after; retry like Realtime Trains waiting on a cold day board.
+    if (res.status === 504 && gatewayRetries < MAX_GATEWAY_RETRIES) {
+      gatewayRetries += 1
+      await sleep(GATEWAY_RETRY_DELAY_MS, init?.signal ?? undefined)
+      continue
+    }
 
     if (res.status !== 503 && res.status !== 429) return res
 

@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DeparturesSnapshot } from '@/types/darwin'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { recallBoard, rememberBoard, rememberRecentCrs } from '@/utils/darwinHotCache'
+import {
+  DARWIN_HISTORICAL_DAY_HOURS,
+  DARWIN_HISTORICAL_DAY_START,
+} from '@/utils/railwayOperatingDayUk'
 
 export type DeparturesStatus =
   | 'idle'
@@ -22,6 +26,11 @@ export interface UseDeparturesOptions {
   staleAfterMs?: number
   date?: string
   at?: string
+  /**
+   * Load a saved Darwin day (02:00, 24h) instead of replaying overlays to `at`.
+   * Time-of-day slicing belongs in the UI, as on Realtime Trains location search.
+   */
+  historicalDayBoard?: boolean
   /** Board fetched on the server so the first paint is not a loading spinner. */
   initialSnapshot?: DeparturesSnapshot | null
 }
@@ -109,10 +118,13 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
     staleAfterMs = DEFAULT_STALE_MS,
     date,
     at,
+    historicalDayBoard = false,
     initialSnapshot = null,
   } = opts
+  const queryHours = historicalDayBoard ? DARWIN_HISTORICAL_DAY_HOURS : hours
+  const queryAt = historicalDayBoard ? DARWIN_HISTORICAL_DAY_START : at
   const effectivePollMs = date ? 0 : pollMs
-  const cacheKey = `${code}|${hours ?? ''}|${date ?? ''}|${at ?? ''}`
+  const cacheKey = `${code}|${queryHours ?? ''}|${date ?? ''}|${queryAt ?? ''}`
 
   const [data, setData]     = useState<DeparturesSnapshot | null>(() => {
     if (!code) return null
@@ -161,9 +173,9 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
     inflightKeyRef.current = key
     try {
       const sp = new URLSearchParams()
-      if (hours != null) sp.set('hours', String(hours))
+      if (queryHours != null) sp.set('hours', String(queryHours))
       if (date) sp.set('date', date)
-      if (at) sp.set('at', at)
+      if (queryAt) sp.set('at', queryAt)
       const qs = sp.toString()
       const url = `/api/darwin/departures/${encodeURIComponent(code)}${qs ? `?${qs}` : ''}`
       let res: Response | null = null
@@ -204,7 +216,7 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
     } finally {
       if (inflightKeyRef.current === key) inflightKeyRef.current = null
     }
-  }, [applySnapshot, at, code, date, hours, putCache])
+  }, [applySnapshot, queryAt, code, date, queryHours, putCache])
 
   const refetch = useCallback(() => {
     if (!code) return

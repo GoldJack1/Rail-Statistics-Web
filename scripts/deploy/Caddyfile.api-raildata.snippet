@@ -37,8 +37,8 @@
 			header_up X-API-Key {$INTERNAL_API_KEY}
 			transport http {
 				dial_timeout 2s
-				response_header_timeout 25s
-				read_timeout 45s
+				response_header_timeout 90s
+				read_timeout 120s
 			}
 		}
 	}
@@ -53,8 +53,8 @@
 			header_down CDN-Cache-Control "public, s-maxage=120, stale-while-revalidate=600"
 			transport http {
 				dial_timeout 2s
-				response_header_timeout 25s
-				read_timeout 45s
+				response_header_timeout 90s
+				read_timeout 120s
 			}
 		}
 	}

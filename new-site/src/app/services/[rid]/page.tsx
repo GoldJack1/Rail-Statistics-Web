@@ -255,7 +255,7 @@ const ServiceDetailPage: React.FC = () => {
   const { status, data, error, ageMs, refetch } = useServiceDetail({
     rid,
     date: historicalDate,
-    at: historicalAt,
+    at: historicalMode ? undefined : historicalAt,
     pollMs: historicalMode || futureTimetableMode || viewMode === 'simple' ? 0 : 15_000,
   })
   const { stations } = useStations()

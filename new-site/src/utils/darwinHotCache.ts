@@ -114,7 +114,7 @@ export function startDarwinHotCache() {
       if (windowBody) healthPayload = windowBody
       if (dates?.dates) {
         historyDates = dates.dates
-          .filter((d) => d.hasState && d.hasTimetable)
+          .filter((d) => d.hasState || d.hasTimetable)
           .map((d) => d.date)
           .sort((a, b) => b.localeCompare(a))
       }

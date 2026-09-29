@@ -22,7 +22,7 @@ import TXTINPBUTWideButton from '@/components/textInputButtons/plain/TXTINPBUTWi
 import TXTINPBUTIconWideButtonSearch from '@/components/textInputButtons/special/TXTINPBUTIconWideButtonSearch'
 import { StationMessages } from '@/components/darwin/StationMessages'
 import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
-import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
+import { railwayOperatingDayIsoFromLondonParts, scheduledTimeInRailwayWindow, DARWIN_HISTORICAL_DAY_START } from '@/utils/railwayOperatingDayUk'
 import { paramAsString } from '@/utils/nextParams'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { peekHotHealth, peekHotHistoryDates } from '@/utils/darwinHotCache'
@@ -247,15 +247,15 @@ const DarwinDepartureRowCard = React.memo(function DarwinDepartureRowCard({
     const backTo = `/departures/${encodeURIComponent(code)}${backQs.toString() ? `?${backQs.toString()}` : ''}`
     qp.set('from', backTo)
     const suffix = qp.toString() ? `?${qp.toString()}` : ''
-    prefetchDarwinService(row.rid, historyDate || undefined, historyTime || undefined)
+    prefetchDarwinService(row.rid, historyDate || undefined, historicalMode ? undefined : historyTime || undefined)
     router.push(`/services/${encodeURIComponent(row.rid)}${suffix}`)
-  }, [router, historyDate, historyTime, code, hours, row.rid])
+  }, [router, historyDate, historyTime, historicalMode, code, hours, row.rid])
 
   return (
     <div
       role="listitem"
       onPointerEnter={() => {
-        if (detailedInfo) prefetchDarwinService(row.rid, historyDate || undefined, historyTime || undefined)
+        if (detailedInfo) prefetchDarwinService(row.rid, historyDate || undefined, historicalMode ? undefined : historyTime || undefined)
       }}
     >
       <DarwinServiceCard
@@ -462,7 +462,8 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     code: hasStationSelected ? code : '',
     hours,
     date: historyDate || undefined,
-    at: historyDate && historyTime ? historyTime : undefined,
+    at: historicalMode ? undefined : historyDate && historyTime ? historyTime : undefined,
+    historicalDayBoard: historicalMode,
     initialSnapshot: hasStationSelected ? initialSnapshot : null,
   })
   const boardReady = !hasStationSelected || (status !== 'idle' && status !== 'loading')
@@ -623,6 +624,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
 
   const selectedTocs = tocSelection ?? tocOptions
   const selectedServiceTypes = typeSelection ?? serviceTypeOptions
+  const historyWindowStart = historyTime || DARWIN_HISTORICAL_DAY_START
 
   useEffect(() => {
     setTocSelection(null)
@@ -644,9 +646,12 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       const stopModeMatch = showDetailedInfo
         ? selectedStopModes.includes(stopMode)
         : true
-      return tocMatch && serviceTypeMatch && stopModeMatch
+      const timeMatch = historicalMode
+        ? scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
+        : true
+      return tocMatch && serviceTypeMatch && stopModeMatch && timeMatch
     })
-  }, [data, selectedTocs, selectedServiceTypes, selectedStopModes, showDetailedInfo])
+  }, [data, selectedTocs, selectedServiceTypes, selectedStopModes, showDetailedInfo, historicalMode, historyWindowStart, hours])
 
   const filteredArrivals = useMemo(() => {
     if (!data) return []
@@ -656,9 +661,12 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       const tocMatch = selectedTocs.includes(tocLabel)
       const rowServiceType = row.serviceType || 'other'
       const serviceTypeMatch = selectedServiceTypes.includes(rowServiceType)
-      return tocMatch && serviceTypeMatch
+      const timeMatch = historicalMode
+        ? scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
+        : true
+      return tocMatch && serviceTypeMatch && timeMatch
     })
-  }, [data, selectedTocs, selectedServiceTypes])
+  }, [data, selectedTocs, selectedServiceTypes, historicalMode, historyWindowStart, hours])
 
   const activeFilteredRows =
     boardMode === 'departures' ? filteredDepartures : filteredArrivals
@@ -667,7 +675,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     activeFilteredRows,
     hasStationSelected && showFormation && !futureTimetableMode,
     historicalMode ? historyDate : undefined,
-    historicalMode ? historyTime : undefined,
+    undefined,
     { poll: !historicalMode && showDetailedInfo },
   )
 
@@ -679,7 +687,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   useEffect(() => {
     if (!showDetailedInfo || historicalMode || boardRows.length === 0) return
     for (const row of boardRows.slice(0, 2)) {
-      prefetchDarwinService(row.rid, historyDate || undefined, historyTime || undefined)
+      prefetchDarwinService(row.rid, historyDate || undefined, historicalMode ? undefined : historyTime || undefined)
     }
   }, [showDetailedInfo, historicalMode, historyDate, historyTime, boardRows])
 
@@ -690,8 +698,11 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
 
   const subtitle = useMemo<React.ReactNode>(() => {
     const movementWord = boardMode === 'departures' ? 'departures' : 'arrivals'
+    const countWindowHours = historicalMode ? hours : (data?.windowHours ?? hours)
     const countPrefix = data
-      ? `${filteredCounts.rows} ${movementWord} in the next ${data.windowHours} hour${data.windowHours === 1 ? '' : 's'}`
+      ? historicalMode
+        ? `${filteredCounts.rows} ${movementWord} from ${historyWindowStart} for ${countWindowHours} hour${countWindowHours === 1 ? '' : 's'}`
+        : `${filteredCounts.rows} ${movementWord} in the next ${countWindowHours} hour${countWindowHours === 1 ? '' : 's'}`
       : null
 
     if (!hasStationSelected) return 'Search by station name, CRS, or TIPLOC'
@@ -706,7 +717,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
 
     if (status === 'ok') {
       const statusText = historicalMode
-        ? `Historical snapshot${historyTime ? ` at ${historyTime}` : ' (latest for selected date)'}`
+        ? `Saved Darwin actuals for ${formatHeaderDate(historyDate)}`
         : timedCurrentDayMode
           ? `Timed board from ${historyTime}`
         : futureTimetableMode
@@ -730,7 +741,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     }
     if (status === 'stale') {
       const statusText = historicalMode
-        ? `Historical snapshot${historyTime ? ` at ${historyTime}` : ' (latest for selected date)'}`
+        ? `Saved Darwin actuals for ${formatHeaderDate(historyDate)}`
         : timedCurrentDayMode
           ? `Timed board from ${historyTime}`
         : futureTimetableMode
@@ -762,7 +773,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     if (status === 'error')     return <span className="dep-subtitle__status">{error ? `Error: ${error}` : 'Board data unavailable'} · {boardDateText}</span>
     if (status === 'not-found') return <span className="dep-subtitle__status">Unknown station</span>
     return ''
-  }, [status, error, ageMs, hasStationSelected, data, filteredCounts.rows, boardMode, historicalMode, timedCurrentDayMode, historyDate, historyTime, futureTimetableMode, todayIsoDate, operatingDayForMode, liveClockReady])
+  }, [status, error, ageMs, hasStationSelected, data, filteredCounts.rows, boardMode, historicalMode, timedCurrentDayMode, historyDate, historyTime, historyWindowStart, hours, futureTimetableMode, todayIsoDate, operatingDayForMode, liveClockReady])
 
   const stationSuggestions = useMemo(
     () => filterStationsForSearchMode(stations, searchInput, searchMode),
@@ -1178,7 +1189,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
 
             {hasStationSelected && status === 'error' && !data && (
               <section className="dep-main-message dep-main-message--error">
-                <h2>Live board unavailable</h2>
+                <h2>{historicalMode ? 'Historical board unavailable' : 'Live board unavailable'}</h2>
                 <p>{error}</p>
               </section>
             )}
@@ -1189,7 +1200,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   <span className="dep-loading-spinner" aria-hidden="true" />
                   <p>
                     {historicalMode
-                      ? `Loading historical data${historyDate ? ` for ${formatHeaderDate(historyDate)}` : ''}…`
+                      ? `Loading the day's trains${historyDate ? ` for ${formatHeaderDate(historyDate)}` : ''}…`
                       : futureTimetableMode
                         ? 'Loading timetable data…'
                         : `Loading live ${boardMode === 'departures' ? 'departures' : 'arrivals'}…`}
