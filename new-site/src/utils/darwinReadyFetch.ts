@@ -48,13 +48,43 @@ function shouldUseDirectDarwinHost(): boolean {
   return process.env.NODE_ENV === 'production'
 }
 
+function isHeavyDarwinBrowserPath(input: string): boolean {
+  const qIndex = input.indexOf('?')
+  const path = qIndex >= 0 ? input.slice(0, qIndex) : input
+  const query = qIndex >= 0 ? input.slice(qIndex) : ''
+  if (
+    path.includes('/history') ||
+    path.includes('/units') ||
+    path.includes('/unit/') ||
+    path.includes('/plan/')
+  ) {
+    return true
+  }
+  return /(?:^|[?&])date=/.test(query)
+}
+
 /** Map `/api/darwin/...` to the public Darwin host (Cloudflare) off localhost. */
 export function resolveDarwinBrowserUrl(input: string): string {
   if (!input.startsWith('/api/darwin')) return input
   if (input.startsWith('/api/darwin/admin')) return input
+  // Dated/heavy boards: stay on the Next proxy. Safari surfaces Caddy 504s
+  // (no CORS headers) as TypeError "Load failed" instead of a readable 504.
+  if (isHeavyDarwinBrowserPath(input)) return input
   if (!shouldUseDirectDarwinHost()) return input
   const origin = (process.env.NEXT_PUBLIC_DARWIN_BROWSER_ORIGIN || PUBLIC_DARWIN_ORIGIN).replace(/\/$/, '')
   return origin + input.replace(/^\/api\/darwin(?=\/|$)/, '/api')
+}
+
+function isTransientFetchFailure(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  if (err.name === 'AbortError') return false
+  const msg = err.message.toLowerCase()
+  return (
+    msg.includes('load failed') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('networkerror') ||
+    msg.includes('network error')
+  )
 }
 
 /**
@@ -62,6 +92,7 @@ export function resolveDarwinBrowserUrl(input: string): string {
  */
 export async function fetchDarwin(input: string, init?: RequestInit): Promise<Response> {
   const url = resolveDarwinBrowserUrl(input)
+  const dated = isHeavyDarwinBrowserPath(input)
   const deadline = Date.now() + MAX_STARTUP_WAIT_MS
   const softDeadline = Date.now() + 20_000
   let lastRes: Response | null = null
@@ -71,7 +102,18 @@ export async function fetchDarwin(input: string, init?: RequestInit): Promise<Re
   while (Date.now() < deadline) {
     if (init?.signal?.aborted) throw abortError()
 
-    const res = await fetch(url, init)
+    let res: Response
+    try {
+      res = await fetch(url, dated ? { ...init, cache: 'no-store' } : init)
+    } catch (err) {
+      if (init?.signal?.aborted) throw abortError()
+      if (dated && gatewayRetries < MAX_GATEWAY_RETRIES && isTransientFetchFailure(err)) {
+        gatewayRetries += 1
+        await sleep(GATEWAY_RETRY_DELAY_MS, init?.signal ?? undefined)
+        continue
+      }
+      throw err
+    }
     lastRes = res
 
     // Caddy kills slow overlay rebuilds at ~25s TTFB. The daemon often finishes

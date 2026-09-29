@@ -24,6 +24,14 @@ describe('resolveDarwinBrowserUrl', () => {
     )
     expect(resolveDarwinBrowserUrl('/api/darwin/admin/reload')).toBe('/api/darwin/admin/reload')
   })
+
+  it('keeps dated historical boards on the same-origin proxy', () => {
+    vi.stubGlobal('window', { location: { hostname: 'railstatistics.co.uk' } })
+    expect(
+      resolveDarwinBrowserUrl('/api/darwin/departures/LDS?hours=24&date=2026-09-27&at=02:00'),
+    ).toBe('/api/darwin/departures/LDS?hours=24&date=2026-09-27&at=02:00')
+    expect(resolveDarwinBrowserUrl('/api/darwin/history/dates')).toBe('/api/darwin/history/dates')
+  })
 })
 
 describe('fetchDarwin', () => {

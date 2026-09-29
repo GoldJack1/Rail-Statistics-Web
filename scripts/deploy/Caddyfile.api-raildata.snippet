@@ -11,16 +11,25 @@
 (darwin_cors) {
 	@preflight {
 		method OPTIONS
-		header Origin https://railstatistics.co.uk
-		header Origin https://www.railstatistics.co.uk
+		header Origin https://railstatistics.co.uk https://www.railstatistics.co.uk
 	}
 	handle @preflight {
 		header Access-Control-Allow-Origin "{http.request.header.Origin}"
 		header Access-Control-Allow-Methods "GET, POST, OPTIONS"
-		header Access-Control-Allow-Headers "Content-Type"
+		header Access-Control-Allow-Headers "Content-Type, Accept"
 		header Access-Control-Max-Age "86400"
 		header Vary Origin
 		respond 204
+	}
+}
+
+# Include this on the site block so Safari can read Caddy 504s (otherwise fetch is "Load failed").
+(darwin_error_cors) {
+	handle_errors {
+		header Access-Control-Allow-Origin "{http.request.header.Origin}"
+		header Access-Control-Allow-Methods "GET, POST, OPTIONS"
+		header Access-Control-Allow-Headers "Content-Type, Accept"
+		header Vary Origin
 	}
 }
 

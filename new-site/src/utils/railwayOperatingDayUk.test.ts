@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   railwayDayMinutesFromHhmm,
   scheduledTimeInRailwayWindow,
+  normalizeClockHhmm,
 } from './railwayOperatingDayUk'
 
 describe('scheduledTimeInRailwayWindow', () => {
@@ -16,6 +17,19 @@ describe('scheduledTimeInRailwayWindow', () => {
     expect(scheduledTimeInRailwayWindow('08:00', '08:00', 3)).toBe(true)
     expect(scheduledTimeInRailwayWindow('10:59', '08:00', 3)).toBe(true)
     expect(scheduledTimeInRailwayWindow('11:00', '08:00', 3)).toBe(false)
+  })
+
+  it('treats working-timetable seconds as the same minute', () => {
+    expect(scheduledTimeInRailwayWindow('08:10:30', '15:44', 1)).toBe(false)
+    expect(scheduledTimeInRailwayWindow('15:44:30', '15:44', 1)).toBe(true)
+  })
+})
+
+describe('normalizeClockHhmm', () => {
+  it('accepts Safari type=time values with seconds', () => {
+    expect(normalizeClockHhmm('15:44:00')).toBe('15:44')
+    expect(normalizeClockHhmm('15:44')).toBe('15:44')
+    expect(normalizeClockHhmm('1544')).toBe('15:44')
   })
 })
 

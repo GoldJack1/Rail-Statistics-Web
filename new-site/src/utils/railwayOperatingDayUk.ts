@@ -12,8 +12,29 @@ export const DARWIN_HISTORICAL_DAY_START = '02:00'
 /** Lookahead used to load a full saved historical day in one request (RTT-style). */
 export const DARWIN_HISTORICAL_DAY_HOURS = 24
 
+export function normalizeClockHhmm(raw: string): string | null {
+  const t = raw.trim()
+  if (!t) return ''
+  if (/^\d{3,4}$/.test(t)) {
+    const padded = t.padStart(4, '0')
+    const hour = Number(padded.slice(0, 2))
+    const minute = Number(padded.slice(2, 4))
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+      return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+    }
+    return null
+  }
+  // Safari <input type="time"> often yields HH:MM:SS, not HH:MM.
+  const match = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(t)
+  if (!match) return null
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
+
 export function hhmmToMinutes(hhmm: string): number | null {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim())
+  const match = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(hhmm.trim())
   if (!match) return null
   const hour = Number(match[1])
   const minute = Number(match[2])

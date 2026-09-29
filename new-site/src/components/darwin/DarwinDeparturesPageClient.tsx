@@ -22,7 +22,7 @@ import TXTINPBUTWideButton from '@/components/textInputButtons/plain/TXTINPBUTWi
 import TXTINPBUTIconWideButtonSearch from '@/components/textInputButtons/special/TXTINPBUTIconWideButtonSearch'
 import { StationMessages } from '@/components/darwin/StationMessages'
 import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
-import { railwayOperatingDayIsoFromLondonParts, scheduledTimeInRailwayWindow, DARWIN_HISTORICAL_DAY_START } from '@/utils/railwayOperatingDayUk'
+import { railwayOperatingDayIsoFromLondonParts, scheduledTimeInRailwayWindow, DARWIN_HISTORICAL_DAY_START, normalizeClockHhmm } from '@/utils/railwayOperatingDayUk'
 import { paramAsString } from '@/utils/nextParams'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { peekHotHealth, peekHotHistoryDates } from '@/utils/darwinHotCache'
@@ -121,22 +121,7 @@ function getLiveNowPartsUk(now = new Date()): { date: string; time: string } {
 }
 
 function normalizeTimeInput(raw: string): string | null {
-  const t = raw.trim()
-  if (!t) return ''
-  // Accept HHMM (e.g. 0920) or HMM (e.g. 920)
-  if (/^\d{3,4}$/.test(t)) {
-    const padded = t.padStart(4, '0')
-    const hh = Number(padded.slice(0, 2))
-    const mm = Number(padded.slice(2, 4))
-    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
-    return null
-  }
-  // Accept HH:MM
-  const m = /^(\d{1,2}):(\d{2})$/.exec(t)
-  if (!m) return null
-  const hh = Number(m[1]); const mm = Number(m[2])
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
-  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+  return normalizeClockHhmm(raw)
 }
 
 function getCurrentRailwayDayIsoUk(now = new Date()): string {
@@ -1022,10 +1007,8 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                         max={maxFutureDateIso}
                         aria-label="Choose date"
                         onChange={(event) => {
-                          const nextDate = event.target.value
-                          setHistoryDateDraft(nextDate)
+                          setHistoryDateDraft(event.target.value)
                           if (historyDateError) setHistoryDateError(null)
-                          applyDateTimeFilter(nextDate, historyTimeDraft)
                         }}
                       />
                     </div>
@@ -1035,12 +1018,13 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                     <TXTINPBUTWideButton
                       id="dep-history-time"
                       type="time"
+                      step={60}
                       lang="en-GB"
                       value={historyTimeDraft}
                       onChange={(value) => {
-                        setHistoryTimeDraft(value)
+                        const next = normalizeClockHhmm(value)
+                        setHistoryTimeDraft(next || value)
                         if (historyDateError) setHistoryDateError(null)
-                        applyDateTimeFilter(historyDateDraft, value)
                       }}
                       showClear={false}
                       ariaLabel="Time"

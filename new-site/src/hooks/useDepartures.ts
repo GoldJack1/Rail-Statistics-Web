@@ -80,7 +80,8 @@ function isTransientNetworkError(err: Error): boolean {
     msg.includes('fetch failed') ||
     msg.includes('enotfound') ||
     msg.includes('eai_again') ||
-    msg.includes('failed to fetch')
+    msg.includes('failed to fetch') ||
+    msg.includes('load failed')
   )
 }
 
