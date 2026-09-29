@@ -42,6 +42,7 @@ const UNIT_SECTIONS: AccountSection[] = [
 ]
 type UnitCatalogItem = {
   unitId: string
+  fleetId?: string | null
   endOfDayMileageByDate?: Record<string, number>
   services?: Array<{ rid?: string | null; start?: string | null }>
 }
