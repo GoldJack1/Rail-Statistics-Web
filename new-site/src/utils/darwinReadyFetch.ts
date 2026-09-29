@@ -60,7 +60,8 @@ export function resolveDarwinBrowserUrl(input: string): string {
 export async function fetchDarwin(input: string, init?: RequestInit): Promise<Response> {
   const url = resolveDarwinBrowserUrl(input)
   const deadline = Date.now() + MAX_STARTUP_WAIT_MS
-  const softDeadline = Date.now() + 20_000
+  /** overlay_busy/429 used to retry for 20s and felt like 10s per historical click. */
+  const softDeadline = Date.now() + 800
   let lastRes: Response | null = null
 
   while (Date.now() < deadline) {
@@ -79,10 +80,10 @@ export async function fetchDarwin(input: string, init?: RequestInit): Promise<Re
       if (err === 'starting' || err === 'reloading') kind = 'startup'
       else if (err === 'overlay_busy' || err === 'rate_limited') kind = 'soft'
       else return res
-      if (typeof body.retryAfterSec === 'number' && Number.isFinite(body.retryAfterSec)) {
+      if (kind === 'soft') {
+        retryMs = 400
+      } else if (typeof body.retryAfterSec === 'number' && Number.isFinite(body.retryAfterSec)) {
         retryMs = Math.min(15_000, Math.max(800, body.retryAfterSec * 1000))
-      } else if (kind === 'soft') {
-        retryMs = 2000
       }
     } catch {
       return res

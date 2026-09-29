@@ -120,7 +120,7 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
       seedCache(cacheKey, initialSnapshot)
       return initialSnapshot
     }
-    const cached = peekCache(cacheKey)
+    const cached = peekCache(cacheKey) || recallBoard(cacheKey)
     if (cached) {
       seedCache(cacheKey, cached)
       return cached
@@ -130,7 +130,7 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
   const [error, setError]   = useState<string | null>(null)
   const [status, setStatus] = useState<DeparturesStatus>(() => {
     if (!code) return 'idle'
-    return (initialSnapshot || peekCache(cacheKey)) ? 'ok' : 'loading'
+    return (initialSnapshot || peekCache(cacheKey) || recallBoard(cacheKey)) ? 'ok' : 'loading'
   })
   const [ageMs, setAgeMs]   = useState<number | null>(null)
 
