@@ -1,0 +1,13 @@
+.tfl-status-page { padding-bottom: 48px; }
+.tfl-mode-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 24px; }
+.tfl-error { color: #f87171; }
+.tfl-line-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+.tfl-line-list li {
+  background: rgba(255,255,255,0.04);
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: grid;
+  gap: 4px;
+}
+.tfl-line-list span { opacity: 0.8; font-size: 14px; }
+.tfl-line-list p { margin: 0; font-size: 13px; opacity: 0.75; }

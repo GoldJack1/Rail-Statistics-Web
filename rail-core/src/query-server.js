@@ -1,15 +1,60 @@
 import { createServer } from "node:http";
 import { existsSync, readdirSync } from "node:fs";
 import { dayPath, openCatalog, openDayDb, operatingDayYmd } from "./db.js";
+import { tocDisplayName } from "./toc-names.js";
+import { planBash } from "./bash-plan.js";
 
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
 const TT_DIR = process.env.TT_DIR ?? "./tt";
 const PORT = Number(process.env.QUERY_PORT ?? 4001);
 const INTERNAL = process.env.INTERNAL_API_KEY ?? "";
+const catalog = openCatalog(DATA_DIR);
+
+function stationName(crs, tpl) {
+  if (crs) {
+    const row = catalog.prepare(`SELECT name FROM tiploc WHERE crs = ? LIMIT 1`).get(String(crs).toUpperCase());
+    if (row?.name) return row.name;
+  }
+  if (tpl) {
+    const row = catalog.prepare(`SELECT name FROM tiploc WHERE tiploc = ?`).get(String(tpl).toUpperCase());
+    if (row?.name) return row.name;
+  }
+  return null;
+}
+
+function londonNowMinutes() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const hour = Number(parts.find((p) => p.type === "hour")?.value);
+  const minute = Number(parts.find((p) => p.type === "minute")?.value);
+  return hour * 60 + minute;
+}
+
+function hhmmMinutes(value) {
+  const s = String(value || "");
+  if (!/^\d{2}:\d{2}/.test(s)) return null;
+  return Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5));
+}
+
+function inHoursWindow(call, hours, nowMins) {
+  const stamp = call.etd || call.std || call.eta || call.sta || call.wtd || call.wta;
+  const mins = hhmmMinutes(stamp);
+  if (mins == null) return true;
+  const from = nowMins - 10;
+  const span = Math.max(1, hours) * 60;
+  const to = nowMins + span;
+  if (to < 24 * 60) return mins >= from && mins <= to;
+  return mins >= from || mins <= to - 24 * 60;
+}
 
 function cors(res) {
   res.setHeader("access-control-allow-origin", "*");
-  res.setHeader("access-control-allow-methods", "GET, OPTIONS");
+  res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+  res.setHeader("access-control-allow-headers", "Content-Type, X-API-Key");
 }
 
 function json(res, status, body, extra = {}) {
@@ -37,12 +82,18 @@ function boardRow(ymd, svc, call) {
   const liveKind = call.live_kind || "scheduled";
   const delayMinutes = call.delay_minutes;
   const cancelled = Boolean(svc.cancelled || call.cancelled);
+  const originCrs = svc.origin_crs;
+  const destCrs = svc.destination_crs;
+  const originName = svc.origin_name || stationName(originCrs);
+  const destName = svc.destination_name || stationName(destCrs);
+  const tocName = tocDisplayName(svc.toc) || svc.operator_name || null;
+  const trainId = svc.headcode && /^[0-9][A-Z][0-9]{2}$/i.test(svc.headcode) ? svc.headcode : "";
   return {
     rid: svc.rid,
-    trainId: svc.headcode || svc.uid,
+    trainId,
     uid: svc.uid,
     toc: svc.toc,
-    tocName: svc.operator_name,
+    tocName,
     trainCat: svc.category,
     serviceType: svc.service_type || "passenger",
     isPassing: Boolean(call.is_passing),
@@ -54,12 +105,12 @@ function boardRow(ymd, svc, call) {
     delayMinutes,
     platform: call.platform,
     livePlatform: call.platform,
-    origin: svc.origin_crs,
-    originName: svc.origin_name,
-    originCrs: svc.origin_crs,
-    destination: svc.destination_crs,
-    destinationName: svc.destination_name,
-    destinationCrs: svc.destination_crs,
+    origin: originCrs,
+    originName,
+    originCrs,
+    destination: destCrs,
+    destinationName: destName,
+    destinationCrs: destCrs,
     callingAfter: [],
     callingAfterNames: [],
     callingAfterCrs: [],
@@ -83,23 +134,24 @@ function boardRow(ymd, svc, call) {
   };
 }
 
-function wrapBoard(crs, generatedAt, services) {
+function wrapBoard(crs, generatedAt, services, hours) {
   const code = String(crs).toUpperCase();
+  const station = stationName(code) || code;
   return {
     code,
     tiploc: code,
     crs: code,
-    name: code,
+    name: station,
     generatedAt,
     updatedAt: generatedAt,
     services,
     departures: services,
     arrivals: [],
-    stationName: code,
+    stationName: station,
     stationCrs: code,
     matchedAs: "crs",
     timetableFile: "",
-    windowHours: 24,
+    windowHours: hours,
     counts: {
       departures: services.length,
       arrivals: 0,
@@ -121,7 +173,7 @@ function departures(ymd, crs, opts) {
   const db = openDay(ymd);
   if (!db) {
     const generatedAt = new Date().toISOString();
-    return wrapBoard(crs, generatedAt, []);
+    return wrapBoard(crs, generatedAt, [], opts.hours ?? 1);
   }
   const code = crs.toUpperCase();
   const tpls = catalog.prepare(`SELECT tiploc FROM tiploc WHERE crs = ?`).all(code).map((r) => r.tiploc);
@@ -136,32 +188,37 @@ function departures(ymd, crs, opts) {
      ORDER BY COALESCE(c.std, c.sta, c.wtd, c.wta, '99:99')`
   );
   const rows = q.all(code, ...tpls);
-  const services = rows.map((r) =>
-    boardRow(ymd,
-      {
-        rid: r.s_rid,
-        uid: r.uid,
-        rs_id: r.rs_id,
-        toc: r.toc,
-        operator_name: r.operator_name,
-        origin_crs: r.origin_crs,
-        origin_name: r.origin_name,
-        destination_crs: r.destination_crs,
-        destination_name: r.destination_name,
-        via: r.via,
-        service_type: r.service_type,
-        cancelled: r.s_cancelled,
-        cancel_reason: r.cancel_reason,
-        delay_reason: r.delay_reason,
-        is_charter: r.is_charter,
-        category: r.category,
-        headcode: r.headcode,
-      },
-      r
-    )
-  );
+  const hours = Math.max(1, Number(opts.hours) || 1);
+  const nowMins = londonNowMinutes();
+  const dated = Boolean(opts.dated);
+  const services = rows
+    .filter((r) => dated || inHoursWindow(r, hours, nowMins))
+    .map((r) =>
+      boardRow(ymd,
+        {
+          rid: r.s_rid,
+          uid: r.uid,
+          rs_id: r.rs_id,
+          toc: r.toc,
+          operator_name: r.operator_name,
+          origin_crs: r.origin_crs,
+          origin_name: r.origin_name,
+          destination_crs: r.destination_crs,
+          destination_name: r.destination_name,
+          via: r.via,
+          service_type: r.service_type,
+          cancelled: r.s_cancelled,
+          cancel_reason: r.cancel_reason,
+          delay_reason: r.delay_reason,
+          is_charter: r.is_charter,
+          category: r.category,
+          headcode: r.headcode,
+        },
+        r
+      )
+    );
   db.close();
-  return wrapBoard(crs, new Date().toISOString(), services);
+  return wrapBoard(crs, new Date().toISOString(), services, hours);
 }
 
 function serviceDetail(ymd, rid) {
@@ -172,7 +229,7 @@ function serviceDetail(ymd, rid) {
     db.close();
     return null;
   }
-  const calls = db.prepare(`SELECT * FROM calls WHERE rid = ? ORDER BY seq`).all(rid);
+  const calls = db.prepare(`SELECT * FROM calls WHERE rid = ? ORDER BY COALESCE(std, sta, wtd, wta, '99:99'), seq`).all(rid);
   const units = db.prepare(`SELECT unit_id FROM units WHERE rid = ?`).all(rid).map((u) => u.unit_id);
   const callingPoints = calls.map((c) => ({
       crs: c.crs,
@@ -197,7 +254,7 @@ function serviceDetail(ymd, rid) {
   const last = callingPoints.length - 1;
   const stops = callingPoints.map((c, i) => ({
     tpl: c.tiploc,
-    name: null,
+    name: stationName(c.crs, c.tiploc),
     crs: c.crs,
     slot: c.isPassing ? "PP" : i === 0 ? "OR" : i === last ? "DT" : "IP",
     pta: c.sta,
@@ -226,13 +283,13 @@ function serviceDetail(ymd, rid) {
     trainId: svc.headcode,
     ssd: ymd,
     toc: svc.toc,
-    tocName: svc.operator_name,
+    tocName: tocDisplayName(svc.toc) || svc.operator_name,
     trainCat: svc.category,
     isPassenger: svc.service_type !== "freight",
     origin: svc.origin_crs,
-    originName: svc.origin_name,
+    originName: svc.origin_name || stationName(svc.origin_crs),
     destination: svc.destination_crs,
-    destinationName: svc.destination_name,
+    destinationName: svc.destination_name || stationName(svc.destination_crs),
     cancelled: Boolean(svc.cancelled),
     cancellation: null,
     partiallyCancelled: false,
@@ -258,9 +315,83 @@ function listDates() {
     .sort();
 }
 
-const catalog = openCatalog(DATA_DIR);
+function fleetIdOf(unitId, cls) {
+  const fromClass = String(cls || "").match(/\d{3}/)?.[0];
+  if (fromClass) return fromClass;
+  return String(unitId || "").match(/^(\d{3})/)?.[1] || "other";
+}
 
-const server = createServer((req, res) => {
+function unitsDays() {
+  return listDates().filter((ymd) => {
+    const db = openDay(ymd);
+    if (!db) return false;
+    const n = db.prepare(`SELECT COUNT(*) AS n FROM units`).get().n;
+    db.close();
+    return n > 0;
+  });
+}
+
+function unitsFleets(day) {
+  const counts = new Map();
+  const bump = (id) => counts.set(id, (counts.get(id) || 0) + 1);
+  if (day && day !== "all") {
+    const db = openDay(day);
+    if (db) {
+      for (const row of db.prepare(`SELECT DISTINCT unit_id FROM units`).all()) bump(fleetIdOf(row.unit_id));
+      db.close();
+    }
+  } else {
+    for (const row of catalog.prepare(`SELECT unit_id, class FROM units`).all()) bump(fleetIdOf(row.unit_id, row.class));
+  }
+  return [...counts.entries()].map(([fleetId, unitCount]) => ({ fleetId, unitCount })).sort((a, b) => a.fleetId.localeCompare(b.fleetId));
+}
+
+function unitDetail(unitId, date) {
+  const cat = catalog.prepare(`SELECT * FROM units WHERE unit_id = ?`).get(unitId);
+  const ymd = date || operatingDayYmd();
+  const db = openDay(ymd);
+  const dayRows = db
+    ? db.prepare(`SELECT * FROM units WHERE unit_id = ?`).all(unitId)
+    : [];
+  if (db) db.close();
+  if (!cat && !dayRows.length) return null;
+  const services = [];
+  for (const row of dayRows) {
+    if (!row.rid) continue;
+    const detail = serviceDetail(ymd, row.rid);
+    services.push({
+      rid: row.rid,
+      headcode: row.headcode || detail?.trainId || null,
+      start: detail?.stops?.[0] ? `${ymd}T${detail.stops[0].ptd || detail.stops[0].pta || "00:00"}:00` : null,
+      end: detail?.stops?.length
+        ? `${ymd}T${detail.stops[detail.stops.length - 1].pta || detail.stops[detail.stops.length - 1].ptd || "00:00"}:00`
+        : null,
+      startTpl: detail?.stops?.[0]?.tpl || null,
+      endTpl: detail?.stops?.[detail.stops.length - 1]?.tpl || null,
+      startName: detail?.originName || null,
+      endName: detail?.destinationName || null,
+      position: null,
+      reversed: false,
+    });
+  }
+  let json = {};
+  try {
+    json = cat?.json ? JSON.parse(cat.json) : {};
+  } catch {
+    json = {};
+  }
+  return {
+    unitId,
+    fleetId: fleetIdOf(unitId, cat?.class),
+    vehicles: json.vehicles || [],
+    lastSeenRid: dayRows[0]?.rid || null,
+    updatedAt: new Date().toISOString(),
+    latestService: services[0] ? serviceDetail(ymd, services[0].rid) : null,
+    services,
+  };
+}
+
+const server = createServer(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -289,7 +420,12 @@ const server = createServer((req, res) => {
         json(res, 400, { error: "bad date" });
         return;
       }
-      const board = departures(date, dep[1], { passengersOnly: url.searchParams.get("passengers") === "1" });
+      const hours = Number(url.searchParams.get("hours") || 1);
+      const board = departures(date, dep[1], {
+        passengersOnly: url.searchParams.get("passengers") === "1",
+        hours,
+        dated: Boolean(url.searchParams.get("date")),
+      });
       const cache =
         date < operatingDayYmd()
           ? { "cache-control": "public, max-age=300, s-maxage=3600" }
@@ -322,10 +458,50 @@ const server = createServer((req, res) => {
       json(res, 200, { dates: listDates() });
       return;
     }
+    if (req.method === "POST" && url.pathname === "/api/plan/bash") {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      let body = {};
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      } catch {
+        json(res, 400, { ok: false, error: "invalid json" });
+        return;
+      }
+      const ymd = body.date || operatingDayYmd();
+      const db = openDay(ymd);
+      if (!db) {
+        json(res, 404, { ok: false, error: "no day" });
+        return;
+      }
+      const out = planBash(db, (crs) => stationName(crs) || crs, body);
+      db.close();
+      json(res, out.ok ? 200 : 400, out);
+      return;
+    }
+    if (url.pathname === "/api/units/days") {
+      json(res, 200, { days: unitsDays() });
+      return;
+    }
+    if (url.pathname === "/api/units/fleets") {
+      json(res, 200, { fleets: unitsFleets(url.searchParams.get("day") || "all") });
+      return;
+    }
+    if (url.pathname === "/api/units/catalog") {
+      const units = catalog.prepare(`SELECT unit_id, class, operator, updated_at FROM units`).all();
+      json(res, 200, { units, updatedAt: new Date().toISOString() });
+      return;
+    }
+    const unitOne = url.pathname.match(/^\/api\/unit\/([^/]+)$/);
+    if (unitOne) {
+      const detail = unitDetail(decodeURIComponent(unitOne[1]), url.searchParams.get("date") || undefined);
+      json(res, detail ? 200 : 404, detail ?? { error: "not found" });
+      return;
+    }
     if (url.pathname.startsWith("/api/units/")) {
       const id = decodeURIComponent(url.pathname.slice("/api/units/".length));
-      const row = catalog.prepare(`SELECT * FROM units WHERE unit_id = ?`).get(id);
-      json(res, row ? 200 : 404, row ?? { error: "not found" });
+      const detail = unitDetail(id, url.searchParams.get("date") || undefined);
+      json(res, detail ? 200 : 404, detail ?? { error: "not found" });
       return;
     }
     if (url.pathname === "/api/window") {

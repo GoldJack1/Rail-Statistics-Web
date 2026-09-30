@@ -51,7 +51,8 @@ function getHeaderPageTitle(pathname: string): string {
   if (pathname.startsWith('/bash-planner')) return 'Bash planner'
   if (pathname.startsWith('/services')) return 'Service'
   if (pathname.startsWith('/units')) return 'Units'
-  if (pathname.startsWith('/admin/api-status')) return 'API Status'
+  if (pathname.startsWith('/status/tfl')) return 'TfL status'
+  if (pathname.startsWith('/status/rtppm')) return 'RTPPM'
   return 'Rail Statistics'
 }
 
@@ -78,6 +79,8 @@ const Header: React.FC = () => {
   const isDeparturesActive = pathname.startsWith('/departures') || pathname.startsWith('/services')
   const isBashPlannerActive = pathname.startsWith('/bash-planner')
   const isUnitsActive = pathname.startsWith('/units')
+  const isTflActive = pathname.startsWith('/status/tfl')
+  const isRtppmActive = pathname.startsWith('/status/rtppm')
   const isApiStatusActive = pathname.startsWith('/admin/api-status') || pathname === '/api-status'
 
   const isAccountActive = pathname.startsWith('/account') || pathname.startsWith('/leaderboards')
@@ -95,6 +98,8 @@ const Header: React.FC = () => {
           { to: '/departures', label: 'Departures', active: isDeparturesActive },
           { to: '/bash-planner', label: 'Bash', active: isBashPlannerActive },
           { to: '/units', label: 'Units', active: isUnitsActive },
+          { to: '/status/tfl', label: 'TfL', active: isTflActive },
+          { to: '/status/rtppm', label: 'RTPPM', active: isRtppmActive },
           { to: '/admin/api-status', label: 'API Status', active: isApiStatusActive },
         ]
       : []),

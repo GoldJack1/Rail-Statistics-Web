@@ -1,0 +1,11 @@
+[Unit]
+Description=rail-core 04:00 UK timetable fetch + CIF import
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/darwin/rail-core
+EnvironmentFile=/home/darwin/rail-core/.env
+Environment=TZ=Europe/London
+ExecStart=/usr/bin/node src/fetch-timetable.js
+User=darwin

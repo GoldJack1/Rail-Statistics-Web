@@ -14,9 +14,12 @@
     "import-ptac": "node src/import-ptac.js",
     "import-tt": "node src/import-tt.js",
     "import-corpus": "node src/import-corpus.js",
+    "fetch-tt": "node src/fetch-timetable.js",
+    "ptac": "node src/kafka-ptac.js",
     "test": "node --test src/*.test.js"
   },
   "dependencies": {
-    "kafkajs": "^2.2.4"
+    "kafkajs": "^2.2.4",
+    "stompit": "^0.26.0"
   }
 }

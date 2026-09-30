@@ -1,0 +1,15 @@
+[Unit]
+Description=rail-core PTAC Kafka (all day)
+After=network.target rail-core-ingest.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/darwin/rail-core
+EnvironmentFile=/home/darwin/rail-core/.env
+ExecStart=/usr/bin/node src/kafka-ptac.js
+Restart=on-failure
+RestartSec=5
+User=darwin
+
+[Install]
+WantedBy=multi-user.target
