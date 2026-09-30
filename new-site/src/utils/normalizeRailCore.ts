@@ -46,68 +46,101 @@ export function parseHistoryDatesList(body: unknown): string[] {
     .sort((a, b) => b.localeCompare(a))
 }
 
-export function isRailCoreBoard(body: unknown): body is { services: Record<string, unknown>[]; generatedAt?: string; station?: { crs?: string } } {
+export function isRailCoreBoard(body: unknown): body is { services: Record<string, unknown>[]; generatedAt?: string; station?: { crs?: string }; crs?: string } {
   if (!body || typeof body !== 'object') return false
-  const services = (body as { services?: unknown }).services
-  if (!Array.isArray(services) || services.length === 0) return false
-  const first = services[0] as Record<string, unknown>
-  return 'scheduled' in first && !('scheduledTime' in first)
+  const o = body as { services?: unknown; departures?: unknown }
+  return Array.isArray(o.services) && !Array.isArray(o.departures)
+}
+
+function rowFromRailCore(r: Record<string, unknown>): DepartureRow {
+  const scheduled = String(r.scheduledTime || r.scheduled || '')
+  const live = String(r.liveTime || r.actual || r.estimated || scheduled)
+  const kind = (r.liveKind as DepartureRow['liveKind']) || (r.actual ? 'actual' : r.estimated ? 'est' : 'scheduled')
+  const cancelled = Boolean(r.cancelled)
+  const delayMinutes = typeof r.delayMinutes === 'number' ? r.delayMinutes : null
+  return {
+    rid: String(r.rid || ''),
+    trainId: String(r.trainId || r.headcode || r.uid || ''),
+    uid: String(r.uid || ''),
+    toc: String(r.toc || ''),
+    tocName: r.tocName ? String(r.tocName) : r.operatorName ? String(r.operatorName) : null,
+    trainCat: r.trainCat ? String(r.trainCat) : r.category ? String(r.category) : null,
+    serviceType: (r.serviceType as DepartureRow['serviceType']) || 'passenger',
+    isPassing: Boolean(r.isPassing),
+    scheduledTime: scheduled,
+    scheduledAt: String(r.scheduledAt || `${new Date().toISOString().slice(0, 10)}T${scheduled || '00:00'}:00`),
+    liveTime: live,
+    liveKind: kind,
+    delayMinutes,
+    platform: r.platform ? String(r.platform) : null,
+    livePlatform: r.livePlatform ? String(r.livePlatform) : r.platform ? String(r.platform) : null,
+    origin: String(r.origin || r.originCrs || ''),
+    originName: r.originName ? String(r.originName) : null,
+    originCrs: r.originCrs ? String(r.originCrs) : null,
+    destination: String(r.destination || r.destinationCrs || ''),
+    destinationName: r.destinationName ? String(r.destinationName) : null,
+    destinationCrs: r.destinationCrs ? String(r.destinationCrs) : null,
+    callingAfter: Array.isArray(r.callingAfter) ? (r.callingAfter as string[]) : [],
+    callingAfterNames: Array.isArray(r.callingAfterNames) ? (r.callingAfterNames as (string | null)[]) : [],
+    callingAfterCrs: Array.isArray(r.callingAfterCrs) ? (r.callingAfterCrs as (string | null)[]) : [],
+    isPassenger: r.isPassenger !== false && String(r.serviceType || 'passenger') !== 'freight',
+    cancelled,
+    cancellation: (r.cancellation as DepartureRow['cancellation']) || (r.cancelReason ? { source: 'ts', reason: String(r.cancelReason) } : null),
+    delayReason: (r.delayReason as DepartureRow['delayReason']) || null,
+    loadingPercentage: null,
+    coachLoading: null,
+    reverseFormation: false,
+    hasConsist: false,
+    actualSource: r.actualSource ? String(r.actualSource) : null,
+    hasAssociations: false,
+    hasAlerts: false,
+    status: String(r.status || (cancelled ? 'Cancelled' : delayMinutes ? `Delayed ${delayMinutes} min` : 'On time')),
+  }
 }
 
 export function normalizeDeparturesSnapshot(body: unknown, fallbackCode: string): DeparturesSnapshot {
-  if (!isRailCoreBoard(body)) return body as DeparturesSnapshot
-  const generatedAt = String(body.generatedAt || new Date().toISOString())
-  const crs = String(body.station?.crs || fallbackCode).toUpperCase()
-  const services: DepartureRow[] = body.services.map((raw) => {
-    const r = raw as Record<string, unknown>
-    const scheduled = String(r.scheduled || '')
-    const live = String(r.actual || r.estimated || scheduled)
-    const kind = String(r.liveKind || (r.actual ? 'actual' : r.estimated ? 'est' : 'scheduled'))
-    return {
-      rid: String(r.rid || ''),
-      trainId: String(r.headcode || r.uid || ''),
-      uid: String(r.uid || ''),
-      toc: String(r.toc || ''),
-      tocName: r.operatorName ? String(r.operatorName) : null,
-      trainCat: r.category ? String(r.category) : null,
-      serviceType: (r.serviceType as DepartureRow['serviceType']) || 'passenger',
-      isPassing: Boolean(r.isPassing),
-      scheduledTime: scheduled,
-      scheduledAt: `${generatedAt.slice(0, 10)}T${scheduled || '00:00'}:00`,
-      liveTime: live,
-      liveKind: kind as DepartureRow['liveKind'],
-      delayMinutes: typeof r.delayMinutes === 'number' ? r.delayMinutes : null,
-      platform: r.platform ? String(r.platform) : null,
-      livePlatform: r.platform ? String(r.platform) : null,
-      origin: String(r.originCrs || ''),
-      originName: r.originName ? String(r.originName) : null,
-      originCrs: r.originCrs ? String(r.originCrs) : null,
-      destination: String(r.destinationCrs || ''),
-      destinationName: r.destinationName ? String(r.destinationName) : null,
-      destinationCrs: r.destinationCrs ? String(r.destinationCrs) : null,
-      callingAfter: [],
-      callingAfterNames: [],
-      callingAfterCrs: [],
-      isPassenger: String(r.serviceType || 'passenger') === 'passenger',
-      cancelled: Boolean(r.cancelled),
-      cancellation: r.cancelReason ? { source: 'ts', reason: String(r.cancelReason) } : null,
-      delayReason: r.delayReason ? { source: 'ts', reason: String(r.delayReason) } : null,
-      loadingPercentage: null,
-      coachLoading: null,
-      reverseFormation: false,
-      hasConsist: false,
-      actualSource: r.actualSource ? String(r.actualSource) : null,
-    } as DepartureRow
-  })
+  if (body && typeof body === 'object' && Array.isArray((body as DeparturesSnapshot).departures)) {
+    return body as DeparturesSnapshot
+  }
+  const o = (body && typeof body === 'object' ? body : {}) as {
+    services?: Record<string, unknown>[]
+    generatedAt?: string
+    updatedAt?: string
+    station?: { crs?: string }
+    crs?: string
+    stationCrs?: string
+    name?: string
+    stationName?: string
+    tiploc?: string
+  }
+  const generatedAt = String(o.generatedAt || o.updatedAt || new Date().toISOString())
+  const crs = String(o.crs || o.stationCrs || o.station?.crs || fallbackCode).toUpperCase()
+  const rows = Array.isArray(o.services) ? o.services.map(rowFromRailCore) : []
   return {
-    code: crs,
-    tiploc: crs,
-    crs,
-    name: crs,
-    generatedAt,
+    tiploc: String(o.tiploc || crs),
+    stationName: o.stationName || o.name || crs,
+    stationCrs: crs,
+    matchedAs: 'crs',
     updatedAt: generatedAt,
-    services,
-  } as DeparturesSnapshot
+    timetableFile: '',
+    windowHours: 24,
+    counts: {
+      departures: rows.length,
+      arrivals: 0,
+      cancelled: rows.filter((r) => r.cancelled).length,
+      withDelay: rows.filter((r) => r.delayMinutes).length,
+      messages: 0,
+    },
+    messages: [],
+    kafka: {
+      consumed: 0,
+      updatesApplied: 0,
+      startedAt: generatedAt,
+      lastMessageAt: generatedAt,
+    },
+    departures: rows,
+    arrivals: [],
+  }
 }
 
 export function isRailCoreService(body: unknown): body is { callingPoints: RailCoreCall[]; rid: string } {

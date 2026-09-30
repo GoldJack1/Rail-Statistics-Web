@@ -24,8 +24,8 @@ describe('normalizeRailCore', () => {
     }
     expect(isRailCoreBoard(body)).toBe(true)
     const snap = normalizeDeparturesSnapshot(body, 'PAD')
-    expect(snap.services[0].scheduledTime).toBe('10:00')
-    expect(snap.services[0].isPassing).toBe(true)
-    expect(snap.services[0].actualSource).toBe('darwin')
+    expect(snap.departures[0].scheduledTime).toBe('10:00')
+    expect(snap.departures[0].isPassing).toBe(true)
+    expect(snap.departures[0].actualSource).toBe('darwin')
   })
 })

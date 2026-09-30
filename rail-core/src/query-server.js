@@ -34,6 +34,9 @@ function boardRow(ymd, svc, call) {
   const actual = call.atd || call.ata || call.atp;
   const est = call.etd || call.eta || call.etp;
   const liveTime = actual || est || planned || "";
+  const liveKind = call.live_kind || "scheduled";
+  const delayMinutes = call.delay_minutes;
+  const cancelled = Boolean(svc.cancelled || call.cancelled);
   return {
     rid: svc.rid,
     trainId: svc.headcode || svc.uid,
@@ -46,9 +49,9 @@ function boardRow(ymd, svc, call) {
     scheduledTime: planned,
     scheduledAt: `${ymd}T${planned || "00:00"}:00`,
     liveTime,
-    liveKind: call.live_kind || "scheduled",
+    liveKind,
     actualSource: call.actual_source,
-    delayMinutes: call.delay_minutes,
+    delayMinutes,
     platform: call.platform,
     livePlatform: call.platform,
     origin: svc.origin_crs,
@@ -61,13 +64,56 @@ function boardRow(ymd, svc, call) {
     callingAfterNames: [],
     callingAfterCrs: [],
     isPassenger: svc.service_type !== "freight",
-    cancelled: Boolean(svc.cancelled || call.cancelled),
+    cancelled,
     cancellation: svc.cancel_reason ? { source: "ts", reason: svc.cancel_reason } : null,
     delayReason: svc.delay_reason ? { source: "ts", reason: svc.delay_reason } : null,
     loadingPercentage: null,
     coachLoading: null,
     reverseFormation: false,
     hasConsist: false,
+    hasAssociations: false,
+    hasAlerts: false,
+    status: cancelled
+      ? "Cancelled"
+      : delayMinutes
+        ? `Delayed ${delayMinutes} min`
+        : liveKind === "actual"
+          ? "Departed"
+          : "On time",
+  };
+}
+
+function wrapBoard(crs, generatedAt, services) {
+  const code = String(crs).toUpperCase();
+  return {
+    code,
+    tiploc: code,
+    crs: code,
+    name: code,
+    generatedAt,
+    updatedAt: generatedAt,
+    services,
+    departures: services,
+    arrivals: [],
+    stationName: code,
+    stationCrs: code,
+    matchedAs: "crs",
+    timetableFile: "",
+    windowHours: 24,
+    counts: {
+      departures: services.length,
+      arrivals: 0,
+      cancelled: services.filter((s) => s.cancelled).length,
+      withDelay: services.filter((s) => s.delayMinutes).length,
+      messages: 0,
+    },
+    messages: [],
+    kafka: {
+      consumed: 0,
+      updatesApplied: 0,
+      startedAt: generatedAt,
+      lastMessageAt: generatedAt,
+    },
   };
 }
 
@@ -75,25 +121,21 @@ function departures(ymd, crs, opts) {
   const db = openDay(ymd);
   if (!db) {
     const generatedAt = new Date().toISOString();
-    return {
-      code: crs.toUpperCase(),
-      tiploc: crs.toUpperCase(),
-      crs: crs.toUpperCase(),
-      name: crs.toUpperCase(),
-      generatedAt,
-      updatedAt: generatedAt,
-      services: [],
-    };
+    return wrapBoard(crs, generatedAt, []);
   }
+  const code = crs.toUpperCase();
+  const tpls = catalog.prepare(`SELECT tiploc FROM tiploc WHERE crs = ?`).all(code).map((r) => r.tiploc);
+  const placeholders = tpls.map(() => "?").join(",") || "NULL";
   const q = db.prepare(
     `SELECT c.*, s.rid as s_rid, s.uid, s.rs_id, s.toc, s.operator_name, s.origin_crs, s.origin_name,
             s.destination_crs, s.destination_name, s.via, s.service_type, s.cancelled as s_cancelled,
             s.cancel_reason, s.delay_reason, s.is_charter, s.category, s.headcode
      FROM calls c JOIN services s ON s.rid = c.rid
-     WHERE c.crs = ? ${opts.passengersOnly ? "AND s.service_type = 'passenger'" : ""}
+     WHERE (c.crs = ? ${tpls.length ? `OR c.tiploc IN (${placeholders})` : ""})
+       ${opts.passengersOnly ? "AND s.service_type = 'passenger'" : ""}
      ORDER BY COALESCE(c.std, c.sta, c.wtd, c.wta, '99:99')`
   );
-  const rows = q.all(crs.toUpperCase());
+  const rows = q.all(code, ...tpls);
   const services = rows.map((r) =>
     boardRow(ymd,
       {
@@ -119,16 +161,7 @@ function departures(ymd, crs, opts) {
     )
   );
   db.close();
-  const generatedAt = new Date().toISOString();
-  return {
-    code: crs.toUpperCase(),
-    tiploc: crs.toUpperCase(),
-    crs: crs.toUpperCase(),
-    name: crs.toUpperCase(),
-    generatedAt,
-    updatedAt: generatedAt,
-    services,
-  };
+  return wrapBoard(crs, new Date().toISOString(), services);
 }
 
 function serviceDetail(ymd, rid) {

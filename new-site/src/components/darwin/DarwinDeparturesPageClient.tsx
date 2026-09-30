@@ -27,6 +27,7 @@ import { railwayOperatingDayIsoFromLondonParts, scheduledTimeInRailwayWindow, DA
 import { paramAsString } from '@/utils/nextParams'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { parseHistoryDatesList } from '@/utils/normalizeRailCore'
+import { peekHotHealth, peekHotHistoryDates } from '@/utils/darwinHotCache'
 import { prefetchDarwinService } from '@/hooks/useServiceDetail'
 import { formatLmTocName } from '@/utils/formatLmTocName'
 import { isoDateToDdMmYyyy } from '@/utils/dateDdMmYyyy'
