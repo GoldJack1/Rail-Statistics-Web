@@ -28,15 +28,6 @@ export function isLocalDarwinOrigin(origin: string): boolean {
 export function resolveDarwinHeavyOrigin(liveOrigin = resolveDarwinApiOrigin()): string {
   const fromEnv = (process.env.DARWIN_HEAVY_ORIGIN || '').trim().replace(/\/$/, '')
   if (fromEnv) return fromEnv
-  try {
-    const url = new URL(liveOrigin)
-    if (url.port === '4001') {
-      url.port = '4002'
-      return url.origin
-    }
-  } catch {
-    /* keep live origin */
-  }
   return liveOrigin
 }
 

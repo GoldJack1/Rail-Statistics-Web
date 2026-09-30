@@ -67,9 +67,11 @@ function applyDarwinCacheHeaders(
   const kind = pathSegments[0]
   const date = request.nextUrl.searchParams.get('date') || ''
   const past = /^\d{4}-\d{2}-\d{2}$/.test(date) && date < londonYmdNow()
-  // Historical boards must never hit the CDN: Netlify reused date-only bodies for ?at=.
   if ((kind === 'departures' || kind === 'service') && past) {
-    noStore()
+    const hist = 'public, s-maxage=3600, stale-while-revalidate=86400'
+    responseHeaders.set('Cache-Control', hist)
+    responseHeaders.set('CDN-Cache-Control', hist)
+    responseHeaders.set('Netlify-CDN-Cache-Control', hist)
     return
   }
   if (kind === 'departures' && !date) {
@@ -101,11 +103,9 @@ function listCacheControl(request: NextRequest, pathSegments: string[]): string 
 
 function darwinUpstreamTimeoutMs(request: NextRequest, pathSegments: string[]): number {
   const kind = pathSegments[0]
-  if (kind === 'plan') return 90_000
-  if (kind === 'health' || kind === 'units' || kind === 'unit' || kind === 'history') return 45_000
-  const date = request.nextUrl.searchParams.get('date') || ''
-  if ((kind === 'departures' || kind === 'service') && /^\d{4}-\d{2}-\d{2}$/.test(date)) return 45_000
-  return 12_000
+  if (kind === 'plan') return 20_000
+  if (kind === 'health' || kind === 'units' || kind === 'unit' || kind === 'history') return 8_000
+  return 8_000
 }
 
 function detectCountryCode(request: NextRequest): string | null {

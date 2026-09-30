@@ -1,0 +1,14 @@
+[Unit]
+Description=rail-core query API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/darwin/rail-core
+EnvironmentFile=/home/darwin/rail-core/.env
+ExecStart=/usr/bin/node src/query-server.js
+Restart=always
+User=darwin
+
+[Install]
+WantedBy=multi-user.target

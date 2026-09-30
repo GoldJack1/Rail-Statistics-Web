@@ -277,6 +277,7 @@ const ApiStatusPage: React.FC = () => {
   const [samples, setSamples] = useState<SamplePoint[]>([])
   const [firebaseCounts, setFirebaseCounts] = useState<FirebaseCounts | null>(null)
   const [firebaseError, setFirebaseError] = useState<string | null>(null)
+  const [extraFeeds, setExtraFeeds] = useState<string>('idle')
 
   const runFetch = async (isInitial = false) => {
     if (isInitial) setStatus('loading')
@@ -330,12 +331,31 @@ const ApiStatusPage: React.FC = () => {
     }
   }
 
+  const fetchExtraFeeds = async () => {
+    try {
+      const [tfl, kb, rtppm] = await Promise.all([
+        fetch('/api/tfl?mode=tube').then((r) => r.status),
+        fetch('/api/knowledgebase/incidents').then((r) => r.status),
+        fetchDarwin('/api/darwin/rtppm').then((r) => r.status),
+      ])
+      setExtraFeeds(`TfL ${tfl} · KB incidents ${kb} · RTPPM ${rtppm}`)
+    } catch {
+      setExtraFeeds('error')
+    }
+  }
+
   const fetchAvailable = async () => {
     try {
-      const res = await fetchDarwin('/api/darwin/history/dates?snapshots=1&sizes=1')
+      const res = await fetchDarwin('/api/darwin/dates')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const payload: HistoryDatesPayload = await res.json()
-      setAvailable(payload)
+      const raw = await res.json() as { dates?: Array<string | { date: string }> }
+      const dates = (raw.dates || []).map((d) => {
+        if (typeof d === 'string') {
+          return { date: d, hasState: true, hasTimetable: true, snapshots: [] as string[] }
+        }
+        return { date: d.date, hasState: true, hasTimetable: true, snapshots: [] as string[] }
+      })
+      setAvailable({ count: dates.length, retentionDays: 30, dates })
     } catch {}
   }
 
@@ -396,6 +416,7 @@ const ApiStatusPage: React.FC = () => {
     setSamples(loadSamples())
     runFetch(true)
     fetchAvailable()
+    fetchExtraFeeds()
     fetchFirebase()
     const t = window.setInterval(() => void runFetch(false), 15000)
     const a = window.setInterval(() => void fetchAvailable(), 120000)
@@ -721,6 +742,16 @@ const ApiStatusPage: React.FC = () => {
                 </article>
               )
             })}
+          </div>
+        </section>
+        <section className="api-panel" aria-label="Extra feeds">
+          <h2>Extra feeds</h2>
+          <p className="api-panel-subtitle">TfL Unified, Knowledgebase incidents, RTPPM (rail-core). Status codes from this browser.</p>
+          <div className="api-status-grid">
+            <Card title="Probe">{extraFeeds}</Card>
+            <Card title="HSP / TT source">NRDP (see rail-core .env SOURCE_HSP)</Card>
+            <Card title="Push Port">RDM Kafka → ingest</Card>
+            <Card title="TRUST / RTPPM">NR Open Data STOMP</Card>
           </div>
         </section>
       </div>

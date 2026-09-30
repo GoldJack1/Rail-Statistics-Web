@@ -1,0 +1,13 @@
+# Query API — Caddy snippet (replace darwin :4001 / darwin-heavy :4002)
+
+api-raildata.railstatistics.co.uk {
+	reverse_proxy 127.0.0.1:4001 {
+		header_up Host {host}
+		transport http {
+			dial_timeout 2s
+			response_header_timeout 8s
+		}
+	}
+	header Access-Control-Allow-Origin *
+	header Access-Control-Allow-Methods "GET, OPTIONS"
+}

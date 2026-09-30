@@ -17,6 +17,7 @@ import Hero7Subscription from './home/sections/Hero7Subscription'
 import Hero8ClosingDownload from './home/sections/Hero8ClosingDownload'
 import Hero9Migrate from './home/sections/Hero9Migrate'
 import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
+import { KnowledgebaseIncidentsBanner } from '@/components/darwin/KnowledgebaseIncidentsBanner'
 
 export default function HomePage() {
   const [downloadModalOpen, setDownloadModalOpen] = useState(false)
@@ -33,6 +34,7 @@ export default function HomePage() {
   return (
     <div className="container">
       <div className="main">
+        <KnowledgebaseIncidentsBanner />
         <Hero1DownloadSplash onDownloadCta={onDownloadCta} />
         <HomeHeroImagePreloader />
 

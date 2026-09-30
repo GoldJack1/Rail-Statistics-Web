@@ -1,0 +1,22 @@
+{
+  "name": "rail-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "ingest": "node src/ingest-server.js",
+    "query": "node src/query-server.js",
+    "seal": "node src/seal-day.js",
+    "prune": "node src/prune.js",
+    "import-ptac": "node src/import-ptac.js",
+    "import-tt": "node src/import-tt.js",
+    "import-corpus": "node src/import-corpus.js",
+    "test": "node --test src/*.test.js"
+  },
+  "dependencies": {
+    "kafkajs": "^2.2.4"
+  }
+}

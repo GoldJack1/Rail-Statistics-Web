@@ -1,5 +1,6 @@
 import type { DeparturesSnapshot } from '@/types/darwin'
 import { resolveDarwinApiOrigin } from '@/utils/darwinApiOrigin'
+import { normalizeDeparturesSnapshot } from '@/utils/normalizeRailCore'
 
 export async function loadDeparturesSnapshot(opts: {
   code: string
@@ -23,7 +24,7 @@ export async function loadDeparturesSnapshot(opts: {
       signal: AbortSignal.timeout(1500),
     })
     if (!res.ok) return null
-    return (await res.json()) as DeparturesSnapshot
+    return normalizeDeparturesSnapshot(await res.json(), code)
   } catch {
     return null
   }

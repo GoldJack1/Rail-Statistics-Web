@@ -1,12 +1,8 @@
 /*
- * Mirrors the JSON contract emitted by `darwin-local-test/departures-daemon.mjs`.
- * Single source of truth for both the React side and (informally) the daemon.
- *
- * Wire path during local dev:
- *   production browser  →  https://api-raildata.railstatistics.co.uk/api/*  (Cloudflare)
+ * Wire path:
+ *   production browser  →  https://api-raildata.railstatistics.co.uk/api/*  (rail-core query)
  *   localhost           →  http://localhost:3000/api/darwin/*  (Next proxy)
- *                                  ↓
- *   daemon   ←  http://localhost:4001/api/*
+
  */
 
 export type DarwinReasonSource =
@@ -55,6 +51,8 @@ export interface DepartureRow {
   serviceType: DepartureServiceType;
   /** True when this row is a pass-through point (PP/OPPP), not a calling stop. */
   isPassing?: boolean;
+  /** darwin | hsp | trust — where recorded times came from. */
+  actualSource?: string | null;
 
   scheduledTime: string;       // "HH:MM"
   scheduledAt: string;         // ISO8601 anchored to today
@@ -232,6 +230,11 @@ export interface ServiceStop {
   wtd: string | null;
   /** Working passing time. */
   wtp: string | null;
+  /** Recorded Darwin/HSP/TRUST times (pass points keep Darwin atp). */
+  ata?: string | null;
+  atd?: string | null;
+  atp?: string | null;
+  actualSource?: string | null;
   platform: string | null;
   livePlatform: string | null;
   /** TB / TF / T / T X / OPRM / etc. */

@@ -14,7 +14,7 @@ export function ukCalendarYmd(now = new Date()): string {
 }
 
 /** PTAC/Darwin unit days we still treat as current (matches daemon history retention). */
-export const UNIT_DAY_RETENTION_DAYS = 90
+export const UNIT_DAY_RETENTION_DAYS = 30
 
 /** PTAC often publishes diagrams 1–2 days ahead of the working day. */
 export const UNIT_DAY_FUTURE_SLACK_DAYS = 2

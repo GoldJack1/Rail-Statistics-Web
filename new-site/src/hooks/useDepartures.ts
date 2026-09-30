@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DeparturesSnapshot } from '@/types/darwin'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
+import { normalizeDeparturesSnapshot } from '@/utils/normalizeRailCore'
 import { recallBoard, rememberBoard, rememberRecentCrs } from '@/utils/darwinHotCache'
 import {
   DARWIN_HISTORICAL_DAY_HOURS,
@@ -205,7 +206,7 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
         return
       }
       if (!res.ok) throw new Error(userMessageForStatus(res.status))
-      const snap: DeparturesSnapshot = await res.json()
+      const snap: DeparturesSnapshot = normalizeDeparturesSnapshot(await res.json(), code)
       putCache(key, snap)
       rememberBoard(key, snap)
       rememberRecentCrs(code)

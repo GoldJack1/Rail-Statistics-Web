@@ -1,5 +1,6 @@
 import type { DeparturesSnapshot } from '@/types/darwin'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
+import { normalizeDeparturesSnapshot, parseHistoryDatesList } from '@/utils/normalizeRailCore'
 
 const RECENT_CRS_KEY = 'rs-darwin-recent-crs'
 const BOARD_KEY_PREFIX = 'rs-darwin-board:'
@@ -7,9 +8,7 @@ const MAX_RECENT = 8
 const BOARD_MAX_AGE_MS = 60_000
 const HIST_BOARD_MAX_AGE_MS = 30 * 60_000
 
-type HistoryDatesResponse = {
-  dates?: Array<{ date: string; hasState: boolean; hasTimetable: boolean }>
-}
+type HistoryDatesResponse = { dates?: unknown }
 
 type UnitsCatalogResponse = {
   units: unknown[]
@@ -95,9 +94,10 @@ export async function prefetchBoard(code: string, hours = 1, date?: string, at?:
   qs.set('hours', String(hours))
   if (date) qs.set('date', date)
   if (date && at) qs.set('at', at)
-  const snap = await prefetchJson<DeparturesSnapshot>(
+  const snapRaw = await prefetchJson<unknown>(
     `/api/darwin/departures/${encodeURIComponent(crs)}?${qs.toString()}`,
   )
+  const snap = snapRaw ? normalizeDeparturesSnapshot(snapRaw, crs) : null
   if (snap?.updatedAt) rememberBoard(key, snap)
 }
 
@@ -113,10 +113,7 @@ export function startDarwinHotCache() {
       ])
       if (windowBody) healthPayload = windowBody
       if (dates?.dates) {
-        historyDates = dates.dates
-          .filter((d) => d.hasState || d.hasTimetable)
-          .map((d) => d.date)
-          .sort((a, b) => b.localeCompare(a))
+        historyDates = parseHistoryDatesList(dates)
       }
     } catch {
       started = false

@@ -1,0 +1,14 @@
+[Unit]
+Description=rail-core NR STOMP (RTPPM + TRUST)
+After=network.target rail-core-ingest.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/darwin/rail-core
+EnvironmentFile=/home/darwin/rail-core/.env
+ExecStart=/usr/bin/node src/stomp-nr.js
+Restart=always
+User=darwin
+
+[Install]
+WantedBy=multi-user.target

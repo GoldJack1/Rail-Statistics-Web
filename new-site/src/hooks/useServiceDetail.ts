@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ServiceDetail } from '@/types/darwin'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
+import { normalizeServiceDetail } from '@/utils/normalizeRailCore'
 
 export type ServiceDetailStatus =
   | 'idle'
@@ -203,7 +204,7 @@ export function useServiceDetail({
         return
       }
       if (!res.ok) throw new Error(userMessageForStatus(res.status))
-      const detail: ServiceDetail = await res.json()
+      const detail: ServiceDetail = normalizeServiceDetail(await res.json())
       putCachedService(cacheKey, detail, cacheTtlMs(date))
       applyCachedDetail(detail, staleAfterMs, setData, setError, setAgeMs, setStatus)
     } catch (e) {

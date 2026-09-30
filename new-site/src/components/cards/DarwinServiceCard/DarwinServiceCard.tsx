@@ -264,6 +264,9 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
         >
           <span className="rs-service-card__status-label">{status.label}</span>
           {status.mode ? <span className="rs-service-card__status-mode">{status.mode}</span> : null}
+          {row.actualSource ? (
+            <span className="rs-service-card__status-mode">({row.actualSource})</span>
+          ) : null}
           <div className="rs-button__inner-shadow" />
         </div>
       </section>

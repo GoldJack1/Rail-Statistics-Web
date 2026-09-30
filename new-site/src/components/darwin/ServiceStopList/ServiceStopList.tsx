@@ -79,14 +79,14 @@ function computeDeltaMinutes(
 function departuresAnchorTime(stop: ServiceStop, kind: StopKind): string | null {
   const live = trimSeconds(stop.liveTime)
   if (live) return live
-  if (kind === 'pass') return trimSeconds(stop.wtp || stop.wtd || stop.wta || stop.pta || stop.ptd || null) || null
-  return trimSeconds(stop.ptd || stop.pta || stop.wtd || stop.wta || stop.wtp || null) || null
+  if (kind === 'pass') return trimSeconds(stop.atp || stop.wtp || stop.wtd || stop.wta || stop.pta || stop.ptd || null) || null
+  return trimSeconds(stop.atd || stop.ata || stop.ptd || stop.pta || stop.wtd || stop.wta || stop.wtp || null) || null
 }
 
 function primaryTime(stop: ServiceStop, kind: StopKind): { label: string; value: string } {
   const wArr = trimSeconds(stop.wta)
   const wDep = trimSeconds(stop.wtd)
-  const wPass = trimSeconds(stop.wtp)
+  const wPass = trimSeconds(stop.atp || stop.wtp)
   if (kind === 'pass') return { label: 'Pass', value: wPass || wDep || wArr || '—' }
   if (kind === 'destination') return { label: 'Arr', value: stop.pta || wArr || stop.ptd || wDep || '—' }
   return { label: 'Dep', value: stop.ptd || wDep || stop.pta || wArr || '—' }
@@ -203,7 +203,7 @@ function ServiceStopRow({
   const pDep = stop.ptd || null
   const wArr = trimSeconds(stop.wta) || null
   const wDep = trimSeconds(stop.wtd) || null
-  const wPass = stop.wtp ? trimSeconds(stop.wtp) : null
+  const wPass = stop.atp ? trimSeconds(stop.atp) : stop.wtp ? trimSeconds(stop.wtp) : null
   const platformValue = stop.livePlatform || stop.platform || ''
   const platformSource = platformSourceLabel(stop.platformSource)
   const scheduledForDelta = kind === 'pass'

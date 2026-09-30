@@ -1,0 +1,10 @@
+[Unit]
+Description=rail-core HSP seal previous operating day
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/darwin/rail-core
+EnvironmentFile=/home/darwin/rail-core/.env
+ExecStart=/usr/bin/node src/seal-day.js
+# Pass yesterday via a wrapper on the VPS, e.g. date -d yesterday +%F
