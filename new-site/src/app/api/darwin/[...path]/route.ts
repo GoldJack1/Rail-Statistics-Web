@@ -1,7 +1,7 @@
 import { Agent, fetch as undiciFetch } from 'undici'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireDarwinAdmin } from '@/app/api/darwin/_lib/requireDarwinAdmin'
-import { isLocalDarwinOrigin, resolveDarwinApiOrigin, resolveDarwinHeavyOrigin, shouldUseDirectHeavyOrigin } from '@/utils/darwinApiOrigin'
+import { isLocalDarwinOrigin, resolveDarwinApiOrigin } from '@/utils/darwinApiOrigin'
 
 /** Reuse TLS to the VPS across warm Netlify isolates (Ohio→Germany was ~8s per live board). */
 const darwinUpstreamAgent = new Agent({
@@ -27,22 +27,8 @@ function londonYmdNow(): string {
   }).format(new Date())
 }
 
-function isPastBoardDate(request: NextRequest): boolean {
-  const date = request.nextUrl.searchParams.get('date') || ''
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false
-  return date < londonYmdNow()
-}
-
-function resolveUpstreamOrigin(request: NextRequest, pathSegments: string[]): string {
-  const origin = resolveDarwinApiOrigin()
-  const heavy = resolveDarwinHeavyOrigin(origin)
-  if (!shouldUseDirectHeavyOrigin(origin, heavy)) return origin
-  const kind = pathSegments[0]
-  if (kind === 'units' || kind === 'unit' || kind === 'history' || kind === 'plan') {
-    return heavy
-  }
-  if ((kind === 'departures' || kind === 'service') && isPastBoardDate(request)) return heavy
-  return origin
+function resolveUpstreamOrigin(_request: NextRequest, _pathSegments: string[]): string {
+  return resolveDarwinApiOrigin()
 }
 
 function applyDarwinCacheHeaders(
@@ -104,6 +90,8 @@ function listCacheControl(request: NextRequest, pathSegments: string[]): string 
 function darwinUpstreamTimeoutMs(request: NextRequest, pathSegments: string[]): number {
   const kind = pathSegments[0]
   if (kind === 'plan') return 20_000
+  if (kind === 'departures') return 25_000
+  if (kind === 'service' && request.nextUrl.searchParams.get('date')) return 20_000
   if (kind === 'health' || kind === 'units' || kind === 'unit' || kind === 'history') return 8_000
   return 8_000
 }
@@ -165,7 +153,6 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
   if (contentType) headers.set('Content-Type', contentType)
 
   try {
-    headers.set('Accept-Encoding', 'identity')
     const method = request.method
     const hasBody = method !== 'GET' && method !== 'HEAD'
     const upstreamRes = await undiciFetch(upstream, {

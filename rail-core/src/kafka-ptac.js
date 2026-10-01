@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Always-on PTAC Kafka consumer → ingest /ingest/unit.
- * Runs all day; does not wait for a clock slot.
+ * Startup seeks back PTAC_INITIAL_REPLAY_MIN (default 48h), matching the old daemon.
  */
 const enabled = process.env.PTAC_ENABLED !== "0";
 const brokers = (process.env.PTAC_BROKERS || process.env.PTAC_BOOTSTRAP || process.env.DARWIN_PUSH_BROKERS || "")
@@ -13,10 +13,13 @@ if (!enabled || !brokers.length) {
   process.exit(0);
 }
 
+import { writeFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
+import { parsePtacMessage } from "./parse-ptac.js";
 
 const ingest = process.env.INGEST_ORIGIN ?? "http://127.0.0.1:4003";
-const topic = process.env.PTAC_TOPIC || "ptac";
+const topic = process.env.PTAC_TOPIC || "prod-1033-Passenger-Train-Allocation-and-Consist-1_0";
+const replayMin = Math.max(0, Number(process.env.PTAC_INITIAL_REPLAY_MIN || 2880));
 const { Kafka } = await import("kafkajs");
 const kafka = new Kafka({
   clientId: "rail-core-ptac",
@@ -28,14 +31,56 @@ const kafka = new Kafka({
     password: process.env.PTAC_PASSWORD || process.env.DARWIN_PUSH_PASSWORD || "",
   },
 });
-const consumer = kafka.consumer({ groupId: process.env.PTAC_GROUP_ID || "rail-core-ptac" });
+const consumer = kafka.consumer({
+  groupId: process.env.PTAC_GROUP_ID || "rail-core-ptac",
+  sessionTimeout: Number(process.env.PTAC_SESSION_TIMEOUT_MS || 120_000),
+  heartbeatInterval: Number(process.env.PTAC_HEARTBEAT_INTERVAL_MS || 10_000),
+  rebalanceTimeout: Number(process.env.PTAC_REBALANCE_TIMEOUT_MS || 90_000),
+});
 await consumer.connect();
 await consumer.subscribe({ topic, fromBeginning: false });
-console.log("PTAC Kafka consumer running", topic);
+
+let replayOffsets = null;
+if (replayMin > 0) {
+  const admin = kafka.admin();
+  await admin.connect();
+  try {
+    replayOffsets = await admin.fetchTopicOffsetsByTimestamp(topic, Date.now() - replayMin * 60_000);
+  } catch (err) {
+    console.warn("PTAC replay offset fetch failed:", err.message);
+  } finally {
+    await admin.disconnect();
+  }
+}
+
+console.log("PTAC Kafka consumer running", topic, replayMin ? `replay ${replayMin} min` : "live only");
+
+let sought = false;
+consumer.on(consumer.events.GROUP_JOIN, () => {
+  if (sought || !replayOffsets?.length) return;
+  sought = true;
+  for (const o of replayOffsets) {
+    if (o?.offset == null || String(o.offset) === "-1") continue;
+    try {
+      consumer.seek({ topic, partition: o.partition, offset: String(o.offset) });
+    } catch (err) {
+      console.warn("PTAC seek failed", o, err.message);
+    }
+  }
+  console.log("PTAC kafka seek applied", replayOffsets.length, "partition(s)", `from ${replayMin} min ago`);
+});
+
+const stats = { consumed: 0, posted: 0, skipped: 0, lastSkip: "" };
+let dumped = false;
+setInterval(() => {
+  console.log("PTAC stats", JSON.stringify(stats));
+}, 40_000);
+
 await consumer.run({
   eachMessage: async ({ message }) => {
     const buf = message.value;
     if (!buf) return;
+    stats.consumed += 1;
     let text;
     try {
       text =
@@ -49,31 +94,51 @@ await consumer.run({
     try {
       payload = JSON.parse(text);
     } catch {
-      payload = { raw: text };
+      payload = text.trim().startsWith("<") ? text : { raw: text };
     }
-    const unitId =
-      payload.unit_id ||
-      payload.unitId ||
-      payload.resourceGroupId ||
-      payload.ResourceGroupId ||
-      payload.id;
-    if (!unitId) return;
-    const body = {
-      unit_id: String(unitId),
-      class: payload.class || payload.fleetId || payload.FleetId || null,
-      operator: payload.operator || payload.toc || null,
-      rid: payload.rid || payload.RID || null,
-      operating_day: payload.operatingDay || payload.operating_day || payload.date || null,
-      json: payload,
-    };
-    try {
-      await fetch(`${ingest}/ingest/unit`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    } catch {
-      /* ingest down */
+    if (!dumped) {
+      dumped = true;
+      try {
+        const sample = typeof payload === "string" ? payload.slice(0, 4000) : JSON.stringify(payload).slice(0, 4000);
+        writeFileSync("data/ptac-last.json", sample);
+      } catch {
+        /* ignore */
+      }
+    }
+    const parsed = parsePtacMessage(payload);
+    if (!parsed.unitIds.length) {
+      stats.skipped += 1;
+      stats.lastSkip = "no-unit";
+      return;
+    }
+    for (const unitId of parsed.unitIds) {
+      try {
+        const res = await fetch(`${ingest}/ingest/unit`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            unit_id: unitId,
+            class: parsed.json?.allocations?.[0]?.resourceGroups?.find((g) => g.unitId === unitId)?.fleetId || null,
+            operator: parsed.json?.companyDarwin || parsed.json?.operator || null,
+            uid: parsed.uid,
+            headcode: parsed.headcode,
+            core: parsed.core,
+            operating_day: parsed.operatingDay,
+            originTpl: parsed.originTpl,
+            originHHMM: parsed.originHHMM,
+            json: parsed.json,
+          }),
+        });
+        if (res.ok) stats.posted += 1;
+        else {
+          stats.skipped += 1;
+          stats.lastSkip = `http-${res.status}`;
+        }
+      } catch {
+        stats.skipped += 1;
+        stats.lastSkip = "ingest-down";
+      }
     }
   },
 });
+

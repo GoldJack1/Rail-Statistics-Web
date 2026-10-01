@@ -1,90 +1,88 @@
 #!/usr/bin/env node
 /**
- * Close-of-day HSP merge: fill missing public stop actuals; keep Darwin pass times.
+ * Close-of-day HSP merge for passenger RIDs with missing public actuals.
  * Usage: node src/seal-day.js 2026-09-29
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { hhmm, liveKind, openDayDb } from "./db.js";
+import "./load-env.js";
+import { openCatalog, openDayDb, operatingDayYmd, walCheckpoint } from "./db.js";
+import { applyHspDetails } from "./hsp-apply.js";
+import { hspServiceDetails } from "./hsp-client.js";
 
-const ymd = process.argv[2];
+function yesterdayYmd() {
+  const today = operatingDayYmd();
+  const t = Date.parse(`${today}T12:00:00Z`) - 86400000;
+  return new Date(t).toISOString().slice(0, 10);
+}
+
+const ymd = process.argv[2] || yesterdayYmd();
 if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd ?? "")) {
   console.error("usage: node src/seal-day.js YYYY-MM-DD");
   process.exit(1);
 }
 
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
-const HSP_ORIGIN = process.env.NRDP_HSP_ORIGIN ?? "https://hsp-prod.rockshore.net";
-const user = process.env.NRDP_HSP_USER ?? "";
-const pass = process.env.NRDP_HSP_PASSWORD ?? "";
+const perSec = Math.max(0.5, Number(process.env.HSP_DETAILS_PER_SEC || 2));
+const gapMs = Math.round(1000 / perSec);
 
-function applyMetrics(db, metrics) {
-  const services = metrics?.Services ?? metrics?.services ?? [];
-  let filled = 0;
-  for (const svc of services) {
-    const rid = svc.rid ?? svc.RID ?? svc.serviceAttributesMetrics?.rid;
-    const locs = svc.Locations ?? svc.locations ?? svc.serviceAttributesMetrics?.locations ?? [];
-    if (!rid) continue;
-    for (let i = 0; i < locs.length; i++) {
-      const loc = locs[i];
-      const crs = loc.crs ?? loc.location ?? loc.station;
-      const ata = hhmm(loc.actual_ta ?? loc.ata);
-      const atd = hhmm(loc.actual_td ?? loc.atd);
-      if (!crs || (!ata && !atd)) continue;
-      const existing = db
-        .prepare(`SELECT ata, atd, atp, is_passing FROM calls WHERE rid = ? AND crs = ?`)
-        .get(rid, crs);
-      if (!existing || existing.is_passing) continue;
-      if (existing.ata || existing.atd) continue;
-      const live_kind = liveKind({ ata, atd, atp: existing.atp });
-      db.prepare(
-        `UPDATE calls SET ata = COALESCE(ata, ?), atd = COALESCE(atd, ?), live_kind = ?, actual_source = COALESCE(actual_source, 'hsp'), updated_at = ?
-         WHERE rid = ? AND crs = ? AND is_passing = 0`
-      ).run(ata, atd, live_kind, Date.now(), rid, crs);
-      filled++;
-    }
-  }
-  db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('sealed', ?)`).run(new Date().toISOString());
-  const cacheDir = join(DATA_DIR, "hsp", ymd);
-  mkdirSync(cacheDir, { recursive: true });
-  writeFileSync(join(cacheDir, "metrics.json"), JSON.stringify(metrics));
-  return filled;
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
+const catalog = openCatalog(DATA_DIR);
 const db = openDayDb(DATA_DIR, ymd);
-if (!user || !pass) {
-  const sample = process.env.HSP_SAMPLE_JSON;
-  if (sample) {
-    const n = applyMetrics(db, JSON.parse(readFileSync(sample, "utf8")));
-    console.log(`sealed ${ymd} from sample, filled ${n}`);
-    db.close();
-    process.exit(0);
-  }
-  console.error("NRDP_HSP_USER/PASSWORD not set; wrote sealed=false");
+if (!process.env.NRDP_HSP_USER) {
+  console.error("NRDP_HSP_USER/PASSWORD not set; wrote sealed=skipped-no-hsp");
   db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('sealed', 'skipped-no-hsp')`).run();
+  walCheckpoint(db);
   db.close();
+  catalog.close();
   process.exit(0);
 }
 
-const auth = Buffer.from(`${user}:${pass}`).toString("base64");
-const res = await fetch(`${HSP_ORIGIN}/api/v1/serviceMetrics`, {
-  method: "POST",
-  headers: { authorization: `Basic ${auth}`, "content-type": "application/json" },
-  body: JSON.stringify({
-    from_loc: "PAD",
-    to_loc: "PAD",
-    from_time: "0000",
-    to_time: "2359",
-    from_date: ymd,
-    to_date: ymd,
-    days: "WEEKDAY",
-  }),
-});
-if (!res.ok) {
-  console.error("HSP metrics failed", res.status, await res.text());
-  process.exit(1);
+const rids = db
+  .prepare(
+    `SELECT s.rid FROM services s
+     WHERE IFNULL(s.service_type, 'passenger') != 'freight'
+       AND EXISTS (
+         SELECT 1 FROM calls c
+         WHERE c.rid = s.rid AND IFNULL(c.is_passing, 0) = 0
+           AND (c.sta IS NOT NULL OR c.std IS NOT NULL)
+           AND (c.ata IS NULL AND c.atd IS NULL)
+       )`,
+  )
+  .all()
+  .map((r) => r.rid);
+
+let filled = 0;
+let skipped404 = 0;
+let errors = 0;
+let authFail = 0;
+for (const rid of rids) {
+  try {
+    const details = await hspServiceDetails(rid);
+    filled += applyHspDetails(db, catalog, details, ymd, rid).filled || 0;
+    authFail = 0;
+  } catch (err) {
+    if (err.status === 404) skipped404++;
+    else {
+      errors++;
+      console.error("HSP", rid, err.message);
+      if (err.status === 401 || err.status === 403) {
+        authFail++;
+        if (authFail >= 3) {
+          console.error("HSP auth failing — stopping seal");
+          break;
+        }
+      }
+    }
+  }
+  await sleep(gapMs);
 }
-const metrics = await res.json();
-const n = applyMetrics(db, metrics);
-console.log(`sealed ${ymd}, filled ${n} stop actuals from HSP`);
+
+db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('sealed', ?)`).run(new Date().toISOString());
+walCheckpoint(db);
+console.log(
+  `sealed ${ymd}, filled ${filled} stop actuals from HSP across ${rids.length} passenger services (404=${skipped404} err=${errors})`,
+);
 db.close();
+catalog.close();

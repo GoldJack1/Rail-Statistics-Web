@@ -623,7 +623,21 @@
   height: 100%;
 }
 
+@media (max-width: 1023px) {
+  .darwin-departures-shell .browse-main {
+    order: 1;
+  }
+
+  .darwin-departures-shell .browse-sidebar {
+    order: 2;
+  }
+}
+
 @media (max-width: 639px) {
+  .darwin-departures-shell .rs-page-top-header {
+    display: block;
+  }
+
   .dep-cards {
     grid-template-columns: 1fr;
     gap: var(--space-sm);

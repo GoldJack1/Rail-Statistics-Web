@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ServiceDetail } from '@/types/darwin'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { normalizeServiceDetail } from '@/utils/normalizeRailCore'
+import { currentRailwayOperatingDayIso } from '@/utils/railwayOperatingDayUk'
 
 export type ServiceDetailStatus =
   | 'idle'
@@ -27,6 +28,7 @@ export interface UseServiceDetailResult {
   refetch: () => void
 }
 
+const HSP_WAIT_MS = 60_000
 const DEFAULT_POLL_MS  = 15_000
 const DEFAULT_STALE_MS = 60_000
 const MAX_NETWORK_RETRIES = 2
@@ -43,8 +45,13 @@ function serviceCacheKey(rid: string, date?: string, at?: string): string {
   return `${rid}|${date || ''}|${at || ''}`
 }
 
+/** A date query on a past or future day is a snapshot. Today's railway day stays live. */
+function isArchivedServiceDate(date?: string): boolean {
+  return Boolean(date) && date !== currentRailwayOperatingDayIso()
+}
+
 function cacheTtlMs(date?: string): number {
-  return date ? HIST_SERVICE_CACHE_TTL_MS : LIVE_SERVICE_CACHE_TTL_MS
+  return isArchivedServiceDate(date) ? HIST_SERVICE_CACHE_TTL_MS : LIVE_SERVICE_CACHE_TTL_MS
 }
 
 function getCachedService(key: string): ServiceDetail | null {
@@ -74,10 +81,10 @@ function applyCachedDetail(
   setAgeMs: (n: number) => void,
   setStatus: (s: ServiceDetailStatus) => void,
 ) {
-  setData(detail)
   setError(null)
   const age = Date.now() - Date.parse(detail.updatedAt)
   setAgeMs(age)
+  setData(detail)
   setStatus(age > staleAfterMs ? 'stale' : 'ok')
 }
 
@@ -140,7 +147,9 @@ export function prefetchDarwinService(rid: string, date?: string, at?: string) {
   void fetchDarwin(serviceUrl(rid, date, at))
     .then((res) => (res.ok ? res.json() : null))
     .then((detail) => {
-      if (detail) putCachedService(key, detail as ServiceDetail, cacheTtlMs(date))
+      if (detail && !(detail as ServiceDetail).hspPending) {
+        putCachedService(key, detail as ServiceDetail, cacheTtlMs(date))
+      }
     })
     .catch(() => undefined)
     .finally(() => prefetchInflight.delete(key))
@@ -165,12 +174,14 @@ export function useServiceDetail({
   const abortRef = useRef<AbortController | null>(null)
   const pollRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
   const ageTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const hspWaitStartedRef = useRef<number | null>(null)
+  const [awaitingHsp, setAwaitingHsp] = useState(false)
 
   const fetchOnce = useCallback(async () => {
     if (!rid) return
     const cacheKey = serviceCacheKey(rid, date, at)
     const cached = getCachedService(cacheKey)
-    if (date && cached) {
+    if (isArchivedServiceDate(date) && cached && !cached.hspPending) {
       applyCachedDetail(cached, staleAfterMs, setData, setError, setAgeMs, setStatus)
       return
     }
@@ -205,6 +216,7 @@ export function useServiceDetail({
       }
       if (!res.ok) throw new Error(userMessageForStatus(res.status))
       const detail: ServiceDetail = normalizeServiceDetail(await res.json())
+      setAwaitingHsp(Boolean(detail.hspPending))
       putCachedService(cacheKey, detail, cacheTtlMs(date))
       applyCachedDetail(detail, staleAfterMs, setData, setError, setAgeMs, setStatus)
     } catch (e) {
@@ -225,10 +237,12 @@ export function useServiceDetail({
 
   useEffect(() => {
     if (!rid) { setStatus('idle'); setData(null); setError(null); return }
+    hspWaitStartedRef.current = null
+    setAwaitingHsp(false)
     const cached = getCachedService(serviceCacheKey(rid, date, at))
     if (cached) {
       applyCachedDetail(cached, staleAfterMs, setData, setError, setAgeMs, setStatus)
-      if (date) {
+      if (isArchivedServiceDate(date)) {
         return () => {
           abortRef.current?.abort()
         }
@@ -246,7 +260,15 @@ export function useServiceDetail({
   }, [rid, pollMs, date, at])
 
   useEffect(() => {
-    if (date) return
+    if (!awaitingHsp || !rid) return
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') void fetchOnce()
+    }, 2_000)
+    return () => clearInterval(t)
+  }, [awaitingHsp, rid, fetchOnce])
+
+  useEffect(() => {
+    if (isArchivedServiceDate(date)) return
     const onVis = () => {
       if (document.visibilityState === 'visible' && rid) fetchOnce()
     }

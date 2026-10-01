@@ -102,7 +102,7 @@ function buildFormation(row: DepartureRow, historicalMode: boolean): string | nu
   const count = carriageCount(row)
   const units = unitLabel(row)
   if (count == null) {
-    if (!historicalMode || !units) return null
+    if (!units) return null
     return row.cancelled ? `Was formed of ${units}` : `Formed of ${units}`
   }
   const carriagePhrase = `${count} carriage${count === 1 ? '' : 's'}`
@@ -139,7 +139,7 @@ function earlyLabel(row: DepartureRow, minutes: number, ongoing: boolean): strin
 function delayedWithReasonAndEta(row: DepartureRow): string {
   const reason = (row.delayReason?.reason || '').replace(/\s+/g, ' ').trim()
   const eta = row.liveTime ? String(row.liveTime).slice(0, 5) : ''
-  const detail = [reason, eta ? `exp ${eta}` : ''].filter(Boolean).join(' · ')
+  const detail = [reason, eta ? `Expected at ${eta}` : ''].filter(Boolean).join(' · ')
   return detail ? `Delayed\u00a0|\u00a0${detail}` : 'Delayed'
 }
 
@@ -228,7 +228,6 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
   const visibleCoaches = coachCount != null ? Math.min(coachCount, MAX_COACH_PILLS) : 0
   const loadValues = visibleCoaches > 0 ? coachLoadValues(row, visibleCoaches) : []
   const loadAsPercent = coachLoadUsesPercent(row, loadValues)
-  const showHistFormation = historicalMode && Boolean(formation)
 
   return (
     <article
@@ -264,9 +263,6 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
         >
           <span className="rs-service-card__status-label">{status.label}</span>
           {status.mode ? <span className="rs-service-card__status-mode">{status.mode}</span> : null}
-          {row.actualSource ? (
-            <span className="rs-service-card__status-mode">({row.actualSource})</span>
-          ) : null}
           <div className="rs-button__inner-shadow" />
         </div>
       </section>
@@ -309,7 +305,7 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
                 ? null
                 : <span className="rs-service-card__coach" />}
           </div>
-          {detailedInfo || showHistFormation ? (
+          {showFormation && (detailedInfo || formation) ? (
             <p className="rs-service-card__formation">{formation || '\u00a0'}</p>
           ) : null}
         </section>

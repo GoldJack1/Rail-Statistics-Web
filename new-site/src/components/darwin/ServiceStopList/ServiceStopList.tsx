@@ -8,7 +8,7 @@ import { ChevronRightIcon } from '@/components/icons'
 import AutoAnimateCollapse from '@/components/misc/AutoAnimateCollapse/AutoAnimateCollapse'
 import { useStations } from '@/hooks/useStations'
 import type { ServiceStop } from '@/types/darwin'
-import { buildStopNameLookup, displayStopName } from '@/components/darwin/serviceStopLabel'
+import { buildStopNameLookup, displayStopName, sortStopsByJourneyTime } from '@/components/darwin/serviceStopLabel'
 import type { ServiceViewMode } from '@/components/darwin/serviceViewMode'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
 import '@/components/cards/StationsTableView/StationsTableView.css'
@@ -34,7 +34,7 @@ export function slotKind(slot: string): StopKind {
   return SLOT_KIND[slot] || 'stop'
 }
 
-function trimSeconds(t: string | null): string {
+function trimSeconds(t: string | null | undefined): string {
   return t ? t.slice(0, 5) : ''
 }
 
@@ -77,16 +77,14 @@ function computeDeltaMinutes(
 }
 
 function departuresAnchorTime(stop: ServiceStop, kind: StopKind): string | null {
-  const live = trimSeconds(stop.liveTime)
-  if (live) return live
-  if (kind === 'pass') return trimSeconds(stop.atp || stop.wtp || stop.wtd || stop.wta || stop.pta || stop.ptd || null) || null
-  return trimSeconds(stop.atd || stop.ata || stop.ptd || stop.pta || stop.wtd || stop.wta || stop.wtp || null) || null
+  if (kind === 'pass') return trimSeconds(stop.wtp || stop.wtd || stop.wta || stop.pta || stop.ptd || null) || null
+  return trimSeconds(stop.ptd || stop.pta || stop.wtd || stop.wta || stop.wtp || null) || null
 }
 
 function primaryTime(stop: ServiceStop, kind: StopKind): { label: string; value: string } {
   const wArr = trimSeconds(stop.wta)
   const wDep = trimSeconds(stop.wtd)
-  const wPass = trimSeconds(stop.atp || stop.wtp)
+  const wPass = trimSeconds(stop.wtp)
   if (kind === 'pass') return { label: 'Pass', value: wPass || wDep || wArr || '—' }
   if (kind === 'destination') return { label: 'Arr', value: stop.pta || wArr || stop.ptd || wDep || '—' }
   return { label: 'Dep', value: stop.ptd || wDep || stop.pta || wArr || '—' }
@@ -124,21 +122,30 @@ function buildStopStatus(
   alertText?: string | null,
 ): StopStatus {
   if (stop.cancelledAtStop) return { verb: 'Cancelled', time: '', delay: '', tone: 'cancelled' }
-  if (stop.unknownDelay) {
-    const eta = trimSeconds(stop.liveTime)
+
+  const live = trimSeconds(stop.liveTime)
+  const hasActual = stop.liveKind === 'actual' || stop.liveKind === 'actual-arr'
+  const hasEst =
+    stop.liveKind === 'est' ||
+    stop.liveKind === 'est-arr' ||
+    stop.liveKind === 'working'
+  const reason = delayReasonText(delayReason, alertText)
+  const delayedOngoing =
+    !hasActual &&
+    !historical &&
+    (Boolean(stop.unknownDelay) || Boolean(reason) || (deltaMinutes != null && deltaMinutes >= 1))
+
+  if (delayedOngoing) {
     return {
       verb: 'Delayed',
       time: '',
       delay: '',
-      tone: 'delay-16',
-      note: delayReasonText(delayReason, alertText) || undefined,
-      eta: eta || null,
+      tone: deltaMinutes != null && deltaMinutes >= 1 ? delayMinutesTone(deltaMinutes) : 'delay-16',
+      note: reason || undefined,
+      eta: live || null,
     }
   }
 
-  const live = trimSeconds(stop.liveTime)
-  const hasActual = stop.liveKind === 'actual' || stop.liveKind === 'actual-arr'
-  const hasEst = stop.liveKind === 'est' || stop.liveKind === 'est-arr'
   const eventTime = live || (scheduledTime !== '—' ? scheduledTime : '')
 
   if (!eventTime) {
@@ -146,7 +153,9 @@ function buildStopStatus(
   }
 
   let verb = 'Due'
-  if (hasEst && !hasActual) verb = 'Expected'
+  if (historical && !hasActual && !hasEst) {
+    verb = ''
+  } else if (hasEst && !hasActual) verb = 'Expected'
   else if (hasActual && kind === 'pass') verb = 'Passed'
   else if (hasActual && (kind === 'destination' || stop.liveKind === 'actual-arr')) verb = 'Stopped'
   else if (hasActual) verb = 'Departed'
@@ -169,6 +178,26 @@ function liveLocationIndex(stops: ServiceStop[]): number | null {
     if (isActualLiveKind(stops[i].liveKind) && !stops[i].cancelledAtStop) last = i
   }
   return last >= 0 ? last : null
+}
+
+function rowClocks(kind: StopKind, stop: ServiceStop): { booked: string | null; real: string | null; estimated: boolean } {
+  if (kind === 'pass') {
+    const actual = trimSeconds(stop.atp)
+    const estimate = trimSeconds(stop.etp)
+    return {
+      booked: trimSeconds(stop.wtp || stop.wtd || stop.wta),
+      real: actual || estimate,
+      estimated: !actual && Boolean(estimate),
+    }
+  }
+  const actual = trimSeconds(kind === 'destination' ? (stop.ata || stop.atd) : (stop.atd || stop.ata))
+  const estimate = trimSeconds(kind === 'destination' ? (stop.eta || stop.etd) : (stop.etd || stop.eta))
+  const booked = trimSeconds(
+    kind === 'destination'
+      ? (stop.pta || stop.wta || stop.ptd || stop.wtd)
+      : (stop.ptd || stop.wtd || stop.pta || stop.wta),
+  )
+  return { booked, real: actual || estimate, estimated: !actual && Boolean(estimate) }
 }
 
 function ServiceStopRow({
@@ -203,25 +232,33 @@ function ServiceStopRow({
   const pDep = stop.ptd || null
   const wArr = trimSeconds(stop.wta) || null
   const wDep = trimSeconds(stop.wtd) || null
-  const wPass = stop.atp ? trimSeconds(stop.atp) : stop.wtp ? trimSeconds(stop.wtp) : null
-  const platformValue = stop.livePlatform || stop.platform || ''
+  const wPass = trimSeconds(stop.wtp)
+  const platformRaw = stop.livePlatform || stop.platform || ''
+  const platformValue =
+    platformRaw && typeof platformRaw === 'object'
+      ? ''
+      : String(platformRaw) === '[object Object]'
+        ? ''
+        : String(platformRaw)
   const platformSource = platformSourceLabel(stop.platformSource)
-  const scheduledForDelta = kind === 'pass'
-    ? (wPass || wDep || wArr || null)
-    : (pDep || pArr || wDep || wArr || null)
-  const deltaMinutes = stop.unknownDelay ? null : computeDeltaMinutes(scheduledForDelta, stop.liveTime)
+  const clocks = rowClocks(kind, stop)
+  const deltaMinutes = stop.unknownDelay || !clocks.real || !clocks.booked
+    ? null
+    : computeDeltaMinutes(clocks.booked, clocks.real)
   const time = primaryTime(stop, kind)
   const status = buildStopStatus(stop, kind, deltaMinutes, time.value, historical, delayReason, alertText)
-  const code = (stop.crs || stop.tpl || '').toUpperCase()
+  const code = (stop.tpl || stop.crs || '').toUpperCase()
   const detailed = viewMode === 'detailed'
 
   const openDepartures = () => {
     if (!code) return
     const next = new URLSearchParams()
     next.set('hours', '1')
-    if (boardDate) next.set('date', boardDate)
-    const anchor = departuresAnchorTime(stop, kind)
-    if (anchor && boardDate) next.set('at', anchor)
+    if (historical && boardDate) {
+      next.set('date', boardDate)
+      const anchor = departuresAnchorTime(stop, kind)
+      if (anchor) next.set('at', anchor)
+    }
     if (returnTo) next.set('from', returnTo)
     next.set('label', label)
     router.push(`/departures/${encodeURIComponent(code)}?${next.toString()}`)
@@ -271,10 +308,12 @@ function ServiceStopRow({
         <td className={`svc-stops-table__status${status.note || status.eta ? ' svc-stops-table__status--note' : ''}`}>
           {status.time ? (
             <>
-              <span className="svc-stops-table__status-main">
-                {status.verb}
-                <span className="svc-stops-table__status-at"> at</span>
-              </span>
+              {status.verb ? (
+                <span className="svc-stops-table__status-main">
+                  {status.verb}
+                  <span className="svc-stops-table__status-at"> at</span>
+                </span>
+              ) : null}
               {' '}
               <span className="svc-stops-table__status-meta">
                 {status.time}
@@ -406,6 +445,7 @@ export function ServiceStopList({
   returnTo,
   delayReason,
   alertText,
+  location,
 }: {
   stops: ServiceStop[]
   viewMode: ServiceViewMode
@@ -416,10 +456,12 @@ export function ServiceStopList({
   returnTo: string
   delayReason?: string | null
   alertText?: string | null
+  location?: { last?: { tiploc?: string } | null; label?: string } | null
 }) {
   const { stations } = useStations()
   const lookup = useMemo(() => buildStopNameLookup(stations), [stations])
-  const visible = stops
+  const orderedStops = useMemo(() => sortStopsByJourneyTime(stops), [stops])
+  const visible = orderedStops
     .map((stop, index) => ({ stop, index }))
     .filter(({ stop }) => viewMode === 'detailed' || slotKind(stop.slot) !== 'pass')
 
@@ -427,7 +469,12 @@ export function ServiceStopList({
     return <p className="unit-muted">No calling points on this service.</p>
   }
 
-  const liveIndex = liveLocationIndex(visible.map(({ stop }) => stop))
+  const liveIndex = historical
+    ? null
+    : location?.last?.tiploc
+      ? visible.findIndex(({ stop }) => stop.tpl === location.last?.tiploc)
+      : liveLocationIndex(visible.map(({ stop }) => stop))
+  const liveIdx = liveIndex != null && liveIndex >= 0 ? liveIndex : null
 
   return (
     <div className="stations-table-panel svc-stops-table-panel">
@@ -461,14 +508,14 @@ export function ServiceStopList({
           {visible.map(({ stop, index }, stripeIndex) => (
             <tbody
               key={`${stop.tpl}-${stop.slot}-${index}`}
-              className={liveIndex === stripeIndex ? 'svc-stop--live-group' : undefined}
+              className={liveIdx === stripeIndex ? 'svc-stop--live-group' : undefined}
             >
               <ServiceStopRow
                 stop={stop}
                 index={index}
                 stripeIndex={stripeIndex}
                 stopCount={stops.length}
-                label={displayStopName(stops, index, lookup)}
+                label={displayStopName(orderedStops, index, lookup)}
                 viewMode={viewMode}
                 boardDate={boardDate || null}
                 historical={historical}

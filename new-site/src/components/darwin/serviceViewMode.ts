@@ -12,16 +12,16 @@ function parseMode(raw: string | null): ServiceViewMode | null {
 }
 
 export function readServiceViewMode(): ServiceViewMode {
-  if (typeof window === 'undefined') return 'simple'
+  if (typeof window === 'undefined') return 'detailed'
   try {
     const stored = parseMode(window.localStorage.getItem(SERVICE_VIEW_MODE_KEY))
     if (stored) return stored
     const legacy = window.localStorage.getItem(LEGACY_DETAILED_INFO_KEY)
     if (legacy === '1') return 'detailed'
     if (legacy === '0') return 'simple'
-    return 'simple'
+    return 'detailed'
   } catch {
-    return 'simple'
+    return 'detailed'
   }
 }
 
@@ -37,7 +37,7 @@ export function writeServiceViewMode(mode: ServiceViewMode): void {
 }
 
 export function useServiceViewMode(): [ServiceViewMode, (mode: ServiceViewMode) => void] {
-  const [viewMode, setViewMode] = useState<ServiceViewMode>(readServiceViewMode)
+  const [viewMode, setViewMode] = useState<ServiceViewMode>('detailed')
 
   useEffect(() => {
     const apply = () => setViewMode(readServiceViewMode())

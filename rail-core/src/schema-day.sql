@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS calls (
   eta TEXT,
   etd TEXT,
   etp TEXT,
+  loading_percentage REAL,
+  coach_loading TEXT,
   delay_minutes INTEGER,
   status TEXT,
   live_kind TEXT NOT NULL DEFAULT 'scheduled',
@@ -54,6 +56,7 @@ CREATE TABLE IF NOT EXISTS calls (
 CREATE INDEX IF NOT EXISTS idx_calls_crs_std ON calls (crs, std);
 CREATE INDEX IF NOT EXISTS idx_calls_crs_sta ON calls (crs, sta);
 CREATE INDEX IF NOT EXISTS idx_calls_rid ON calls (rid);
+CREATE INDEX IF NOT EXISTS idx_services_uid ON services (uid);
 
 CREATE TABLE IF NOT EXISTS units (
   unit_id TEXT NOT NULL,
@@ -62,10 +65,15 @@ CREATE TABLE IF NOT EXISTS units (
   toc TEXT,
   headcode TEXT,
   diagram TEXT,
+  origin_tpl TEXT,
+  origin_hhmm TEXT,
   PRIMARY KEY (unit_id, operating_day, rid)
 );
 
 CREATE INDEX IF NOT EXISTS idx_units_day ON units (operating_day, unit_id);
+CREATE INDEX IF NOT EXISTS idx_units_rid ON units (rid);
+CREATE INDEX IF NOT EXISTS idx_calls_tiploc_std ON calls (tiploc, std);
+CREATE INDEX IF NOT EXISTS idx_services_headcode ON services (headcode);
 
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
@@ -86,6 +94,13 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS rtppm (
   snapshot_at INTEGER PRIMARY KEY,
   json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS trust_trains (
+  train_id TEXT PRIMARY KEY,
+  uid TEXT,
+  toc_id TEXT,
+  activated_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS trust_events (

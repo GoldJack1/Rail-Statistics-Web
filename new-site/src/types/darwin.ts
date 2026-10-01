@@ -53,6 +53,8 @@ export interface DepartureRow {
   isPassing?: boolean;
   /** darwin | hsp | trust — where recorded times came from. */
   actualSource?: string | null;
+  /** Fresh live caption from rail-core `location.label` (last actual < 20 min). */
+  locationLabel?: string | null;
 
   scheduledTime: string;       // "HH:MM"
   scheduledAt: string;         // ISO8601 anchored to today
@@ -95,6 +97,8 @@ export interface DepartureRow {
   destination: string;         // TIPLOC
   destinationName: string | null;
   destinationCrs: string | null;
+  /** Short via line for the card (not full calling-after arrays). */
+  via?: string | null;
 
   callingAfter: string[];               // TIPLOCs after this stop
   callingAfterNames: (string | null)[]; // parallel — null for junctions
@@ -198,6 +202,8 @@ export interface DeparturesSnapshot {
   historicalSavedAt?: string | null;
   /** Calendar date from the request when timed boards remap overnight (matches query ?date=). */
   wallClockDate?: string | null;
+  /** True while HSP public actuals are still filling this dated board. */
+  hspPending?: boolean;
 }
 
 /**
@@ -234,6 +240,9 @@ export interface ServiceStop {
   ata?: string | null;
   atd?: string | null;
   atp?: string | null;
+  eta?: string | null;
+  etd?: string | null;
+  etp?: string | null;
   actualSource?: string | null;
   platform: string | null;
   livePlatform: string | null;
@@ -341,7 +350,22 @@ export interface ServiceDetail {
   historicalDate?: string | null;
   historicalAt?: string | null;
   historicalSavedAt?: string | null;
+  location?: ServiceLocation | null;
+  hspPending?: boolean;
   updatedAt: string;
+}
+
+export interface ServiceLocation {
+  phase: 'at_station' | 'between' | 'approaching' | 'finished' | 'not_started';
+  last: {
+    tiploc: string;
+    crs: string | null;
+    kind: 'stop' | 'pass';
+    at?: string;
+    source?: string;
+  } | null;
+  next: { tiploc: string; crs: string | null; kind: 'stop' | 'pass' } | null;
+  label: string;
 }
 
 /* ===========================================================================

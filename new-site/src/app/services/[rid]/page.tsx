@@ -113,6 +113,7 @@ function getCurrentRailwayDayIsoUk(now = new Date()): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    hourCycle: 'h23',
     hour12: false,
   }).formatToParts(now)
 
@@ -255,7 +256,7 @@ const ServiceDetailPage: React.FC = () => {
   const { status, data, error, ageMs, refetch } = useServiceDetail({
     rid,
     date: historicalDate,
-    at: historicalMode ? undefined : historicalAt,
+    at: historicalAt,
     pollMs: historicalMode || futureTimetableMode || viewMode === 'simple' ? 0 : 15_000,
   })
   const { stations } = useStations()
@@ -287,10 +288,12 @@ const ServiceDetailPage: React.FC = () => {
 
   const subtitle = useMemo(() => {
     const serviceDate = data?.ssd ? formatDateOnly(data.ssd) : null
+    const uidLine = data?.uid ? `UID ${data.uid}` : ''
     const histDate = data?.historicalDate ? formatDateOnly(data.historicalDate) : null
-    const dateText = histDate && serviceDate && histDate !== serviceDate
-      ? `${histDate} · booked ${serviceDate}`
-      : histDate || serviceDate || ''
+    const running = serviceDate ? `Runs ${serviceDate}` : ''
+    const dateText = [uidLine, running, histDate && histDate !== serviceDate ? `Snapshot ${histDate}` : '']
+      .filter(Boolean)
+      .join(' · ')
     const liveLine = historicalMode
       ? 'Snapshot'
       : futureTimetableMode
@@ -371,7 +374,8 @@ const ServiceDetailPage: React.FC = () => {
           <section className="modal-section">
             <StationSectionTitle title="Service not found" icon={Info} pageHeading />
             <p className="edit-hint kb-source-hint">
-              RID <code>{rid}</code> isn’t in today’s timetable. It may have already run, or the daemon may be using yesterday’s file.
+              RID <code>{rid}</code> was not found for {historicalDate || 'this date'}.
+              The live API may still be on the previous build, or that day’s timetable is not imported yet.
             </p>
           </section>
         )}
@@ -386,7 +390,7 @@ const ServiceDetailPage: React.FC = () => {
         {status === 'loading' && !data && (
           <section className="modal-section">
             <StationSectionTitle title="Overview" icon={Info} pageHeading />
-            <p className="edit-hint kb-source-hint">Loading service detail…</p>
+            <p className="edit-hint kb-source-hint">Loading actual times…</p>
           </section>
         )}
 
@@ -485,7 +489,7 @@ const ServiceDetailPage: React.FC = () => {
               <span className="svc-footer-sep" aria-hidden="true">·</span>
               <span>RID {data.rid}</span>
               <span className="svc-footer-sep" aria-hidden="true">·</span>
-              <span>Updated {new Date(data.updatedAt).toLocaleString('en-GB', { timeZone: 'Europe/London' })}</span>
+              <span>Updated {new Date(data.updatedAt).toLocaleString('en-GB', { timeZone: 'Europe/London', hourCycle: 'h23', hour12: false })}</span>
             </p>
           </section>
         )}
@@ -554,11 +558,12 @@ const ServiceDetailPage: React.FC = () => {
               <ServiceStopList
                 stops={data.stops}
                 viewMode={viewMode}
-                boardDate={historicalDate || data.ssd || null}
-                historical={!!data.historicalDate}
+                boardDate={historicalMode || futureTimetableMode ? historicalDate || null : null}
+                historical={historicalMode || futureTimetableMode}
                 returnTo={`/services/${encodeURIComponent(data.rid)}${location.search || ''}`}
                 delayReason={data.delayReason?.reason}
                 alertText={data.alerts?.[0]?.text}
+                location={data.location}
               />
             </section>
         )}

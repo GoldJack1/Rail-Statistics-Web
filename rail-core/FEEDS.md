@@ -1,15 +1,20 @@
-# NRDP vs RDM vs NR Open Data
+# Feeds (live rail-core)
 
-| Product | Source | Where used |
-| --- | --- | --- |
-| Darwin Push Port | RDM Kafka | rail-core ingest (live CIS) |
-| HSP serviceMetrics / Details | **NRDP** (`SOURCE_HSP=nrdp`) | seal-day stop actuals |
-| CIF / timetable files | **NRDP** (`SOURCE_TIMETABLE=nrdp`) | future `/api/window` |
-| Knowledgebase Stations / Incidents / NSI | RDM until NRDP equivalents exist | Next.js `/api/knowledgebase/*` |
-| RTPPM_ALL | Network Rail Open Data STOMP | ingest `/ingest/rtppm` |
-| TRAIN_MVT_ALL_TOC (TRUST) | Network Rail Open Data STOMP | freight / gap actuals |
-| CORPUS | Network Rail | catalog.sqlite tiploc map |
-| TfL Unified | TfL app key | Next.js `/api/tfl` |
-| PTAC | existing Kafka | catalog + per-day units |
+| Product | Used |
+| --- | --- |
+| Darwin Push Port | Kafka → ingest → today’s `calls` |
+| TRUST | STOMP `TRAIN_MVT_ALL_TOC` → `/ingest/trust` (live overlay on calls) |
+| PTAC | Kafka → `/ingest/unit` → catalog `consists` keyed **UID + SSD** (joined at query time) |
+| PPTimetable | 04:00 **Europe/London** `DARWINTTFILES/PPTimetable` (retry ~35m until today’s v8) |
+| RDM NLC / CORPUS | after v8 import succeeds |
+| TOPS locations | after v8 import succeeds |
+| Long-range CIF | after v8 import succeeds (`timetable_full.zip`) |
+| HSP | overnight seal + background fill for historical public actuals |
 
-Do not commit passwords. Copy PTAC SQLite before wipe. Do not run `wipe-old-darwin.sh` until Paddington live + dated boards on rail-core succeed.
+Location boards use **Europe/London calendar dates** (Realtime Trains). Default board is a working line-up (passes, freight, TRUST). CIS passenger boards: `?passengers=1`.
+
+Publish from the RDM download folder:
+
+```
+./rail-core/scripts/publish-rdm-files.sh ~/Downloads
+```

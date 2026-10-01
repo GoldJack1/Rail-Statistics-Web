@@ -1,54 +1,69 @@
+import "./load-env.js";
 import { createServer } from "node:http";
 import { existsSync, readdirSync } from "node:fs";
-import { dayPath, openCatalog, openDayDb, operatingDayYmd } from "./db.js";
+import { dayPath, openCatalog, openDayDb, operatingDayYmd, platformText } from "./db.js";
+import { addCalendarDays, locationBoardDays, londonCalendarYmd, londonInstant, ssdFromRid } from "./calendar-day.js";
+import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
-import { planBash } from "./bash-plan.js";
+import { formatTiplocName } from "./tiploc-names.js";
+import { sortCallsByJourneyTime } from "./journey-order.js";
+import { buildStationBoard, liveClockFromCall } from "./board-build.js";
+import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
+import { computeServiceLocation, locationIsFresh } from "./location.js";
+import { ensureDayImported, ridNeedsHsp, ridsNeedHsp, startBoardHspFill } from "./ensure-history-day.js";
+import { consistDocument, lookupConsist, normalizePtacVehicles, unitIdsFromConsistRow } from "./ptac-apply.js";
 
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
-const TT_DIR = process.env.TT_DIR ?? "./tt";
 const PORT = Number(process.env.QUERY_PORT ?? 4001);
 const INTERNAL = process.env.INTERNAL_API_KEY ?? "";
 const catalog = openCatalog(DATA_DIR);
 
+let namedTiplocCache = { at: 0, rows: [] };
+function namedTiplocs() {
+  const now = Date.now();
+  if (now - namedTiplocCache.at > 60_000) {
+    namedTiplocCache = {
+      at: now,
+      rows: catalog
+        .prepare(
+          `SELECT tiploc, name FROM corpus
+           WHERE name IS NOT NULL AND trim(name) != '' AND UPPER(name) != tiploc`,
+        )
+        .all(),
+    };
+  }
+  return namedTiplocCache.rows;
+}
+
 function stationName(crs, tpl) {
-  if (crs) {
-    const row = catalog.prepare(`SELECT name FROM tiploc WHERE crs = ? LIMIT 1`).get(String(crs).toUpperCase());
-    if (row?.name) return row.name;
-  }
+  let official = null;
   if (tpl) {
-    const row = catalog.prepare(`SELECT name FROM tiploc WHERE tiploc = ?`).get(String(tpl).toUpperCase());
-    if (row?.name) return row.name;
+    const byCorpus = catalog
+      .prepare(`SELECT name, crs FROM corpus WHERE tiploc = ?`)
+      .get(String(tpl).toUpperCase());
+    if (byCorpus?.name) official = byCorpus.name;
+    if (!official) {
+      const byTpl = catalog.prepare(`SELECT name, crs FROM tiploc WHERE tiploc = ?`).get(String(tpl).toUpperCase());
+      if (byTpl?.name) official = byTpl.name;
+    }
   }
-  return null;
+  if (!official && crs) {
+    const row =
+      catalog
+        .prepare(
+          `SELECT name FROM corpus WHERE crs = ? AND name IS NOT NULL AND name != '' LIMIT 1`,
+        )
+        .get(String(crs).toUpperCase()) ||
+      catalog
+        .prepare(`SELECT name FROM tiploc WHERE crs = ? AND name IS NOT NULL AND name != '' LIMIT 1`)
+        .get(String(crs).toUpperCase());
+    if (row?.name) official = row.name;
+  }
+  return formatTiplocName(tpl, official, official ? [] : namedTiplocs());
 }
 
-function londonNowMinutes() {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/London",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date());
-  const hour = Number(parts.find((p) => p.type === "hour")?.value);
-  const minute = Number(parts.find((p) => p.type === "minute")?.value);
-  return hour * 60 + minute;
-}
-
-function hhmmMinutes(value) {
-  const s = String(value || "");
-  if (!/^\d{2}:\d{2}/.test(s)) return null;
-  return Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5));
-}
-
-function inHoursWindow(call, hours, nowMins) {
-  const stamp = call.etd || call.std || call.eta || call.sta || call.wtd || call.wta;
-  const mins = hhmmMinutes(stamp);
-  if (mins == null) return true;
-  const from = nowMins - 10;
-  const span = Math.max(1, hours) * 60;
-  const to = nowMins + span;
-  if (to < 24 * 60) return mins >= from && mins <= to;
-  return mins >= from || mins <= to - 24 * 60;
+function londonNow() {
+  return new Date();
 }
 
 function cors(res) {
@@ -64,77 +79,133 @@ function json(res, status, body, extra = {}) {
   res.end(JSON.stringify(body));
 }
 
-function ymdValid(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+function timetableHorizonYmd() {
+  return addCalendarDays(londonCalendarYmd(), Number(process.env.TT_LOOKAHEAD_DAYS || 6));
 }
+
+function listDayYmds() {
+  try {
+    return readdirSync(DATA_DIR)
+      .map((n) => n.match(/^day-(\d{4}-\d{2}-\d{2})\.sqlite$/)?.[1])
+      .filter(Boolean)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+const dayPool = new Map();
+const boardSnap = new Map();
 
 function openDay(ymd) {
   const p = dayPath(DATA_DIR, ymd);
   if (!existsSync(p)) return null;
-  return openDayDb(DATA_DIR, ymd);
+  let db = dayPool.get(ymd);
+  if (db) return db;
+  db = openDayDb(DATA_DIR, ymd);
+  dayPool.set(ymd, db);
+  return db;
 }
 
-function boardRow(ymd, svc, call) {
-  const planned = call.std || call.sta;
-  const actual = call.atd || call.ata || call.atp;
-  const est = call.etd || call.eta || call.etp;
-  const liveTime = actual || est || planned || "";
-  const liveKind = call.live_kind || "scheduled";
-  const delayMinutes = call.delay_minutes;
-  const cancelled = Boolean(svc.cancelled || call.cancelled);
-  const originCrs = svc.origin_crs;
-  const destCrs = svc.destination_crs;
-  const originName = svc.origin_name || stationName(originCrs);
-  const destName = svc.destination_name || stationName(destCrs);
-  const tocName = tocDisplayName(svc.toc) || svc.operator_name || null;
-  const trainId = svc.headcode && /^[0-9][A-Z][0-9]{2}$/i.test(svc.headcode) ? svc.headcode : "";
+function catalogTiplocsForCrs(crs) {
+  const rows = [
+    ...catalog.prepare(`SELECT tiploc FROM tiploc WHERE crs = ?`).all(crs),
+    ...catalog.prepare(`SELECT tiploc FROM corpus WHERE crs = ?`).all(crs),
+  ];
+  return rows.map((r) => String(r.tiploc || "").toUpperCase()).filter(Boolean);
+}
+
+function resolveBoardLocation(code) {
+  const c = String(code || "").toUpperCase();
+  const asTpl =
+    catalog.prepare(`SELECT tiploc, crs FROM corpus WHERE tiploc = ?`).get(c) ||
+    catalog.prepare(`SELECT tiploc, crs FROM tiploc WHERE tiploc = ?`).get(c);
+  const stationCode = asTpl && c.length !== 3 ? String(asTpl.crs || c).toUpperCase() : c;
+  const grouped = stationCrsGroup(stationCode);
+  if (grouped || (c.length === 3 && catalogTiplocsForCrs(c).length)) {
+    const merged = tiplocsForStation(stationCode, catalogTiplocsForCrs);
+    return { crs: stationCode, tiplocs: merged.tiplocs, matchedAs: "crs" };
+  }
+  if (asTpl && c.length !== 3) {
+    return { crs: String(asTpl.crs || c).toUpperCase(), tiplocs: [c], matchedAs: "tiploc" };
+  }
+  if (asTpl) {
+    return { crs: String(asTpl.crs || c).toUpperCase(), tiplocs: [c], matchedAs: "tiploc" };
+  }
+  if (c.length === 3) return { crs: c, tiplocs: [], matchedAs: "crs" };
+  return { crs: c, tiplocs: [c], matchedAs: "tiploc" };
+}
+
+function addLocationHit(seen, row) {
+  const tiploc = String(row?.tiploc || "").toUpperCase();
+  if (!tiploc || seen.has(tiploc)) return;
+  const crs = String(row?.crs || "").toUpperCase();
+  const name = String(row?.name || "").trim() || stationName(crs, tiploc) || tiploc;
+  seen.set(tiploc, { tiploc, crs: crs.length === 3 ? crs : "", name });
+}
+
+function searchLocations(query) {
+  const raw = String(query || "").trim();
+  if (!raw) return [];
+  const compact = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const nameNeedle = raw.toUpperCase().replace(/[%_]/g, "").trim();
+  const seen = new Map();
+  if (compact) {
+    const exactCorpus = catalog.prepare(`SELECT tiploc, crs, name FROM corpus WHERE tiploc = ?`).get(compact);
+    const exactTpl = catalog.prepare(`SELECT tiploc, crs, name FROM tiploc WHERE tiploc = ?`).get(compact);
+    addLocationHit(seen, exactCorpus);
+    addLocationHit(seen, exactTpl);
+    if (compact.length === 3) {
+      for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM corpus WHERE crs = ?`).all(compact)) {
+        addLocationHit(seen, row);
+      }
+      for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM tiploc WHERE crs = ?`).all(compact)) {
+        addLocationHit(seen, row);
+      }
+    }
+    const prefix = `${compact.replace(/[%_]/g, "")}%`;
+    for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM corpus WHERE tiploc LIKE ? LIMIT 24`).all(prefix)) {
+      addLocationHit(seen, row);
+    }
+    for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM tiploc WHERE tiploc LIKE ? LIMIT 24`).all(prefix)) {
+      addLocationHit(seen, row);
+    }
+  }
+  if (nameNeedle.length >= 2) {
+    const like = `%${nameNeedle}%`;
+    for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM corpus WHERE UPPER(name) LIKE ? LIMIT 24`).all(like)) {
+      addLocationHit(seen, row);
+    }
+    for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM tiploc WHERE UPPER(name) LIKE ? LIMIT 24`).all(like)) {
+      addLocationHit(seen, row);
+    }
+  }
+  const hits = [...seen.values()];
+  const present = new Set(hits.map((hit) => hit.crs));
+  const visible = hits.filter((hit) => {
+    const group = stationCrsGroup(hit.crs);
+    if (!group || group[0] === hit.crs) return true;
+    if (compact === hit.crs) return true;
+    return !present.has(group[0]);
+  });
+  return visible.slice(0, 20);
+}
+
+function lookupLocation(code) {
+  const loc = resolveBoardLocation(code);
+  const requested = String(code || "").toUpperCase();
+  const tpl = loc.matchedAs === "tiploc" ? requested : loc.tiplocs[0] || requested;
+  const name = stationName(loc.crs, tpl) || tpl;
   return {
-    rid: svc.rid,
-    trainId,
-    uid: svc.uid,
-    toc: svc.toc,
-    tocName,
-    trainCat: svc.category,
-    serviceType: svc.service_type || "passenger",
-    isPassing: Boolean(call.is_passing),
-    scheduledTime: planned,
-    scheduledAt: `${ymd}T${planned || "00:00"}:00`,
-    liveTime,
-    liveKind,
-    actualSource: call.actual_source,
-    delayMinutes,
-    platform: call.platform,
-    livePlatform: call.platform,
-    origin: originCrs,
-    originName,
-    originCrs,
-    destination: destCrs,
-    destinationName: destName,
-    destinationCrs: destCrs,
-    callingAfter: [],
-    callingAfterNames: [],
-    callingAfterCrs: [],
-    isPassenger: svc.service_type !== "freight",
-    cancelled,
-    cancellation: svc.cancel_reason ? { source: "ts", reason: svc.cancel_reason } : null,
-    delayReason: svc.delay_reason ? { source: "ts", reason: svc.delay_reason } : null,
-    loadingPercentage: null,
-    coachLoading: null,
-    reverseFormation: false,
-    hasConsist: false,
-    hasAssociations: false,
-    hasAlerts: false,
-    status: cancelled
-      ? "Cancelled"
-      : delayMinutes
-        ? `Delayed ${delayMinutes} min`
-        : liveKind === "actual"
-          ? "Departed"
-          : "On time",
+    tiploc: tpl,
+    crs: loc.crs.length === 3 ? loc.crs : "",
+    name,
+    matchedAs: loc.matchedAs,
   };
 }
 
-function wrapBoard(crs, generatedAt, services, hours) {
+function emptyBoard(crs, hours, matchedAs = "crs") {
+  const generatedAt = new Date().toISOString();
   const code = String(crs).toUpperCase();
   const station = stationName(code) || code;
   return {
@@ -144,99 +215,271 @@ function wrapBoard(crs, generatedAt, services, hours) {
     name: station,
     generatedAt,
     updatedAt: generatedAt,
-    services,
-    departures: services,
+    services: [],
+    departures: [],
     arrivals: [],
     stationName: station,
     stationCrs: code,
-    matchedAs: "crs",
+    matchedAs,
     timetableFile: "",
     windowHours: hours,
-    counts: {
-      departures: services.length,
-      arrivals: 0,
-      cancelled: services.filter((s) => s.cancelled).length,
-      withDelay: services.filter((s) => s.delayMinutes).length,
-      messages: 0,
-    },
+    counts: { departures: 0, arrivals: 0, cancelled: 0, withDelay: 0, messages: 0 },
     messages: [],
-    kafka: {
-      consumed: 0,
-      updatesApplied: 0,
-      startedAt: generatedAt,
-      lastMessageAt: generatedAt,
-    },
+    kafka: { consumed: 0, updatesApplied: 0, startedAt: generatedAt, lastMessageAt: generatedAt },
   };
 }
 
-function departures(ymd, crs, opts) {
-  const db = openDay(ymd);
-  if (!db) {
-    const generatedAt = new Date().toISOString();
-    return wrapBoard(crs, generatedAt, [], opts.hours ?? 1);
+async function liveDepartures(crs, opts) {
+  const today = operatingDayYmd();
+  const ymd = opts.ymd || today;
+  const at = parseAtParam(opts.at);
+  const cisMode = opts.passengersOnly === true;
+  const hours = Math.max(1, Number(opts.hours) || 24);
+  const loc = resolveBoardLocation(crs);
+  const snapKey = `${String(crs).toUpperCase()}|${ymd}|${cisMode ? "cis" : "wtt"}|${at || ""}`;
+  const hit = boardSnap.get(snapKey);
+  if (hit && Date.now() - hit.at < (ymd < today ? 3_600_000 : 2_500)) return hit.board;
+
+  const days = locationBoardDays(ymd);
+  for (const d of days) {
+    if (d !== today) await ensureDayImported(d);
   }
-  const code = crs.toUpperCase();
-  const tpls = catalog.prepare(`SELECT tiploc FROM tiploc WHERE crs = ?`).all(code).map((r) => r.tiploc);
-  const placeholders = tpls.map(() => "?").join(",") || "NULL";
-  const q = db.prepare(
-    `SELECT c.*, s.rid as s_rid, s.uid, s.rs_id, s.toc, s.operator_name, s.origin_crs, s.origin_name,
-            s.destination_crs, s.destination_name, s.via, s.service_type, s.cancelled as s_cancelled,
-            s.cancel_reason, s.delay_reason, s.is_charter, s.category, s.headcode
-     FROM calls c JOIN services s ON s.rid = c.rid
-     WHERE (c.crs = ? ${tpls.length ? `OR c.tiploc IN (${placeholders})` : ""})
-       ${opts.passengersOnly ? "AND s.service_type = 'passenger'" : ""}
-     ORDER BY COALESCE(c.std, c.sta, c.wtd, c.wta, '99:99')`
-  );
-  const rows = q.all(code, ...tpls);
-  const hours = Math.max(1, Number(opts.hours) || 1);
-  const nowMins = londonNowMinutes();
-  const dated = Boolean(opts.dated);
-  const services = rows
-    .filter((r) => dated || inHoursWindow(r, hours, nowMins))
-    .map((r) =>
-      boardRow(ymd,
-        {
-          rid: r.s_rid,
-          uid: r.uid,
-          rs_id: r.rs_id,
-          toc: r.toc,
-          operator_name: r.operator_name,
-          origin_crs: r.origin_crs,
-          origin_name: r.origin_name,
-          destination_crs: r.destination_crs,
-          destination_name: r.destination_name,
-          via: r.via,
-          service_type: r.service_type,
-          cancelled: r.s_cancelled,
-          cancel_reason: r.cancel_reason,
-          delay_reason: r.delay_reason,
-          is_charter: r.is_charter,
-          category: r.category,
-          headcode: r.headcode,
-        },
-        r
-      )
-    );
-  db.close();
-  return wrapBoard(crs, new Date().toISOString(), services, hours);
+  const historicalDate = ymd < today ? ymd : null;
+  let now = londonNow();
+  if (at) {
+    const t = londonInstant(ymd, at);
+    if (!Number.isNaN(t.getTime())) now = t;
+  }
+  let board = emptyBoard(loc.crs, hours, loc.matchedAs);
+  for (const fileYmd of days) {
+    const db = openDay(fileYmd);
+    if (!db) continue;
+    const part = buildStationBoard({
+      db,
+      ymd: fileYmd,
+      crs: loc.crs,
+      tiplocs: loc.tiplocs,
+      hours,
+      now,
+      passengersOnly: cisMode,
+      stationName,
+      matchBy: loc.matchedAs,
+      at,
+      historicalDate,
+      fullDay: true,
+      boardDate: ymd,
+      cisMode,
+      catalog,
+    });
+    board.departures = mergeBoardRows(board.departures, part.departures);
+    board.arrivals = mergeBoardRows(board.arrivals, part.arrivals);
+    if (part.stationName) board.stationName = part.stationName;
+    board.name = part.name || board.name;
+  }
+  if (historicalDate) {
+    const rids = [...new Set([...(board.departures || []), ...(board.arrivals || [])].map((row) => row.rid).filter(Boolean))];
+    const holes = ridsNeedHsp(ymd, rids);
+    board.hspPending = holes.length > 0;
+    if (holes.length) startBoardHspFill(ymd, holes);
+  } else {
+    board.hspPending = false;
+  }
+  if (historicalDate) board.historicalDate = historicalDate;
+  else board.historicalDate = ymd;
+  if (at) board.historicalAt = at;
+  board.windowHours = hours;
+  board.matchedAs = loc.matchedAs;
+  if (loc.matchedAs === "tiploc") board.tiploc = String(crs).toUpperCase();
+  board.generatedAt = new Date().toISOString();
+  board.updatedAt = board.generatedAt;
+  boardSnap.set(snapKey, { at: Date.now(), board });
+  return board;
 }
 
-function serviceDetail(ymd, rid) {
+function parseUnitCatalogJson(raw) {
+  let parsed = {};
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch {
+    parsed = {};
+  }
+  if (parsed.json && typeof parsed.json === "object") parsed = { ...parsed, ...parsed.json };
+  if (typeof parsed.vehicles_json === "string") {
+    try {
+      parsed.vehicles = JSON.parse(parsed.vehicles_json);
+    } catch {
+      /* keep string */
+    }
+  }
+  return parsed;
+}
+
+function collapseCalls(rows) {
+  const map = new Map();
+  for (const c of rows) {
+    const key = `${c.seq ?? "?"}|${c.tiploc}`;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, { ...c });
+      continue;
+    }
+    map.set(key, { ...prev, ...c, seq: prev.seq });
+  }
+  return [...map.values()].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
+}
+
+function trimCallsToDestination(rows, svc) {
+  const destCrs = String(svc?.destination_crs || "").toUpperCase();
+  const destTpl = String(svc?.destination || "").toUpperCase();
+  const destName = String(svc?.destination_name || "").trim().toUpperCase();
+  const ordered = collapseCalls(rows);
+  if (!destCrs && destTpl.length < 3 && destName.length < 3) return ordered;
+  let seenPublic = false;
+  const out = [];
+  for (const c of ordered) {
+    out.push(c);
+    const pass = Boolean(Number(c.is_passing)) || Boolean(c.wtp && !c.sta && !c.std);
+    if (pass) continue;
+    seenPublic = true;
+    const crs = String(c.crs || "").toUpperCase();
+    const tpl = String(c.tiploc || "").toUpperCase();
+    const name = String(stationName(crs, tpl) || "").trim().toUpperCase();
+    if (seenPublic && destCrs && crs === destCrs) break;
+    if (seenPublic && destTpl && tpl === destTpl) break;
+    if (seenPublic && destName && (name === destName || tpl === destName)) break;
+  }
+  return out.length ? out : ordered;
+}
+
+function parseCoachLoading(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.length) return null;
+    return parsed
+      .filter((item) => item && item.number != null && Number.isFinite(Number(item.value)))
+      .map((item) => ({ number: String(item.number), value: Number(item.value) }));
+  } catch {
+    return null;
+  }
+}
+
+function storedFormation(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.coaches) || !parsed.coaches.length) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function consistForService(ymd, svc) {
+  const days = [ymd, addCalendarDays(ymd, 1), addCalendarDays(ymd, -1)].filter(Boolean);
+  const seen = new Set();
+  for (const day of days) {
+    if (seen.has(day)) continue;
+    seen.add(day);
+    const row = lookupConsist(catalog, { uid: svc.uid, ssd: day, headcode: svc.headcode });
+    const doc = consistDocument(row, svc.toc);
+    if (doc) return doc;
+  }
+  return null;
+}
+
+function ridYmd(rid) {
+  const s = String(rid || "");
+  if (!/^\d{8}/.test(s)) return null;
+  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+}
+
+function dayHasRid(ymd, rid) {
+  const db = openDay(ymd);
+  if (!db) return false;
+  return Boolean(db.prepare(`SELECT 1 AS n FROM services WHERE rid = ?`).get(rid));
+}
+
+function mergeBoardRows(a, b) {
+  const map = new Map();
+  for (const row of [...(a || []), ...(b || [])]) {
+    const key = `${row.rid}|${row.std || row.sta || ""}|${row.movement || ""}`;
+    if (!map.has(key)) map.set(key, row);
+  }
+  return [...map.values()].sort((x, y) => String(x.scheduledAt || "").localeCompare(String(y.scheduledAt || "")));
+}
+
+function isLiveServiceDay(ymd) {
+  const op = operatingDayYmd();
+  return ymd === op || ymd === addCalendarDays(op, -1) || ymd === addCalendarDays(op, 1);
+}
+
+function ridLiveScore(ymd, rid) {
+  const db = openDay(ymd);
+  if (!db) return -1;
+  if (!db.prepare(`SELECT 1 AS n FROM services WHERE rid = ?`).get(rid)) return -1;
+  return db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM calls
+       WHERE rid = ? AND (ata IS NOT NULL OR atd IS NOT NULL OR eta IS NOT NULL OR etd IS NOT NULL)`,
+    )
+    .get(rid).n;
+}
+
+function resolveServiceYmd(rid, dateParam) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateParam || "")) return dateParam;
+  const today = operatingDayYmd();
+  const fromRid = ssdFromRid(rid) || ridYmd(rid);
+  // A Darwin rid is often dated tomorrow while the live overlay sits on today's
+  // railway-day file. Prefer the day that actually has live times, with today
+  // and yesterday ahead of a future rid date when scores tie.
+  const candidates = [today, addCalendarDays(today, -1), fromRid, addCalendarDays(today, 1)];
+  let best = null;
+  let bestScore = -1;
+  const seen = new Set();
+  for (const y of candidates) {
+    if (!y || seen.has(y)) continue;
+    seen.add(y);
+    const score = ridLiveScore(y, rid);
+    if (score > bestScore) {
+      bestScore = score;
+      best = y;
+    }
+  }
+  if (best && bestScore >= 0) return best;
+  return fromRid || today;
+}
+
+function serviceHspPending(db, ymd, rid) {
+  if (isLiveServiceDay(ymd)) return false;
+  if (!ridNeedsHsp(db, rid)) return false;
+  if (ymd > operatingDayYmd()) return false;
+  return true;
+}
+
+async function serviceDetail(ymd, rid, atRaw) {
+  const at = parseAtParam(atRaw);
+  if (ymd !== londonCalendarYmd()) await ensureDayImported(ymd);
   const db = openDay(ymd);
   if (!db) return null;
   const svc = db.prepare(`SELECT * FROM services WHERE rid = ?`).get(rid);
-  if (!svc) {
-    db.close();
-    return null;
-  }
-  const calls = db.prepare(`SELECT * FROM calls WHERE rid = ? ORDER BY COALESCE(std, sta, wtd, wta, '99:99'), seq`).all(rid);
-  const units = db.prepare(`SELECT unit_id FROM units WHERE rid = ?`).all(rid).map((u) => u.unit_id);
+  if (!svc) return null;
+  const rawCalls = db
+    .prepare(`SELECT * FROM calls WHERE rid = ? ORDER BY seq, COALESCE(std, sta, wtd, wta, wtp, '99:99')`)
+    .all(rid);
+  const calls = maskCallsAsOf(trimCallsToDestination(sortCallsByJourneyTime(rawCalls), svc), at);
+  const consist = consistForService(ymd, svc);
+  const units = Array.isArray(consist?.allocations)
+    ? [...new Set(consist.allocations.flatMap((a) => (a.resourceGroups || []).map((g) => g.unitId).filter(Boolean)))]
+    : [];
   const callingPoints = calls.map((c) => ({
       crs: c.crs,
       tiploc: c.tiploc,
       seq: c.seq,
-      isPassing: Boolean(c.is_passing),
-      platform: c.platform,
+      isPassing:
+        Boolean(Number(c.is_passing)) ||
+        Boolean(c.wtp && !c.sta && !c.std),
+      platform: platformText(c.platform),
       sta: c.sta,
       std: c.std,
       wta: c.wta,
@@ -251,12 +494,16 @@ function serviceDetail(ymd, rid) {
       liveKind: c.live_kind,
       actualSource: c.actual_source,
     }));
-  const last = callingPoints.length - 1;
+  const passengerIdx = callingPoints
+    .map((c, i) => (c.isPassing ? -1 : i))
+    .filter((i) => i >= 0);
+  const firstPax = passengerIdx[0] ?? 0;
+  const lastPax = passengerIdx[passengerIdx.length - 1] ?? callingPoints.length - 1;
   const stops = callingPoints.map((c, i) => ({
     tpl: c.tiploc,
     name: stationName(c.crs, c.tiploc),
     crs: c.crs,
-    slot: c.isPassing ? "PP" : i === 0 ? "OR" : i === last ? "DT" : "IP",
+    slot: c.isPassing ? "PP" : i === firstPax ? "OR" : i === lastPax ? "DT" : "IP",
     pta: c.sta,
     ptd: c.std,
     wta: c.wta,
@@ -268,15 +515,21 @@ function serviceDetail(ymd, rid) {
     platform: c.platform,
     livePlatform: c.platform,
     activity: null,
-    liveTime: c.atd || c.ata || c.atp || c.etd || c.eta || c.etp,
-    liveKind: c.liveKind,
+    liveTime: c.isPassing
+      ? c.atp || c.etp || c.wtp
+      : c.atd || c.ata || c.atp || c.etd || c.eta || c.etp || c.std || c.sta || c.wtp,
+    liveKind: liveClockFromCall(c, c.isPassing ? "departure" : i === lastPax ? "arrival" : "departure").kind || c.liveKind,
     cancelledAtStop: false,
     cancelReasonAtStop: null,
-    loadingPercentage: null,
-    coachLoading: null,
+    loadingPercentage: c.loading_percentage ?? null,
+    coachLoading: parseCoachLoading(c.coach_loading),
     actualSource: c.actualSource,
   }));
-  db.close();
+  const hspPending = serviceHspPending(db, ymd, rid);
+  if (hspPending) startBoardHspFill(ymd, [rid]);
+  const originStop = stops.find((s) => s.slot === "OR") || stops.find((s) => s.crs && s.slot !== "PP");
+  const destStop = [...stops].reverse().find((s) => s.slot === "DT") || [...stops].reverse().find((s) => s.crs && s.slot !== "PP");
+  const location = computeServiceLocation(calls, { stationName, ymd, now: at ? londonInstant(ymd, at) || new Date() : new Date() });
   return {
     rid: svc.rid,
     uid: svc.uid,
@@ -286,33 +539,28 @@ function serviceDetail(ymd, rid) {
     tocName: tocDisplayName(svc.toc) || svc.operator_name,
     trainCat: svc.category,
     isPassenger: svc.service_type !== "freight",
-    origin: svc.origin_crs,
-    originName: svc.origin_name || stationName(svc.origin_crs),
-    destination: svc.destination_crs,
-    destinationName: svc.destination_name || stationName(svc.destination_crs),
+    origin: originStop?.crs || svc.origin_crs || "",
+    originName: originStop?.name || stationName(originStop?.crs, originStop?.tpl) || svc.origin_name,
+    destination: destStop?.crs || svc.destination_crs || "",
+    destinationName: destStop?.name || stationName(destStop?.crs, destStop?.tpl) || svc.destination_name,
     cancelled: Boolean(svc.cancelled),
     cancellation: null,
     partiallyCancelled: false,
-    delayReason: null,
+    delayReason: svc.delay_reason || null,
     reverseFormation: false,
-    formation: null,
-    consist: null,
+    formation: storedFormation(svc.formation),
+    consist,
     associations: [],
     alerts: [],
-    stops,
-    callingPoints,
     units,
+    stops,
     serviceType: svc.service_type,
     updatedAt: new Date().toISOString(),
+    historicalDate: isLiveServiceDay(ymd) ? null : ymd,
+    historicalAt: at,
+    location,
+    hspPending,
   };
-}
-
-function listDates() {
-  if (!existsSync(DATA_DIR)) return [];
-  return readdirSync(DATA_DIR)
-    .filter((f) => /^day-\d{4}-\d{2}-\d{2}\.sqlite$/.test(f))
-    .map((f) => f.slice(4, 14))
-    .sort();
 }
 
 function fleetIdOf(unitId, cls) {
@@ -321,72 +569,130 @@ function fleetIdOf(unitId, cls) {
   return String(unitId || "").match(/^(\d{3})/)?.[1] || "other";
 }
 
-function unitsDays() {
-  return listDates().filter((ymd) => {
-    const db = openDay(ymd);
-    if (!db) return false;
-    const n = db.prepare(`SELECT COUNT(*) AS n FROM units`).get().n;
-    db.close();
-    return n > 0;
-  });
+function catalogFleetId(row) {
+  const inner = parseUnitCatalogJson(row?.json);
+  return inner.fleetId || inner.fleet_id || row?.class || fleetIdOf(row?.unit_id, row?.class);
 }
 
-function unitsFleets(day) {
-  const counts = new Map();
-  const bump = (id) => counts.set(id, (counts.get(id) || 0) + 1);
-  if (day && day !== "all") {
-    const db = openDay(day);
-    if (db) {
-      for (const row of db.prepare(`SELECT DISTINCT unit_id FROM units`).all()) bump(fleetIdOf(row.unit_id));
-      db.close();
-    }
-  } else {
-    for (const row of catalog.prepare(`SELECT unit_id, class FROM units`).all()) bump(fleetIdOf(row.unit_id, row.class));
+function listUnitDays() {
+  return catalog
+    .prepare(`SELECT DISTINCT ssd FROM consists ORDER BY ssd DESC`)
+    .all()
+    .map((r) => r.ssd);
+}
+
+function unitIdsOnDay(ymd) {
+  const ids = new Set();
+  for (const row of catalog.prepare(`SELECT unit_ids FROM consists WHERE ssd = ?`).all(ymd)) {
+    for (const id of unitIdsFromConsistRow(row)) ids.add(id);
   }
-  return [...counts.entries()].map(([fleetId, unitCount]) => ({ fleetId, unitCount })).sort((a, b) => a.fleetId.localeCompare(b.fleetId));
+  return ids;
 }
 
-function unitDetail(unitId, date) {
-  const cat = catalog.prepare(`SELECT * FROM units WHERE unit_id = ?`).get(unitId);
-  const ymd = date || operatingDayYmd();
-  const db = openDay(ymd);
-  const dayRows = db
-    ? db.prepare(`SELECT * FROM units WHERE unit_id = ?`).all(unitId)
-    : [];
-  if (db) db.close();
-  if (!cat && !dayRows.length) return null;
+function listUnitFleets(day) {
+  const filterIds = day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? unitIdsOnDay(day) : null;
+  const counts = new Map();
+  const rows = catalog.prepare(`SELECT unit_id, class, json FROM units`).all();
+  for (const row of rows) {
+    if (filterIds && !filterIds.has(String(row.unit_id))) continue;
+    const fleetId = catalogFleetId(row) || "Unknown";
+    counts.set(fleetId, (counts.get(fleetId) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([fleetId, unitCount]) => ({ fleetId, unitCount }))
+    .sort((a, b) => a.fleetId.localeCompare(b.fleetId));
+}
+
+function listUnitCatalog(params) {
+  const fleet = String(params.get("fleet") || "").trim();
+  const q = String(params.get("q") || "").trim().toUpperCase();
+  const day = params.get("day");
+  const limit = Math.min(200, Math.max(1, Number(params.get("limit") || 100)));
+  const cursor = Math.max(0, Number(params.get("cursor") || 0));
+  const filterIds = day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? unitIdsOnDay(day) : null;
+  const milesByUnit = new Map();
+  if (day && /^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      for (const row of catalog.prepare(`SELECT unit_ids FROM consists WHERE ssd = ?`).all(day)) {
+        for (const id of unitIdsFromConsistRow(row)) {
+          const cur = milesByUnit.get(id) || { serviceCount: 0 };
+          cur.serviceCount += 1;
+          milesByUnit.set(id, cur);
+        }
+      }
+  }
+  const rows = catalog.prepare(`SELECT unit_id, class, json FROM units ORDER BY unit_id`).all();
+  const units = [];
+  for (const row of rows) {
+    const unitId = String(row.unit_id);
+    if (filterIds && !filterIds.has(unitId)) continue;
+    if (q && !unitId.toUpperCase().includes(q)) continue;
+    const fleetId = catalogFleetId(row);
+    if (fleet && String(fleetId) !== fleet && !String(fleetId).startsWith(fleet)) continue;
+    const inner = parseUnitCatalogJson(row.json);
+    units.push({
+      unitId,
+      fleetId,
+      serviceCount: milesByUnit.get(unitId)?.serviceCount || 0,
+      lastEndOfDayMiles: inner.last_end_of_day_miles ?? inner.lastEndOfDayMiles ?? null,
+    });
+  }
+  const slice = units.slice(cursor, cursor + limit);
+  return { units: slice, total: units.length, nextCursor: cursor + slice.length < units.length ? cursor + slice.length : null };
+}
+
+async function unitDetail(unitId, dateRaw) {
+  const id = String(unitId || "").trim();
+  if (!id) return null;
+  const cat = catalog.prepare(`SELECT unit_id, class, json, updated_at FROM units WHERE unit_id = ?`).get(id);
+  const ymd = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw || "") ? dateRaw : londonCalendarYmd();
   const services = [];
-  for (const row of dayRows) {
-    if (!row.rid) continue;
-    const detail = serviceDetail(ymd, row.rid);
+  let lastSeenRid = null;
+  const consistRows = catalog
+    .prepare(`SELECT uid, ssd, headcode, unit_ids FROM consists WHERE unit_ids LIKE ? ORDER BY ssd DESC LIMIT 40`)
+    .all(`%${id}%`);
+  for (const row of consistRows) {
+    if (!unitIdsFromConsistRow(row).includes(id)) continue;
+    const db = openDay(row.ssd);
+    if (!db) continue;
+    const svc = db.prepare(`SELECT rid, headcode, origin_name, destination_name, origin_crs, destination_crs FROM services WHERE UPPER(IFNULL(uid,'')) = ? LIMIT 1`).get(String(row.uid).toUpperCase());
+    if (!svc) continue;
+    lastSeenRid = svc.rid;
     services.push({
-      rid: row.rid,
-      headcode: row.headcode || detail?.trainId || null,
-      start: detail?.stops?.[0] ? `${ymd}T${detail.stops[0].ptd || detail.stops[0].pta || "00:00"}:00` : null,
-      end: detail?.stops?.length
-        ? `${ymd}T${detail.stops[detail.stops.length - 1].pta || detail.stops[detail.stops.length - 1].ptd || "00:00"}:00`
-        : null,
-      startTpl: detail?.stops?.[0]?.tpl || null,
-      endTpl: detail?.stops?.[detail.stops.length - 1]?.tpl || null,
-      startName: detail?.originName || null,
-      endName: detail?.destinationName || null,
+      rid: svc.rid,
+      headcode: svc.headcode || row.headcode || null,
+      start: row.ssd,
+      end: row.ssd,
+      startTpl: null,
+      endTpl: null,
+      startName: svc.origin_name || svc.origin_crs || null,
+      endName: svc.destination_name || svc.destination_crs || null,
       position: null,
       reversed: false,
     });
   }
-  let json = {};
-  try {
-    json = cat?.json ? JSON.parse(cat.json) : {};
-  } catch {
-    json = {};
+  if (!cat && !services.length) return null;
+  const inner = parseUnitCatalogJson(cat?.json);
+  let vehiclesRaw = inner.vehicles || inner.Vehicles || [];
+  if (typeof inner.vehicles_json === "string") {
+    try {
+      vehiclesRaw = JSON.parse(inner.vehicles_json);
+    } catch {
+      /* keep */
+    }
+  }
+  let latestService = null;
+  if (lastSeenRid) {
+    const ridDay = ridYmd(lastSeenRid) || ymd;
+    latestService = await serviceDetail(ridDay, lastSeenRid, null);
   }
   return {
-    unitId,
-    fleetId: fleetIdOf(unitId, cat?.class),
-    vehicles: json.vehicles || [],
-    lastSeenRid: dayRows[0]?.rid || null,
-    updatedAt: new Date().toISOString(),
-    latestService: services[0] ? serviceDetail(ymd, services[0].rid) : null,
+    unitId: id,
+    fleetId: catalogFleetId(cat || { unit_id: id, class: inner.fleetId, json: cat?.json }),
+    vehicles: normalizePtacVehicles(vehiclesRaw),
+    lastSeenRid,
+    lastEndOfDayMiles: inner.last_end_of_day_miles ?? inner.lastEndOfDayMiles ?? null,
+    updatedAt: cat?.updated_at ? new Date(cat.updated_at).toISOString() : new Date().toISOString(),
+    latestService,
     services,
   };
 }
@@ -404,129 +710,126 @@ const server = createServer(async (req, res) => {
     req.headers["x-internal-key"] ??
     req.headers["x-api-key"];
   if (INTERNAL && key !== INTERNAL) {
-    json(res, 401, { error: "unauthorized" });
-    return;
+    const open = url.pathname === "/api/ping" || url.pathname === "/health";
+    if (!open) {
+      json(res, 401, { error: "unauthorized" });
+      return;
+    }
   }
 
   try {
     if (url.pathname === "/health" || url.pathname === "/api/health" || url.pathname === "/api/ping") {
-      json(res, 200, { ok: true, role: "query", day: operatingDayYmd(), dates: listDates().length });
+      json(res, 200, { ok: true, role: "query", day: operatingDayYmd(), days: listDayYmds() });
       return;
     }
-    const dep = url.pathname.match(/^\/api\/departures\/([A-Z]{3})$/i);
+    if (url.pathname === "/api/locations" || url.pathname === "/api/station") {
+      json(res, 200, { locations: searchLocations(url.searchParams.get("q") || "") }, {
+        "cache-control": "public, max-age=60, s-maxage=60",
+      });
+      return;
+    }
+    const locOne = url.pathname.match(/^\/api\/(?:locations|station)\/([A-Z0-9]{3,10})$/i);
+    if (locOne) {
+      json(res, 200, lookupLocation(locOne[1]), {
+        "cache-control": "public, max-age=300, s-maxage=300",
+      });
+      return;
+    }
+    const dep = url.pathname.match(/^\/api\/departures\/([A-Z0-9]{3,10})$/i);
     if (dep) {
-      const date = url.searchParams.get("date") || operatingDayYmd();
-      if (!ymdValid(date)) {
-        json(res, 400, { error: "bad date" });
+      const date = url.searchParams.get("date");
+      const ymd = /^\d{4}-\d{2}-\d{2}$/.test(date || "") ? date : operatingDayYmd();
+      const cis = url.searchParams.get("passengers") === "1" || url.searchParams.get("cis") === "1";
+      const board = await liveDepartures(dep[1], {
+        passengersOnly: cis,
+        hours: 24,
+        ymd,
+        at: url.searchParams.get("at"),
+      });
+      const past = ymd < operatingDayYmd();
+      json(res, 200, board, {
+        "cache-control": past ? "public, max-age=3600, s-maxage=3600" : "public, max-age=3, s-maxage=3",
+      });
+      return;
+    }
+    const svcDated = url.pathname.match(/^\/api\/service\/([^/]+)\/(\d{4}-\d{2}-\d{2})$/);
+    if (svcDated) {
+      const detail = await serviceDetail(svcDated[2], decodeURIComponent(svcDated[1]), url.searchParams.get("at"));
+      if (!detail) {
+        json(res, 404, { error: "not found" });
         return;
       }
-      const hours = Number(url.searchParams.get("hours") || 1);
-      const board = departures(date, dep[1], {
-        passengersOnly: url.searchParams.get("passengers") === "1",
-        hours,
-        dated: Boolean(url.searchParams.get("date")),
-      });
-      const cache =
-        date < operatingDayYmd()
-          ? { "cache-control": "public, max-age=300, s-maxage=3600" }
-          : { "cache-control": "public, max-age=15, s-maxage=15" };
-      json(res, 200, board, cache);
+      json(res, 200, detail, { "cache-control": "public, max-age=60" });
       return;
     }
     const svcRid = url.pathname.match(/^\/api\/service\/([^/]+)$/);
     if (svcRid) {
-      const date = url.searchParams.get("date") || operatingDayYmd();
-      const detail = serviceDetail(date, decodeURIComponent(svcRid[1]));
+      const rid = decodeURIComponent(svcRid[1]);
+      const ymd = resolveServiceYmd(rid, url.searchParams.get("date"));
+      const detail = await serviceDetail(ymd, rid, url.searchParams.get("at"));
       if (!detail) {
         json(res, 404, { error: "not found" });
         return;
       }
-      json(res, 200, detail, { "cache-control": "public, max-age=60" });
+      json(res, 200, detail, { "cache-control": "public, max-age=5" });
       return;
     }
-    const svc = url.pathname.match(/^\/api\/service\/([^/]+)\/(\d{4}-\d{2}-\d{2})$/);
-    if (svc) {
-      const detail = serviceDetail(svc[2], decodeURIComponent(svc[1]));
-      if (!detail) {
-        json(res, 404, { error: "not found" });
-        return;
-      }
-      json(res, 200, detail, { "cache-control": "public, max-age=60" });
-      return;
-    }
-    if (url.pathname === "/api/dates" || url.pathname === "/api/history/dates") {
-      json(res, 200, { dates: listDates() });
-      return;
-    }
-    if (req.method === "POST" && url.pathname === "/api/plan/bash") {
-      const chunks = [];
-      for await (const c of req) chunks.push(c);
-      let body = {};
-      try {
-        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-      } catch {
-        json(res, 400, { ok: false, error: "invalid json" });
-        return;
-      }
-      const ymd = body.date || operatingDayYmd();
+    const trustTrain = url.pathname.match(/^\/api\/trust\/([^/]+)$/i);
+    if (trustTrain) {
+      const date = url.searchParams.get("date");
+      const ymd = /^\d{4}-\d{2}-\d{2}$/.test(date || "") ? date : londonCalendarYmd();
       const db = openDay(ymd);
       if (!db) {
-        json(res, 404, { ok: false, error: "no day" });
+        json(res, 404, { error: "not found" });
         return;
       }
-      const out = planBash(db, (crs) => stationName(crs) || crs, body);
-      db.close();
-      json(res, out.ok ? 200 : 400, out);
+      const trainId = decodeURIComponent(trustTrain[1]);
+      const events = db
+        .prepare(`SELECT event_id, train_id, uid, loc_stanox, event_type, planned, actual, json, received_at FROM trust_events WHERE train_id = ? ORDER BY received_at`)
+        .all(trainId)
+        .map((e) => {
+          let parsed = e.json;
+          try {
+            parsed = e.json ? JSON.parse(e.json) : null;
+          } catch {
+            parsed = e.json;
+          }
+          return { ...e, json: parsed };
+        });
+      json(res, 200, { trainId, date: ymd, events });
       return;
     }
-    if (url.pathname === "/api/units/days") {
-      json(res, 200, { days: unitsDays() });
-      return;
-    }
-    if (url.pathname === "/api/units/fleets") {
-      json(res, 200, { fleets: unitsFleets(url.searchParams.get("day") || "all") });
-      return;
-    }
-    if (url.pathname === "/api/units/catalog") {
-      const units = catalog.prepare(`SELECT unit_id, class, operator, updated_at FROM units`).all();
-      json(res, 200, { units, updatedAt: new Date().toISOString() });
-      return;
-    }
-    const unitOne = url.pathname.match(/^\/api\/unit\/([^/]+)$/);
-    if (unitOne) {
-      const detail = unitDetail(decodeURIComponent(unitOne[1]), url.searchParams.get("date") || undefined);
-      json(res, detail ? 200 : 404, detail ?? { error: "not found" });
-      return;
-    }
-    if (url.pathname.startsWith("/api/units/")) {
-      const id = decodeURIComponent(url.pathname.slice("/api/units/".length));
-      const detail = unitDetail(id, url.searchParams.get("date") || undefined);
-      json(res, detail ? 200 : 404, detail ?? { error: "not found" });
-      return;
-    }
-    if (url.pathname === "/api/window") {
-      const dates = listDates();
-      const today = operatingDayYmd();
+    if (url.pathname === "/api/window" || url.pathname === "/api/dates" || url.pathname === "/api/history/dates") {
+      const days = listDayYmds();
+      const today = londonCalendarYmd();
+      const horizon = timetableHorizonYmd();
+      const maxFile = days.at(-1) || today;
       json(res, 200, {
-        timetableWindow: {
-          minDate: dates[0] || today,
-          maxDate: dates[dates.length - 1] || today,
-        },
-        dates,
-        ttDir: TT_DIR,
+        timetableWindow: { minDate: days[0] || today, maxDate: maxFile > horizon ? maxFile : horizon },
+        dates: days,
       });
       return;
     }
-    if (url.pathname === "/api/rtppm") {
-      const ymd = url.searchParams.get("date") || operatingDayYmd();
-      const db = openDay(ymd);
-      if (!db) {
-        json(res, 404, { error: "no day" });
+    if (url.pathname === "/api/units/days") {
+      json(res, 200, { days: listUnitDays() }, { "cache-control": "public, max-age=30" });
+      return;
+    }
+    if (url.pathname === "/api/units/fleets") {
+      json(res, 200, { fleets: listUnitFleets(url.searchParams.get("day")) }, { "cache-control": "public, max-age=30" });
+      return;
+    }
+    if (url.pathname === "/api/units/catalog") {
+      json(res, 200, listUnitCatalog(url.searchParams), { "cache-control": "public, max-age=15" });
+      return;
+    }
+    const unitOne = url.pathname.match(/^\/api\/unit\/([^/]+)$/i);
+    if (unitOne) {
+      const detail = await unitDetail(decodeURIComponent(unitOne[1]), url.searchParams.get("date"));
+      if (!detail) {
+        json(res, 404, { error: "not found" });
         return;
       }
-      const row = db.prepare(`SELECT * FROM rtppm ORDER BY snapshot_at DESC LIMIT 1`).get();
-      db.close();
-      json(res, 200, row ? JSON.parse(row.json) : { snapshots: [] });
+      json(res, 200, detail, { "cache-control": "public, max-age=5" });
       return;
     }
     json(res, 404, { error: "not found" });

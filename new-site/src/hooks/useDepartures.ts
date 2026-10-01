@@ -3,10 +3,6 @@ import type { DeparturesSnapshot } from '@/types/darwin'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { normalizeDeparturesSnapshot } from '@/utils/normalizeRailCore'
 import { recallBoard, rememberBoard, rememberRecentCrs } from '@/utils/darwinHotCache'
-import {
-  DARWIN_HISTORICAL_DAY_HOURS,
-  DARWIN_HISTORICAL_DAY_START,
-} from '@/utils/railwayOperatingDayUk'
 
 export type DeparturesStatus =
   | 'idle'
@@ -32,7 +28,8 @@ export interface UseDeparturesOptions {
    * Time-of-day slicing belongs in the UI, as on Realtime Trains location search.
    */
   historicalDayBoard?: boolean
-  /** Board fetched on the server so the first paint is not a loading spinner. */
+  /** CIS passenger board (`passengers=1`). Default is working line-up. */
+  cisMode?: boolean
   initialSnapshot?: DeparturesSnapshot | null
 }
 
@@ -47,6 +44,7 @@ export interface UseDeparturesResult {
   refetch: () => void
 }
 
+const HSP_WAIT_MS = 60_000
 const DEFAULT_POLL_MS  = 10_000
 const DEFAULT_STALE_MS = 30_000
 const MAX_NETWORK_RETRIES = 3
@@ -115,19 +113,18 @@ function seedCache(key: string, snap: DeparturesSnapshot) {
 export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
   const {
     code,
-    hours,
     pollMs = DEFAULT_POLL_MS,
     staleAfterMs = DEFAULT_STALE_MS,
     date,
     at,
     historicalDayBoard = false,
+    cisMode = false,
     initialSnapshot = null,
   } = opts
-  const queryHours = historicalDayBoard ? DARWIN_HISTORICAL_DAY_HOURS : hours
-  const queryAt = historicalDayBoard ? DARWIN_HISTORICAL_DAY_START : at
-  const effectivePollMs = date ? 0 : pollMs
-  const cacheKey = `${code}|${queryHours ?? ''}|${date ?? ''}|${queryAt ?? ''}`
+  const queryAt = historicalDayBoard ? undefined : at
+  const cacheKey = `${code}|${date ?? ''}|${queryAt ?? ''}|${cisMode ? 'cis' : 'wtt'}`
 
+  const [awaitingHsp, setAwaitingHsp] = useState(false)
   const [data, setData]     = useState<DeparturesSnapshot | null>(() => {
     if (!code) return null
     if (initialSnapshot) {
@@ -141,16 +138,19 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
     }
     return null
   })
+  const effectivePollMs = awaitingHsp ? 4_000 : date ? 0 : pollMs
   const [error, setError]   = useState<string | null>(null)
   const [status, setStatus] = useState<DeparturesStatus>(() => {
     if (!code) return 'idle'
-    return (initialSnapshot || peekCache(cacheKey) || recallBoard(cacheKey)) ? 'ok' : 'loading'
+    const cached = peekCache(cacheKey) || recallBoard(cacheKey)
+    return (initialSnapshot || cached) ? 'ok' : 'loading'
   })
   const [ageMs, setAgeMs]   = useState<number | null>(null)
 
   const pollRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
   const ageTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const inflightKeyRef = useRef<string | null>(null)
+  const hspWaitStartedRef = useRef<number | null>(null)
 
   const applySnapshot = useCallback((snap: DeparturesSnapshot) => {
     setData(snap)
@@ -158,7 +158,7 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
     const age = Date.now() - Date.parse(snap.updatedAt)
     setAgeMs(age)
     setStatus(age > staleAfterMs ? 'stale' : 'ok')
-  }, [staleAfterMs])
+  }, [staleAfterMs, date, historicalDayBoard])
 
   const putCache = useCallback((key: string, snap: DeparturesSnapshot) => {
     departuresSWRCache.set(key, { key, data: snap, cachedAtMs: Date.now() })
@@ -175,9 +175,10 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
     inflightKeyRef.current = key
     try {
       const sp = new URLSearchParams()
-      if (queryHours != null) sp.set('hours', String(queryHours))
+      sp.set('hours', '24')
       if (date) sp.set('date', date)
       if (queryAt) sp.set('at', queryAt)
+      if (cisMode) sp.set('passengers', '1')
       const qs = sp.toString()
       const url = `/api/darwin/departures/${encodeURIComponent(code)}${qs ? `?${qs}` : ''}`
       let res: Response | null = null
@@ -207,6 +208,8 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
       }
       if (!res.ok) throw new Error(userMessageForStatus(res.status))
       const snap: DeparturesSnapshot = normalizeDeparturesSnapshot(await res.json(), code)
+      if (snap.hspPending) setAwaitingHsp(true)
+      else setAwaitingHsp(false)
       putCache(key, snap)
       rememberBoard(key, snap)
       rememberRecentCrs(code)
@@ -218,7 +221,7 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
     } finally {
       if (inflightKeyRef.current === key) inflightKeyRef.current = null
     }
-  }, [applySnapshot, queryAt, code, date, queryHours, putCache])
+  }, [applySnapshot, queryAt, code, date, cisMode, putCache])
 
   const refetch = useCallback(() => {
     if (!code) return
@@ -235,35 +238,36 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
     }
 
     const cached = peekCache(cacheKey) || recallBoard(cacheKey)
-    if (cached) {
+    if (cached && !cached.hspPending) {
       applySnapshot(cached)
-    } else {
-      setData(null)
-      setError(null)
-      setStatus('loading')
     }
 
     const ac = new AbortController()
     void fetchOnce(ac.signal, cacheKey)
 
+    return () => {
+      ac.abort()
+      if (inflightKeyRef.current === cacheKey) inflightKeyRef.current = null
+    }
+  }, [applySnapshot, cacheKey, code, fetchOnce])
+
+  useEffect(() => {
+    if (!code || effectivePollMs <= 0) return
     if (pollRef.current) clearTimeout(pollRef.current)
     const schedulePoll = () => {
-      if (effectivePollMs <= 0) return
       pollRef.current = setTimeout(() => {
         if (document.visibilityState === 'visible' && inflightKeyRef.current !== cacheKey) {
+          const ac = new AbortController()
           void fetchOnce(ac.signal, cacheKey)
         }
         schedulePoll()
       }, effectivePollMs)
     }
     schedulePoll()
-
     return () => {
       if (pollRef.current) clearTimeout(pollRef.current)
-      ac.abort()
-      if (inflightKeyRef.current === cacheKey) inflightKeyRef.current = null
     }
-  }, [applySnapshot, cacheKey, code, effectivePollMs, fetchOnce])
+  }, [cacheKey, code, effectivePollMs, fetchOnce])
 
   useEffect(() => {
     const onVis = () => {

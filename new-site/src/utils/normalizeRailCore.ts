@@ -19,6 +19,8 @@ type RailCoreCall = {
   etp?: string | null
   liveKind?: string | null
   actualSource?: string | null
+  loadingPercentage?: number | null
+  coachLoading?: ServiceStop['coachLoading']
 }
 
 function liveFromCall(c: RailCoreCall): { liveTime: string | null; liveKind: ServiceStop['liveKind'] } {
@@ -80,6 +82,7 @@ function rowFromRailCore(r: Record<string, unknown>): DepartureRow {
     destination: String(r.destination || r.destinationCrs || ''),
     destinationName: r.destinationName ? String(r.destinationName) : null,
     destinationCrs: r.destinationCrs ? String(r.destinationCrs) : null,
+    via: typeof r.via === 'string' ? r.via : null,
     callingAfter: Array.isArray(r.callingAfter) ? (r.callingAfter as string[]) : [],
     callingAfterNames: Array.isArray(r.callingAfterNames) ? (r.callingAfterNames as (string | null)[]) : [],
     callingAfterCrs: Array.isArray(r.callingAfterCrs) ? (r.callingAfterCrs as (string | null)[]) : [],
@@ -87,11 +90,13 @@ function rowFromRailCore(r: Record<string, unknown>): DepartureRow {
     cancelled,
     cancellation: (r.cancellation as DepartureRow['cancellation']) || (r.cancelReason ? { source: 'ts', reason: String(r.cancelReason) } : null),
     delayReason: (r.delayReason as DepartureRow['delayReason']) || null,
-    loadingPercentage: null,
-    coachLoading: null,
+    loadingPercentage: typeof r.loadingPercentage === 'number' ? r.loadingPercentage : null,
+    coachLoading: Array.isArray(r.coachLoading) ? (r.coachLoading as DepartureRow['coachLoading']) : null,
     reverseFormation: false,
-    hasConsist: false,
+    hasConsist: Boolean(r.hasConsist),
+    unitIds: Array.isArray(r.unitIds) ? (r.unitIds as string[]) : null,
     actualSource: r.actualSource ? String(r.actualSource) : null,
+    locationLabel: r.locationLabel ? String(r.locationLabel) : null,
     hasAssociations: false,
     hasAlerts: false,
     status: String(r.status || (cancelled ? 'Cancelled' : delayMinutes ? `Delayed ${delayMinutes} min` : 'On time')),
@@ -100,7 +105,9 @@ function rowFromRailCore(r: Record<string, unknown>): DepartureRow {
 
 export function normalizeDeparturesSnapshot(body: unknown, fallbackCode: string): DeparturesSnapshot {
   if (body && typeof body === 'object' && Array.isArray((body as DeparturesSnapshot).departures)) {
-    return body as DeparturesSnapshot
+    const snap = body as DeparturesSnapshot
+    if (!Array.isArray(snap.arrivals)) snap.arrivals = []
+    return snap
   }
   const o = (body && typeof body === 'object' ? body : {}) as {
     services?: Record<string, unknown>[]
@@ -112,6 +119,7 @@ export function normalizeDeparturesSnapshot(body: unknown, fallbackCode: string)
     name?: string
     stationName?: string
     tiploc?: string
+    matchedAs?: string
   }
   const generatedAt = String(o.generatedAt || o.updatedAt || new Date().toISOString())
   const crs = String(o.crs || o.stationCrs || o.station?.crs || fallbackCode).toUpperCase()
@@ -120,7 +128,7 @@ export function normalizeDeparturesSnapshot(body: unknown, fallbackCode: string)
     tiploc: String(o.tiploc || crs),
     stationName: o.stationName || o.name || crs,
     stationCrs: crs,
-    matchedAs: 'crs',
+    matchedAs: o.matchedAs === 'tiploc' ? 'tiploc' : 'crs',
     updatedAt: generatedAt,
     timetableFile: '',
     windowHours: 24,
@@ -144,7 +152,12 @@ export function normalizeDeparturesSnapshot(body: unknown, fallbackCode: string)
 }
 
 export function isRailCoreService(body: unknown): body is { callingPoints: RailCoreCall[]; rid: string } {
-  return Boolean(body && typeof body === 'object' && Array.isArray((body as { callingPoints?: unknown }).callingPoints))
+  return Boolean(
+    body &&
+      typeof body === 'object' &&
+      Array.isArray((body as { callingPoints?: unknown }).callingPoints) &&
+      !Array.isArray((body as { stops?: unknown }).stops),
+  )
 }
 
 export function normalizeServiceDetail(body: unknown): ServiceDetail {
@@ -175,8 +188,8 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
       liveKind: live.liveKind,
       cancelledAtStop: false,
       cancelReasonAtStop: null,
-      loadingPercentage: null,
-      coachLoading: null,
+      loadingPercentage: typeof c.loadingPercentage === 'number' ? c.loadingPercentage : null,
+      coachLoading: Array.isArray(c.coachLoading) ? c.coachLoading : null,
       actualSource: c.actualSource ?? null,
     }
   })
@@ -190,19 +203,22 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
     trainCat: null,
     isPassenger: String(b.serviceType || 'passenger') === 'passenger',
     origin: String(b.originCrs || ''),
-    originName: null,
+    originName: b.originName ? String(b.originName) : null,
     destination: String(b.destinationCrs || ''),
-    destinationName: null,
+    destinationName: b.destinationName ? String(b.destinationName) : null,
     cancelled: Boolean(b.cancelled),
     cancellation: null,
     partiallyCancelled: false,
     delayReason: null,
     reverseFormation: false,
-    formation: null,
-    consist: null,
+    formation: (b.formation as ServiceDetail['formation']) || null,
+    consist: (b.consist as ServiceDetail['consist']) || null,
     associations: [],
     alerts: [],
     stops,
+    historicalDate: (b.historicalDate as string) || null,
+    location: (b.location as ServiceDetail['location']) || null,
+    hspPending: Boolean(b.hspPending),
     updatedAt: new Date().toISOString(),
   }
 }

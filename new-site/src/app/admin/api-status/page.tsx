@@ -336,9 +336,9 @@ const ApiStatusPage: React.FC = () => {
       const [tfl, kb, rtppm] = await Promise.all([
         fetch('/api/tfl?mode=tube').then((r) => r.status),
         fetch('/api/knowledgebase/incidents').then((r) => r.status),
-        fetchDarwin('/api/darwin/rtppm').then((r) => r.status),
+        fetchDarwin('/api/darwin/ping').then((r) => r.status),
       ])
-      setExtraFeeds(`TfL ${tfl} · KB incidents ${kb} · RTPPM ${rtppm}`)
+      setExtraFeeds(`TfL ${tfl} · KB incidents ${kb} · Darwin ping ${rtppm}`)
     } catch {
       setExtraFeeds('error')
     }
@@ -346,7 +346,7 @@ const ApiStatusPage: React.FC = () => {
 
   const fetchAvailable = async () => {
     try {
-      const res = await fetchDarwin('/api/darwin/dates')
+      const res = await fetchDarwin('/api/darwin/history/dates')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const raw = await res.json() as { dates?: Array<string | { date: string }> }
       const dates = (raw.dates || []).map((d) => {

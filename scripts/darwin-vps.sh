@@ -1,34 +1,28 @@
 #!/usr/bin/env bash
-# Local helper for the netcup Darwin VPS.
+# Local helper for the netcup Darwin VPS (rail-core live boards).
 # Uses SSH host alias `netcup-darwin` (see ~/.ssh/config).
 set -euo pipefail
 
 HOST="${DARWIN_VPS_HOST:-netcup-darwin}"
-SERVICE="${DARWIN_VPS_SERVICE:-darwin}"
-HEAVY_SERVICE="${DARWIN_VPS_HEAVY_SERVICE:-darwin-heavy}"
-REMOTE_DIR="${DARWIN_VPS_DIR:-/home/darwin/darwin-local-test}"
+REMOTE_DIR="${RAIL_CORE_DIR:-/home/darwin/rail-core}"
+UNITS="rail-core-query rail-core-ingest rail-core-kafka rail-core-ptac"
 
 usage() {
   cat <<'EOF'
-Run this on your Mac, from the website repo (not after you SSH into the VPS):
+Run this on your Mac, from the website repo:
 
   ./scripts/darwin-vps.sh <command>
 
-This script SSHs to host alias `netcup-darwin` for you.
-
-  ssh         Open an SSH session as darwin (no password)
-  status      Service, memory, disk, local ping
-  logs [N]    Last N journal lines (default 80)
-  follow      Live daemon logs
-  start       Start darwin + darwin-heavy
-  stop        Stop darwin + darwin-heavy
-  restart     Restart darwin + darwin-heavy
-  health      Local /api/ping on :4001 and :4002; short /api/health on :4002
-  data        Disk use, history days, unit-catalog days
-  fetch       Download today's PPTimetable files from GCS now
-  reboot      Reboot the VPS (asks yes first)
-
-Already on the VPS? Use: darwin-vps status
+  ssh         Open an SSH session
+  status      rail-core units, memory, disk, :4001 ping
+  logs [N]    Last N journal lines
+  follow      Live logs
+  start       Start query, ingest, kafka, ptac
+  stop        Stop those four
+  restart     Restart those four
+  health      Local /api/ping and /api/departures/PAD on :4001
+  fetch-tt     Run 04:00 timetable pull now (rail-core-tt)
+  publish-rdm  Upload NLC, TOPS, CIF from ~/Downloads to GCS
 EOF
 }
 
@@ -60,109 +54,44 @@ case "$cmd" in
   status)
     need_host
     remote "set -e
-sudo systemctl status ${SERVICE} --no-pager -l | head -20
-echo
-sudo systemctl status ${HEAVY_SERVICE} --no-pager -l | head -20
-echo
-echo \"caddy: \$(systemctl is-active caddy 2>/dev/null || echo unknown)  live: \$(systemctl is-active ${SERVICE})  heavy: \$(systemctl is-active ${HEAVY_SERVICE})\"
+for u in ${UNITS}; do systemctl is-active \$u; sudo systemctl status \$u --no-pager -l | head -8; echo; done
+echo \"caddy: \$(systemctl is-active caddy)\"
 echo
 free -h
 echo
 df -h /
-echo
-echo '--- live ping :4001 ---'
-curl -fsS --max-time 3 http://127.0.0.1:4001/api/ping || echo 'ping: not ready'
-echo
-echo '--- heavy ping :4002 ---'
-curl -fsS --max-time 3 http://127.0.0.1:4002/api/ping || echo 'ping: not ready'"
+echo '--- ping :4001 ---'
+curl -fsS --max-time 3 http://127.0.0.1:4001/api/ping || echo 'ping: not ready'"
     ;;
   logs)
     need_host
     n="${1:-80}"
-    remote "sudo journalctl -u ${SERVICE} -u ${HEAVY_SERVICE} -n ${n} --no-pager"
+    remote "sudo journalctl -u rail-core-query -u rail-core-ingest -u rail-core-kafka -u rail-core-ptac -n ${n} --no-pager"
     ;;
   follow)
     need_host
-    remote_tty "sudo journalctl -u ${SERVICE} -u ${HEAVY_SERVICE} -f"
+    remote_tty "sudo journalctl -u rail-core-query -u rail-core-ingest -u rail-core-kafka -u rail-core-ptac -f"
     ;;
   start)
     need_host
-    remote "sudo systemctl start ${SERVICE} ${HEAVY_SERVICE} && systemctl is-active ${SERVICE} ${HEAVY_SERVICE}"
+    remote "sudo systemctl start ${UNITS} && systemctl is-active ${UNITS}"
     ;;
   stop)
     need_host
-    remote "sudo systemctl stop ${SERVICE} ${HEAVY_SERVICE} && systemctl is-active ${SERVICE} ${HEAVY_SERVICE} || true"
+    remote "sudo systemctl stop ${UNITS} && systemctl is-active ${UNITS} || true"
     ;;
   restart)
     need_host
-    remote "sudo systemctl restart ${SERVICE} ${HEAVY_SERVICE} && systemctl is-active ${SERVICE} ${HEAVY_SERVICE}"
+    remote "sudo systemctl restart ${UNITS} && systemctl is-active ${UNITS}"
     ;;
   health)
     need_host
-    remote "echo '--- live ping :4001 ---'
+    remote "echo '--- ping :4001 ---'
 curl -fsS --max-time 5 http://127.0.0.1:4001/api/ping || echo not-ready
 echo
-echo '--- heavy ping :4002 ---'
-curl -fsS --max-time 5 http://127.0.0.1:4002/api/ping || echo not-ready
-echo
-echo '--- window :4001 ---'
-curl -fsS --max-time 5 http://127.0.0.1:4001/api/window || echo not-ready
-echo
-echo '--- health :4002 (truncated) ---'
-curl -fsS --max-time 12 http://127.0.0.1:4002/api/health | head -c 2000
+echo '--- PAD 1h ---'
+curl -fsS --max-time 8 'http://127.0.0.1:4001/api/departures/PAD?hours=1' | head -c 400
 echo"
-    ;;
-  data)
-    need_host
-    remote "set -e
-cd ${REMOTE_DIR}
-echo '=== sizes ==='
-du -sh . state state/history state/unit-catalog.json ttis 2>/dev/null || true
-echo
-echo '=== disk ==='
-df -h /
-echo
-echo '=== history days ==='
-ls -1 state/history 2>/dev/null | tail -n 40 || echo '(none)'
-echo
-echo '=== unit-catalog days ==='
-python3 - <<'PY'
-import json, os, re
-p = '${REMOTE_DIR}/state/unit-catalog.json'
-iso = re.compile(r'^\\d{4}-\\d{2}-\\d{2}$')
-if not os.path.isfile(p):
-    print('(no unit-catalog.json)')
-    raise SystemExit
-with open(p) as f:
-    data = json.load(f)
-days = set()
-for pair in data.get('units') or []:
-    entry = pair[1] if isinstance(pair, list) and len(pair) > 1 else pair
-    if not isinstance(entry, dict):
-        continue
-    miles = entry.get('endOfDayMileageByDate') or {}
-    if isinstance(miles, dict):
-        days.update(k for k in miles if iso.match(str(k)))
-    for svc in entry.get('services') or []:
-        if isinstance(svc, dict):
-            for key in ('date', 'day', 'operatingDay'):
-                v = svc.get(key)
-                if iso.match(str(v or '')):
-                    days.add(v)
-print('\\n'.join(sorted(days)) if days else '(no ISO days found)')
-print('units:', len(data.get('units') or []))
-print('savedAt:', data.get('savedAt') or '')
-PY"
-    ;;
-  fetch)
-    need_host
-    remote "set -euo pipefail
-export GOOGLE_APPLICATION_CREDENTIALS=/home/darwin/.config/gcloud/tt-fetch-sa.json
-export CLOUDSDK_CORE_PROJECT=rail-statistics
-export GSUTIL_PATH=/usr/bin/gsutil
-cd ${REMOTE_DIR}
-/usr/bin/node fetch-daily-timetables.mjs
-ls -1 tt | tail -20"
     ;;
   reboot)
     need_host
@@ -174,6 +103,14 @@ ls -1 tt | tail -20"
     fi
     remote "sudo reboot" || true
     echo "Reboot sent."
+    ;;
+  fetch-tt)
+    need_host
+    remote "sudo systemctl start rail-core-tt && sudo journalctl -u rail-core-tt -n 40 --no-pager"
+    ;;
+  publish-rdm)
+    root="$(cd "$(dirname "$0")/.." && pwd)"
+    exec bash "$root/rail-core/scripts/publish-rdm-files.sh" "${1:-$HOME/Downloads}"
     ;;
   *)
     echo "Unknown command: $cmd" >&2

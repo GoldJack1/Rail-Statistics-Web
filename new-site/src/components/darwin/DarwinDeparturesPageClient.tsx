@@ -6,10 +6,8 @@ import { createPortal } from 'react-dom'
 import { Info, MagnifyingGlass, X } from '@phosphor-icons/react'
 
 import { useDepartures } from '@/hooks/useDepartures'
-import { applyBoardFormationOverlay, overlayKeyForRow, useBoardCoachLoading } from '@/hooks/useBoardCoachLoading'
 import type { DepartureRow, DepartureServiceType, DeparturesSnapshot } from '@/types/darwin'
-import type { Station } from '@/types'
-import { useStations } from '@/hooks/useStations'
+import { useDarwinLocationLookup, useDarwinLocationSearch, type DarwinCatalogLocation } from '@/hooks/useDarwinLocationSearch'
 import { BackIcon } from '@/components/icons'
 import { PageTopHeader, SidebarDropdownSection, SidebarPanel } from '@/components/misc'
 import { BUTBaseButton, BUTCircleButton, BUTOperatorChip, BUTTwoButtonBar, BUTWideButton, TOGToggleVisited } from '@/components/buttons'
@@ -23,7 +21,7 @@ import TXTINPBUTIconWideButtonSearch from '@/components/textInputButtons/special
 import { StationMessages } from '@/components/darwin/StationMessages'
 import { KnowledgebaseIncidentsBanner } from '@/components/darwin/KnowledgebaseIncidentsBanner'
 import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
-import { railwayOperatingDayIsoFromLondonParts, scheduledTimeInRailwayWindow, DARWIN_HISTORICAL_DAY_START, normalizeClockHhmm } from '@/utils/railwayOperatingDayUk'
+import { railwayOperatingDayIsoFromLondonParts, scheduledTimeInRailwayWindow, normalizeClockHhmm } from '@/utils/railwayOperatingDayUk'
 import { paramAsString } from '@/utils/nextParams'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { parseHistoryDatesList } from '@/utils/normalizeRailCore'
@@ -31,11 +29,6 @@ import { peekHotHealth, peekHotHistoryDates } from '@/utils/darwinHotCache'
 import { prefetchDarwinService } from '@/hooks/useServiceDetail'
 import { formatLmTocName } from '@/utils/formatLmTocName'
 import { isoDateToDdMmYyyy } from '@/utils/dateDdMmYyyy'
-import {
-  filterStationsLikeFaresSearch,
-  matchStationLikeFaresSearch,
-  stationFaresSuggestionCode,
-} from '@/utils/darwinStationFaresSearch'
 import '@/styles/browsePageLayout.css'
 import '@/app/departures/DarwinDeparturesPage.css'
 
@@ -54,7 +47,7 @@ const WINDOW_VALUES = new Set(WINDOW_OPTIONS.map((opt) => opt.value))
 function formatTime(iso: string): string {
   const d = new Date(iso)
   return d.toLocaleTimeString('en-GB', {
-    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/London',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23', hour12: false, timeZone: 'Europe/London',
   })
 }
 
@@ -86,7 +79,7 @@ function formatLiveNowUk(): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    hourCycle: 'h23', hour12: false,
   }).formatToParts(new Date())
   const pick = (type: Intl.DateTimeFormatPartTypes): string =>
     parts.find((part) => part.type === type)?.value || '00'
@@ -102,7 +95,7 @@ function getLiveNowPartsUk(now = new Date()): { date: string; time: string } {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    hourCycle: 'h23', hour12: false,
   }).formatToParts(now)
   const pick = (type: Intl.DateTimeFormatPartTypes): string =>
     parts.find((part) => part.type === type)?.value || '00'
@@ -124,7 +117,7 @@ function getCurrentRailwayDayIsoUk(now = new Date()): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    hourCycle: 'h23', hour12: false,
   }).formatToParts(now)
 
   const pick = (type: Intl.DateTimeFormatPartTypes): string =>
@@ -213,26 +206,29 @@ const DarwinDepartureRowCard = React.memo(function DarwinDepartureRowCard({
 
   const onClick = useCallback(() => {
     const qp = new URLSearchParams()
-    if (historyDate) {
-      qp.set('date', historyDate)
-      if (historyTime) qp.set('at', historyTime)
-    }
+    const now = getLiveNowPartsUk()
+    const frozen = Boolean(historyDate) && (historyDate !== now.date || (historyTime && historyTime !== now.time))
+    const serviceDate = frozen ? historyDate : undefined
+    const serviceAt = frozen && historyTime ? historyTime : undefined
+    if (serviceDate) qp.set('date', serviceDate)
+    if (serviceAt) qp.set('at', serviceAt)
     const backQs = new URLSearchParams()
     backQs.set('hours', String(hours))
-    if (historyDate) backQs.set('date', historyDate)
-    if (historyTime) backQs.set('at', historyTime)
-    const backTo = `/departures/${encodeURIComponent(code)}${backQs.toString() ? `?${backQs.toString()}` : ''}`
-    qp.set('from', backTo)
-    const suffix = qp.toString() ? `?${qp.toString()}` : ''
-    prefetchDarwinService(row.rid, historyDate || undefined, historicalMode ? undefined : historyTime || undefined)
-    router.push(`/services/${encodeURIComponent(row.rid)}${suffix}`)
-  }, [router, historyDate, historyTime, historicalMode, code, hours, row.rid])
+    if (serviceDate) backQs.set('date', serviceDate)
+    if (serviceAt) backQs.set('at', serviceAt)
+    qp.set('from', `/departures/${encodeURIComponent(code)}?${backQs.toString()}`)
+    prefetchDarwinService(row.rid, serviceDate, serviceAt)
+    router.push(`/services/${encodeURIComponent(row.rid)}?${qp.toString()}`)
+  }, [router, historyDate, historyTime, code, hours, row.rid])
 
   return (
     <div
       role="listitem"
       onPointerEnter={() => {
-        if (detailedInfo) prefetchDarwinService(row.rid, historyDate || undefined, historicalMode ? undefined : historyTime || undefined)
+        if (!detailedInfo) return
+        const now = getLiveNowPartsUk()
+        const frozen = Boolean(historyDate) && (historyDate !== now.date || (historyTime && historyTime !== now.time))
+        prefetchDarwinService(row.rid, frozen ? historyDate : undefined, frozen && historyTime ? historyTime : undefined)
       }}
     >
       <DarwinServiceCard
@@ -247,32 +243,31 @@ const DarwinDepartureRowCard = React.memo(function DarwinDepartureRowCard({
   )
 })
 
-function resolveSearchInput(rawInput: string, stations: Station[]): string | null {
-  const matched = matchStationLikeFaresSearch(stations, rawInput)
-  if (matched) return matched.crsCode || matched.tiploc
-  return null
+type DarwinSearchHit = {
+  id: string
+  stationName: string
+  crsCode: string
+  tiploc: string | null
+}
+
+function catalogToSearchHit(row: DarwinCatalogLocation): DarwinSearchHit {
+  return {
+    id: `tpl:${row.tiploc}`,
+    stationName: row.name,
+    crsCode: row.crs,
+    tiploc: row.tiploc,
+  }
+}
+
+function resolveSearchInput(rawInput: string): string | null {
+  const compact = rawInput.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+  return compact || null
 }
 
 function normalizeSearchInputForMode(raw: string, mode: StationSearchMode): string {
   if (mode === 'name') return raw
   if (mode === 'crs') return raw.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3)
   return raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10)
-}
-
-function filterStationsForSearchMode(
-  stations: Station[],
-  query: string,
-  mode: StationSearchMode
-): Station[] {
-  if (mode === 'name') return filterStationsLikeFaresSearch(stations, query)
-  const needle = query.trim().toUpperCase()
-  if (!needle) return []
-  return stations
-    .filter((station) => {
-      const value = (mode === 'crs' ? station.crsCode : station.tiploc)?.toUpperCase() || ''
-      return value.startsWith(needle)
-    })
-    .slice(0, 12)
 }
 
 function searchPlaceholderForMode(mode: StationSearchMode): string {
@@ -370,7 +365,8 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   const [boardMode, setBoardMode] = useState<BoardModeFilter>('departures')
   const [historyDates, setHistoryDates] = useState<string[]>(() => peekHotHistoryDates() || [])
   const [liveClockReady, setLiveClockReady] = useState(false)
-  const { stations } = useStations()
+  const catalogHits = useDarwinLocationSearch(searchInput)
+  const catalogHere = useDarwinLocationLookup(hasStationSelected ? code : '')
 
   useEffect(() => {
     setLiveClockReady(true)
@@ -439,8 +435,9 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     code: hasStationSelected ? code : '',
     hours,
     date: historyDate || undefined,
-    at: undefined,
-    historicalDayBoard: datedBoard,
+    at: historyTime || undefined,
+    historicalDayBoard: datedBoard && !historyTime,
+    cisMode: viewMode === 'simple',
     initialSnapshot: hasStationSelected ? initialSnapshot : null,
   })
   const boardReady = !hasStationSelected || (status !== 'idle' && status !== 'loading')
@@ -508,7 +505,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     const normalizedInput = normalizeSearchInputForMode(searchInput, searchMode).trim()
     let next: string | null = null
     if (searchMode === 'name') {
-      next = resolveSearchInput(normalizedInput, stations)
+      next = catalogHits[0]?.tiploc || catalogHits[0]?.crs || resolveSearchInput(normalizedInput)
       if (!next) {
         setSearchError('No station name match found. Try the full station name or switch mode.')
         return
@@ -518,23 +515,15 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
         setSearchError('CRS must be exactly 3 uppercase letters.')
         return
       }
-      const byCrs = stations.find((station) => station.crsCode?.toUpperCase() === normalizedInput)
-      if (!byCrs) {
-        setSearchError(`No station found for CRS "${normalizedInput}".`)
-        return
-      }
-      next = byCrs.crsCode || byCrs.tiploc
+      const byCrs = catalogHits.find((row) => row.crs === normalizedInput) || catalogHits[0]
+      next = byCrs?.tiploc || byCrs?.crs || normalizedInput
     } else {
       if (!normalizedInput) {
         setSearchError('Enter a TIPLOC code (up to 10 uppercase characters).')
         return
       }
-      const byTiploc = stations.find((station) => station.tiploc?.toUpperCase() === normalizedInput)
-      if (!byTiploc) {
-        setSearchError(`No station found for TIPLOC "${normalizedInput}".`)
-        return
-      }
-      next = byTiploc.crsCode || byTiploc.tiploc
+      const byTiploc = catalogHits.find((row) => row.tiploc === normalizedInput) || catalogHits[0]
+      next = byTiploc?.tiploc || normalizedInput
     }
     const normalizedNext = String(next).toUpperCase()
     if (normalizedNext === code) return
@@ -551,6 +540,9 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   const stationLabel = useMemo(() => {
     if (!hasStationSelected) return 'Live departures'
     if (clickedLabel.trim()) return clickedLabel.trim()
+    if (catalogHere?.name && !isRawTiplocLikeName(catalogHere.name, code)) {
+      return catalogHere.crs ? `${catalogHere.name} (${catalogHere.crs})` : catalogHere.name
+    }
     if (data?.stationName && !isRawTiplocLikeName(data.stationName, code)) {
       return data.stationCrs ? `${data.stationName} (${data.stationCrs})` : data.stationName
     }
@@ -558,23 +550,10 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       const humanized = stationLikeNameFromTiploc(data.stationName)
       if (humanized) return data.stationCrs ? `${humanized} (${data.stationCrs})` : humanized
     }
-    const normalizedCode = code.toUpperCase()
-    const stationByCrs = stations.find((station) => station.crsCode?.toUpperCase() === normalizedCode)
-    if (stationByCrs?.stationName) {
-      return stationByCrs.crsCode
-        ? `${stationByCrs.stationName} (${stationByCrs.crsCode.toUpperCase()})`
-        : stationByCrs.stationName
-    }
-    const stationByTiploc = stations.find((station) => station.tiploc?.toUpperCase() === normalizedCode)
-    if (stationByTiploc?.stationName) {
-      return stationByTiploc.crsCode
-        ? `${stationByTiploc.stationName} (${stationByTiploc.crsCode.toUpperCase()})`
-        : stationByTiploc.stationName
-    }
-    const stationLikeFallback = stationLikeNameFromTiploc(normalizedCode)
+    const stationLikeFallback = stationLikeNameFromTiploc(code.toUpperCase())
     if (stationLikeFallback) return stationLikeFallback
     return code
-  }, [code, data, hasStationSelected, clickedLabel, stations])
+  }, [code, data, hasStationSelected, clickedLabel, catalogHere])
 
   const windowSelectedIndex = useMemo(() => {
     const idx = WINDOW_OPTIONS.findIndex((opt) => opt.value === hours)
@@ -594,9 +573,9 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
 
   const serviceTypeOptions = ALL_SERVICE_TYPES
 
-  const selectedTocs = tocSelection ?? tocOptions
-  const selectedServiceTypes = typeSelection ?? serviceTypeOptions
-  const historyWindowStart = historyTime || DARWIN_HISTORICAL_DAY_START
+  const selectedTocs = tocSelection && tocSelection.length > 0 ? tocSelection : tocOptions
+  const selectedServiceTypes = typeSelection && typeSelection.length > 0 ? typeSelection : serviceTypeOptions
+  const historyWindowStart = historyTime || (datedBoard ? '02:00' : getLiveNowPartsUk().time)
 
   useEffect(() => {
     setTocSelection(null)
@@ -618,12 +597,10 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       const stopModeMatch = showDetailedInfo
         ? selectedStopModes.includes(stopMode)
         : true
-      const timeMatch = datedBoard
-        ? scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
-        : true
+      const timeMatch = scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
       return tocMatch && serviceTypeMatch && stopModeMatch && timeMatch
     })
-  }, [data, selectedTocs, selectedServiceTypes, selectedStopModes, showDetailedInfo, datedBoard, historyWindowStart, hours])
+  }, [data, selectedTocs, selectedServiceTypes, selectedStopModes, showDetailedInfo, datedBoard, historyTime, historyWindowStart, hours])
 
   const filteredArrivals = useMemo(() => {
     if (!data) return []
@@ -633,35 +610,15 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       const tocMatch = selectedTocs.includes(tocLabel)
       const rowServiceType = row.serviceType || 'other'
       const serviceTypeMatch = selectedServiceTypes.includes(rowServiceType)
-      const timeMatch = datedBoard
-        ? scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
-        : true
+      const timeMatch = scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
       return tocMatch && serviceTypeMatch && timeMatch
     })
-  }, [data, selectedTocs, selectedServiceTypes, datedBoard, historyWindowStart, hours])
+  }, [data, selectedTocs, selectedServiceTypes, datedBoard, historyTime, historyWindowStart, hours])
 
   const activeFilteredRows =
     boardMode === 'departures' ? filteredDepartures : filteredArrivals
 
-  const loadingOverlays = useBoardCoachLoading(
-    activeFilteredRows,
-    hasStationSelected && showFormation && !futureTimetableMode,
-    datedBoard ? historyDate : undefined,
-    undefined,
-    { poll: !historicalMode && showDetailedInfo },
-  )
-
-  const boardRows = useMemo(() => {
-    if (loadingOverlays.size === 0) return activeFilteredRows
-    return activeFilteredRows.map((row) => applyBoardFormationOverlay(row, loadingOverlays.get(overlayKeyForRow(row))))
-  }, [activeFilteredRows, loadingOverlays])
-
-  useEffect(() => {
-    if (!showDetailedInfo || historicalMode || boardRows.length === 0) return
-    for (const row of boardRows.slice(0, 2)) {
-      prefetchDarwinService(row.rid, historyDate || undefined, historicalMode ? undefined : historyTime || undefined)
-    }
-  }, [showDetailedInfo, historicalMode, historyDate, historyTime, boardRows])
+  const boardRows = activeFilteredRows
 
   const filteredCounts = useMemo(
     () => ({ rows: activeFilteredRows.length }),
@@ -670,7 +627,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
 
   const subtitle = useMemo<React.ReactNode>(() => {
     const movementWord = boardMode === 'departures' ? 'departures' : 'arrivals'
-    const countWindowHours = datedBoard ? hours : (data?.windowHours ?? hours)
+    const countWindowHours = hours
     const countPrefix = data
       ? datedBoard
         ? `${filteredCounts.rows} ${movementWord} from ${historyWindowStart} for ${countWindowHours} hour${countWindowHours === 1 ? '' : 's'}`
@@ -747,13 +704,12 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     return ''
   }, [status, error, ageMs, hasStationSelected, data, filteredCounts.rows, boardMode, historicalMode, timedCurrentDayMode, historyDate, historyTime, historyWindowStart, hours, futureTimetableMode, todayIsoDate, operatingDayForMode, liveClockReady])
 
-  const stationSuggestions = useMemo(
-    () => filterStationsForSearchMode(stations, searchInput, searchMode),
-    [searchInput, searchMode, stations]
-  )
+  const stationSuggestions = useMemo(() => {
+    return catalogHits.map(catalogToSearchHit)
+  }, [catalogHits])
 
-  const openDeparturesForStation = (station: Station) => {
-    const targetCode = (station.crsCode || station.tiploc || '').toUpperCase()
+  const openDeparturesForStation = (station: DarwinSearchHit) => {
+    const targetCode = (station.tiploc || station.crsCode || '').toUpperCase()
     if (!targetCode) return
     setSearchError(null)
     setSearchInput('')
@@ -788,7 +744,15 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       return
     }
     setHistoryDateError(null)
+    const now = getLiveNowPartsUk()
+    const operatingDay = railwayOperatingDayIsoUk(dateValue, normalizedTime || now.time)
+    const live = operatingDay === todayIsoDate && normalizedTime === now.time
     updateQuery((next) => {
+      if (live) {
+        next.delete('date')
+        next.delete('at')
+        return
+      }
       next.set('date', dateValue)
       if (normalizedTime) next.set('at', normalizedTime)
       else next.delete('at')
@@ -860,7 +824,11 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                 </div>
               </div>
 
-              <SidebarDropdownSection title="Search" defaultExpanded>
+              <SidebarDropdownSection
+                key={hasStationSelected ? 'search-station' : 'search-home'}
+                title="Search"
+                defaultExpanded={!hasStationSelected}
+              >
                 <div className="search-container tickets-od-stack">
                   <TXTINPBUTIconWideButtonSearch
                     id="darwin-station-search"
@@ -891,8 +859,8 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                         const isLast = index === stationSuggestions.length - 1
                         const codeLabel =
                           searchMode === 'tiploc'
-                            ? (station.tiploc || stationFaresSuggestionCode(station) || '').toUpperCase()
-                            : stationFaresSuggestionCode(station) || (station.tiploc || '').toUpperCase()
+                            ? (station.tiploc || station.crsCode || '').toUpperCase()
+                            : (station.crsCode || station.tiploc || '').toUpperCase()
                         return (
                           <BUTBaseButton
                             key={station.id}
@@ -961,7 +929,12 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                 )}
               </SidebarDropdownSection>
 
-              <SidebarDropdownSection title="Date and time" className="dep-datetime-section" defaultExpanded>
+              <SidebarDropdownSection
+                key={hasStationSelected ? 'datetime-station' : 'datetime-home'}
+                title="Date and time"
+                className="dep-datetime-section"
+                defaultExpanded={!hasStationSelected}
+              >
                 <div className="dep-history-controls">
                   <button
                     type="button"
@@ -1031,7 +1004,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                       width="fill"
                       instantAction
                       colorVariant="primary"
-                      state={historyDate ? 'active' : 'pressed'}
+                      state={historyTime && historyTime === getLiveNowPartsUk().time ? 'pressed' : 'active'}
                       onClick={resetToLiveNow}
                     >
                       Live now
@@ -1075,7 +1048,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                         .map((toc) => tocOptions.indexOf(toc))
                         .filter((index) => index >= 0)}
                       onSelectionChanged={(_, selectedItems) => {
-                        setTocSelection(selectedItems)
+                        setTocSelection(selectedItems.length > 0 ? selectedItems : null)
                       }}
                       colorVariant="primary"
                     />
@@ -1094,7 +1067,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                         const selected = selectedItems
                           .map((label) => serviceTypeOptions.find((type) => SERVICE_TYPE_LABELS[type] === label))
                           .filter((value): value is DepartureServiceType => Boolean(value))
-                        setTypeSelection(selected)
+                        setTypeSelection(selected.length > 0 ? selected : null)
                       }}
                       colorVariant="primary"
                     />
@@ -1171,7 +1144,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   <span className="dep-loading-spinner" aria-hidden="true" />
                   <p>
                     {historicalMode
-                      ? `Loading the day's trains${historyDate ? ` for ${formatHeaderDate(historyDate)}` : ''}…`
+                      ? `Loading actual times${historyDate ? ` for ${formatHeaderDate(historyDate)}` : ''}…`
                       : futureTimetableMode
                         ? 'Loading timetable data…'
                         : `Loading live ${boardMode === 'departures' ? 'departures' : 'arrivals'}…`}
@@ -1216,7 +1189,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   <span className="dep-footer-sep" aria-hidden="true">·</span>
                   <DataLicenceAttribution />
                   <span className="dep-footer-sep" aria-hidden="true">·</span>
-                  <span>Updated {new Date(data.updatedAt).toLocaleString('en-GB', { timeZone: 'Europe/London' })}</span>
+                  <span>Updated {new Date(data.updatedAt).toLocaleString('en-GB', { timeZone: 'Europe/London', hourCycle: 'h23', hour12: false })}</span>
                 </footer>
               </>
             )}
@@ -1264,7 +1237,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                     </>
                   ) : (
                     <p>
-                      <strong>Live board · operating day:</strong> {formatHeaderDate(todayIsoDate)}
+                      <strong>Live board · date:</strong> {formatHeaderDate(todayIsoDate)}
                     </p>
                   )}
                   <p>
@@ -1272,11 +1245,8 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   </p>
                 </div>
                 <p className="dep-operating-day-dialog__copy">
-                  UK railway operating day here runs{' '}
-                  <strong>02:00</strong> one morning to <strong>01:59</strong> the next calendar morning (Europe/London).
-                  Between <strong>midnight and 01:59</strong>, departures still belong to the{' '}
-                  <strong>previous calendar date&apos;s</strong> timetable. Use the wall-clock date and time for that period,
-                  so you see overnight trains for that operating day — not the following morning&apos;s first services.
+                  The railway day runs <strong>02:00 to 01:59</strong> (Europe/London). Tonight’s board
+                  keeps running through midnight until 02:00. After 02:00 that is the next day’s timetable.
                 </p>
               </div>
             </div>,

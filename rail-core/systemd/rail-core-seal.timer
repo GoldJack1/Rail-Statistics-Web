@@ -1,0 +1,7 @@
+[Unit]
+Description=Unused. Yesterday is sealed by rail-core-tt.service OnSuccess after a successful timetable import.
+
+[Timer]
+
+[Install]
+WantedBy=timers.target

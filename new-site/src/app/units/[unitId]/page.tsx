@@ -67,6 +67,7 @@ function formatTimeOnly(dateTime: string | null | undefined): string {
   return d.toLocaleTimeString('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
+    hourCycle: 'h23',
     hour12: false,
     timeZone: 'Europe/London',
   })
@@ -97,10 +98,11 @@ function formatMilesDelta(value: number | null): string {
   return `${sign}${rounded.toLocaleString('en-GB')} mi`
 }
 
-function darwinRidToIsoDate(rid: string | null | undefined): string | null {
-  const m = String(rid || '').match(/^(\d{4})(\d{2})(\d{2})/)
-  if (!m) return null
-  return `${m[1]}-${m[2]}-${m[3]}`
+/** A chosen unit day other than the live railway day. The RID prefix is not a query date. */
+function snapshotDay(selectedDay: string): string | null {
+  if (!selectedDay || selectedDay === 'all') return null
+  if (selectedDay === getTodayUkDateYmd()) return null
+  return selectedDay
 }
 
 function serviceDetailErrorMessage(status: number, body: { error?: string } | null, date: string | null): string {
@@ -291,7 +293,7 @@ const UnitLookupPage: React.FC = () => {
     setLatestServiceError(null)
 
     const ac = new AbortController()
-    const dateFromDay = selectedDay !== 'all' ? selectedDay : darwinRidToIsoDate(rid)
+    const dateFromDay = snapshotDay(selectedDay)
     const qp = new URLSearchParams()
     if (dateFromDay) qp.set('date', dateFromDay)
     const url = `/api/darwin/service/${encodeURIComponent(rid)}${qp.toString() ? `?${qp.toString()}` : ''}`
@@ -582,11 +584,7 @@ const UnitLookupPage: React.FC = () => {
                         instantAction
                         onClick={() => {
                           const qp = new URLSearchParams()
-                          const serviceDate =
-                            (selectedDay && selectedDay !== 'all' ? selectedDay : null) ||
-                            latestService.historicalDate ||
-                            latestService.ssd ||
-                            darwinRidToIsoDate(latestService.rid)
+                          const serviceDate = snapshotDay(selectedDay) || latestService.historicalDate || null
                           if (serviceDate) qp.set('date', serviceDate)
                           if (selectedDay && selectedDay !== 'all') qp.set('unitDay', selectedDay)
                           qp.set('from', `${location.pathname}${location.search || ''}`)
@@ -635,13 +633,8 @@ const UnitLookupPage: React.FC = () => {
                       <ServiceStopList
                         stops={latestService.stops}
                         viewMode="simple"
-                        boardDate={
-                          (selectedDay !== 'all' ? selectedDay : null) ||
-                          latestService.historicalDate ||
-                          latestService.ssd ||
-                          darwinRidToIsoDate(latestService.rid)
-                        }
-                        historical={!!latestService.historicalDate}
+                        boardDate={snapshotDay(selectedDay) || latestService.historicalDate || null}
+                        historical={Boolean(snapshotDay(selectedDay) || latestService.historicalDate)}
                         returnTo={`${pathname}${location.search || ''}`}
                         delayReason={latestService.delayReason?.reason}
                         alertText={latestService.alerts?.[0]?.text}
@@ -668,10 +661,7 @@ const UnitLookupPage: React.FC = () => {
                       state="default"
                       onClick={() => {
                         const qp = new URLSearchParams()
-                        const serviceDate =
-                          (selectedDay && selectedDay !== 'all' ? selectedDay : null) ||
-                          darwinRidToIsoDate(svc.rid) ||
-                          (svc.start ? svc.start.slice(0, 10) : null)
+                        const serviceDate = snapshotDay(selectedDay)
                         if (serviceDate) qp.set('date', serviceDate)
                         if (selectedDay && selectedDay !== 'all') qp.set('unitDay', selectedDay)
                         qp.set('from', `${location.pathname}${location.search || ''}`)

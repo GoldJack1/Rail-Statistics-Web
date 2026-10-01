@@ -1,5 +1,5 @@
 [Unit]
-Description=rail-core NR STOMP (RTPPM + TRUST)
+Description=rail-core NR STOMP TRUST movements
 After=network.target rail-core-ingest.service
 
 [Service]
@@ -8,6 +8,7 @@ WorkingDirectory=/home/darwin/rail-core
 EnvironmentFile=/home/darwin/rail-core/.env
 ExecStart=/usr/bin/node src/stomp-nr.js
 Restart=always
+RestartSec=5
 User=darwin
 
 [Install]

@@ -11,42 +11,69 @@ type NamedStation = {
   crsCode?: string | null
 }
 
+function alnumUpper(value: string): string {
+  return value.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+}
+
 function isRawTiplocName(name: string | null | undefined, tpl: string): boolean {
   if (!name) return true
   const trimmedName = name.trim()
   const trimmedTpl = tpl.trim()
+  if (!trimmedName) return true
   if (trimmedName === trimmedTpl) return true
+  if (alnumUpper(trimmedName) === alnumUpper(trimmedTpl)) return true
   return trimmedName === trimmedName.toUpperCase()
     && trimmedName.toUpperCase() === trimmedTpl.toUpperCase()
 }
 
-function titleCaseWord(word: string): string {
-  if (!word) return word
-  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+const PLACE_STEMS: Record<string, string> = {
+  ARML: 'Armley',
+  APERLY: 'Apperley',
+  SHPYD: 'Shipley',
+  SHPY: 'Shipley',
+  MALTK: 'Malton',
+  SEAMW: 'Seamer',
 }
 
 function stationLikeNameFromTiploc(tpl: string): string | null {
   const raw = (tpl || '').trim().toUpperCase()
   if (!raw) return null
-  if (/^[A-Z0-9]{4,}$/.test(raw)) {
-    const expanded = raw
-      .replace(/JNCT$/g, ' JNCT')
-      .replace(/JCN$/g, ' JCN')
-      .replace(/JN$/g, ' JN')
-      .replace(/PASS$/g, ' PASS')
-      .replace(/PSS$/g, ' PSS')
-      .replace(/HALT$/g, ' HALT')
-      .replace(/(?:\d)(?=[A-Z])/g, '$& ')
-      .replace(/([A-Z])([0-9])/g, '$1 $2')
-      .replace(/\s+/g, ' ')
-      .trim()
-    const words = expanded.split(' ')
-    return words.map((w) => {
-      if (w === 'JN' || w === 'JCN' || w === 'JNCT' || w === 'PSS') return w
-      return titleCaseWord(w)
-    }).join(' ')
+  const suffixes: Array<[RegExp, string]> = [
+    [/WESTJN$/, ' West Junction'],
+    [/EASTJN$/, ' East Junction'],
+    [/SOUTHJN$/, ' South Junction'],
+    [/NORTHJN$/, ' North Junction'],
+    [/WJ$/, ' West Junction'],
+    [/EJ$/, ' East Junction'],
+    [/SJ$/, ' South Junction'],
+    [/NJ$/, ' North Junction'],
+    [/DJN$/, ' Junction'],
+    [/UJN$/, ' Junction'],
+    [/JNCT$/, ' Junction'],
+    [/JCN$/, ' Junction'],
+    [/JN$/, ' Junction'],
+  ]
+  let rest = raw
+  let suffix = ''
+  for (const [re, label] of suffixes) {
+    if (re.test(rest)) {
+      suffix = label
+      rest = rest.replace(re, '')
+      break
+    }
   }
-  return null
+  if (!suffix && /J$/.test(rest) && rest.length >= 6) {
+    suffix = ' Junction'
+    rest = rest.slice(0, -1)
+  }
+  if (!rest) return suffix.trim() || raw
+  const stem = PLACE_STEMS[rest] || Object.entries(PLACE_STEMS).find(([k]) => rest.startsWith(k) && k.length >= 4)?.[1]
+  const place =
+    stem ||
+    rest
+      .toLowerCase()
+      .replace(/(^|\s)\S/g, (ch) => ch.toUpperCase())
+  return `${place}${suffix}`
 }
 
 export function buildStopNameLookup(stations: NamedStation[]): StopNameLookup {
@@ -79,4 +106,35 @@ export function displayStopName(
   const stationLikeFallback = stationLikeNameFromTiploc(stop.tpl)
   if (stationLikeFallback) return stationLikeFallback
   return stop.tpl
+}
+
+const RAILWAY_DAY_START_MINUTES = 2 * 60
+
+function parseHmMinutes(value: string | null | undefined): number | null {
+  if (!value) return null
+  const m = /^(\d{1,2}):(\d{2})/.exec(value.trim())
+  if (!m) return null
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
+  return (hh % 24) * 60 + mm
+}
+
+function stopScheduledMinutes(stop: NonNullable<ServiceDetail['stops']>[number]): number | null {
+  return parseHmMinutes(stop.ptd || stop.pta || stop.wtd || stop.wta || stop.wtp)
+}
+
+function railwayDayMinutes(clockMins: number): number {
+  return clockMins < RAILWAY_DAY_START_MINUTES ? clockMins + 1440 : clockMins
+}
+
+/** Start of the run → end of the run on the 02:00–01:59 railway day. */
+export function sortStopsByJourneyTime<T extends NonNullable<ServiceDetail['stops']>[number]>(stops: T[]): T[] {
+  return [...stops].sort((a, b) => {
+    const am = stopScheduledMinutes(a)
+    const bm = stopScheduledMinutes(b)
+    const ak = am == null ? 10_000_000 : railwayDayMinutes(am)
+    const bk = bm == null ? 10_000_000 : railwayDayMinutes(bm)
+    return ak - bk
+  })
 }

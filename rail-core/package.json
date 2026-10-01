@@ -10,15 +10,20 @@
     "ingest": "node src/ingest-server.js",
     "query": "node src/query-server.js",
     "seal": "node src/seal-day.js",
+    "history": "node src/history-day.js",
+    "history-backfill": "node src/history-backfill.js",
+    "trust": "node src/stomp-nr.js",
     "prune": "node src/prune.js",
     "import-ptac": "node src/import-ptac.js",
     "import-tt": "node src/import-tt.js",
     "import-corpus": "node src/import-corpus.js",
+    "fetch-corpus": "node src/fetch-corpus.js",
     "fetch-tt": "node src/fetch-timetable.js",
     "ptac": "node src/kafka-ptac.js",
     "test": "node --test src/*.test.js"
   },
   "dependencies": {
+    "fast-xml-parser": "^4.5.7",
     "kafkajs": "^2.2.4",
     "stompit": "^0.26.0"
   }

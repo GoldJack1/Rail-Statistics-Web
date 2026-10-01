@@ -8,7 +8,7 @@ async function kbGet(kind: 'incidents' | 'nsi') {
   const apiKey = process.env.KB_STATIONS_API_KEY || process.env.KB_STATIONS_CONSUMER_KEY || ''
   const origin = (process.env.KB_INCIDENTS_API_ORIGIN || process.env.KB_STATIONS_API_ORIGIN || '').replace(/\/$/, '')
   if (!apiKey || !origin) {
-    return json(500, { error: 'not_configured', message: 'KB incidents origin/key not set' })
+    return json(200, { kind, xml: '' })
   }
   const path = kind === 'nsi' ? '/nsi.xml' : '/incidents.xml'
   const upstream = await fetch(`${origin}${path}`, {

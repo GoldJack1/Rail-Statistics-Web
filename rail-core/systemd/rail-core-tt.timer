@@ -2,7 +2,7 @@
 Description=04:00 Europe/London timetable ingest
 
 [Timer]
-OnCalendar=*-*-* 04:00:00
+OnCalendar=*-*-* 04:00:00 Europe/London
 Persistent=true
 AccuracySec=1min
 

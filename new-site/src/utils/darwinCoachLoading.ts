@@ -37,13 +37,52 @@ export function unitIdsFromConsist(consist: ConsistData | null | undefined): str
   return ids.length ? ids : null
 }
 
+/** Typical vehicles per TOPS class, used when Darwin has no trainLength. */
+function carsForClassNumber(n: number): number {
+  if (n === 139 || n === 153) return 1
+  if (n === 159 || n === 166 || n === 185 || n === 195 || n === 196 || n === 197) return 3
+  if (n === 180) return 5
+  if (n === 220) return 4
+  if (n === 221 || n === 222) return 5
+  if (n === 331 || n === 334 || n === 380 || n === 385) return 3
+  if (n === 333 || n === 350 || n === 357 || n === 360 || n === 365 || n === 379 || n === 387) return 4
+  if (n === 345) return 9
+  if (n === 378) return 5
+  if (n === 390) return 9
+  if (n === 397) return 5
+  if (n === 700) return 8
+  if (n === 707) return 5
+  if (n === 717) return 6
+  if (n === 720) return 5
+  if (n === 730) return 3
+  if (n === 745) return 12
+  if (n === 755 || n === 756) return 3
+  if (n === 800 || n === 801 || n === 802 || n === 803 || n === 805 || n === 810) return 5
+  if (n === 807) return 7
+  if (n >= 100 && n < 200) return 2
+  if (n >= 300 && n < 400) return 4
+  if (n >= 700 && n < 900) return 5
+  return 2
+}
+
+export function coachCountFromUnitIds(unitIds: string[] | null | undefined): number | null {
+  if (!unitIds?.length) return null
+  let total = 0
+  for (const raw of unitIds) {
+    const match = String(raw).match(/^(\d{3})/)
+    if (!match) continue
+    total += carsForClassNumber(Number(match[1]))
+  }
+  return total > 0 ? total : null
+}
+
 export function coachCountFromRow(row: DepartureRow): number | null {
   if (row.trainLength && row.trainLength > 0) return row.trainLength
   const formationCoaches = row.formation?.coaches?.length
   if (formationCoaches && formationCoaches > 0) return formationCoaches
   const loadingCoaches = row.coachLoading?.length
   if (loadingCoaches && loadingCoaches > 0) return loadingCoaches
-  return null
+  return coachCountFromUnitIds(row.unitIds)
 }
 
 export function coachLoadValues(row: DepartureRow, count: number): Array<number | null> {

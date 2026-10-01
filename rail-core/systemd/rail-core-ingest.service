@@ -8,6 +8,7 @@ WorkingDirectory=/home/darwin/rail-core
 EnvironmentFile=/home/darwin/rail-core/.env
 ExecStart=/usr/bin/node src/ingest-server.js
 Restart=always
+RestartSec=5
 User=darwin
 
 [Install]

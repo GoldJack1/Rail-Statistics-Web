@@ -5,7 +5,8 @@
  */
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
-import { hhmm, openDayDb, upsertCall, upsertService } from "./db.js";
+import { gunzipSync } from "node:zlib";
+import { adoptUidOntoRid, hhmm, openCatalog, openDayDb, refreshServiceJourney, upsertCall, upsertService } from "./db.js";
 
 const file = process.argv[2];
 if (!file) {
@@ -21,7 +22,10 @@ if (!ymdGuess) {
 
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
 const db = openDayDb(DATA_DIR, ymdGuess);
-const text = readFileSync(file, "utf8");
+const catalog = openCatalog(DATA_DIR);
+const compact = ymdGuess.replace(/-/g, "");
+const buf = readFileSync(file);
+const text = (buf[0] === 0x1f && buf[1] === 0x8b ? gunzipSync(buf) : buf).toString("utf8");
 const lines = text.split(/\r?\n/);
 
 let current = null;
@@ -29,14 +33,39 @@ let seq = 0;
 let nSvc = 0;
 let nCall = 0;
 
+function crsForTpl(tpl) {
+  const row = catalog.prepare(`SELECT crs FROM tiploc WHERE tiploc = ?`).get(String(tpl).toUpperCase());
+  return row?.crs || null;
+}
+
+function ridForUid(uid) {
+  const existing = db.prepare(`SELECT rid, service_type FROM services WHERE uid = ? COLLATE NOCASE LIMIT 1`).get(uid);
+  if (existing?.rid) return existing;
+  return { rid: `${compact}${uid}`, service_type: null };
+}
+
 function flush() {
   if (!current) return;
-  upsertService(db, current.svc);
+  const darwinPassenger = current.hadDarwin && current.darwinType !== "freight";
+  if (darwinPassenger) current.svc.service_type = "passenger";
+  upsertService(db, current.svc, { overlay: Boolean(current.hadDarwin) });
+  if (current.svc.uid) adoptUidOntoRid(db, current.svc.uid, current.svc.rid);
   nSvc++;
   for (const c of current.calls) {
-    upsertCall(db, c);
+    upsertCall(db, c, { cifMerge: true });
     nCall++;
   }
+  refreshServiceJourney(db, current.svc.rid, (crs, tpl) => {
+    if (crs) {
+      const byCrs = catalog.prepare(`SELECT name FROM tiploc WHERE crs = ? LIMIT 1`).get(crs);
+      if (byCrs?.name) return byCrs.name;
+    }
+    if (tpl) {
+      const byTpl = catalog.prepare(`SELECT name FROM tiploc WHERE tiploc = ?`).get(String(tpl).toUpperCase());
+      if (byTpl?.name) return byTpl.name;
+    }
+    return null;
+  });
 }
 
 function parseHhmm(s) {
@@ -50,13 +79,15 @@ for (const line of lines) {
   if (rec === "BS") {
     flush();
     const uid = line.slice(3, 9).trim();
-    const runs = line.slice(9, 15).trim();
     const toc = line.slice(70, 72).trim() || null;
     const trainId = line.slice(32, 36).trim() || null;
     const status = line.slice(2, 3);
+    const found = ridForUid(uid);
     current = {
+      hadDarwin: Boolean(found.rid && found.rid !== `${compact}${uid}`),
+      darwinType: found.service_type,
       svc: {
-        rid: `${ymdGuess}-${uid}-${runs || "1"}`,
+        rid: found.rid,
         uid,
         train_id: trainId,
         rs_id: null,
@@ -95,7 +126,7 @@ for (const line of lines) {
     current.calls.push({
       rid: current.svc.rid,
       tiploc: tpl,
-      crs: null,
+      crs: crsForTpl(tpl),
       seq: seq++,
       is_passing: passing ? 1 : 0,
       cancelled: 0,
@@ -124,5 +155,7 @@ for (const line of lines) {
   }
 }
 flush();
+db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('timetable_imported', ?)`).run(ymdGuess);
 console.log(`imported ${nSvc} services, ${nCall} calls into day-${ymdGuess}.sqlite`);
 db.close();
+catalog.close();

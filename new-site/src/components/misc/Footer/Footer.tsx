@@ -104,9 +104,6 @@ const Footer: React.FC = () => {
                 <BUTFooterLink to="/departures">
                   Departures
                 </BUTFooterLink>
-                <BUTFooterLink to="/bash-planner">
-                  Bash
-                </BUTFooterLink>
                 <BUTFooterLink to="/units">
                   Units
                 </BUTFooterLink>

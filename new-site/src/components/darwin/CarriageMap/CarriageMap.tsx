@@ -300,7 +300,7 @@ function collectPtacStages(consist: ConsistData | null | undefined): PtacStage[]
           fleetId:  rg.fleetId,
           position: a.resourceGroupPosition,
           reversed: a.reversed,
-          vehicles: [...rg.vehicles].sort((x, y) => (x.position ?? 99) - (y.position ?? 99)),
+          vehicles: [...(rg.vehicles || [])].sort((x, y) => (x.position ?? 99) - (y.position ?? 99)),
         },
         startDt:  a.allocationOriginDateTime,
         endDt:    a.allocationDestinationDateTime,

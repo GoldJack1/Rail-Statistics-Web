@@ -150,6 +150,7 @@ function londonNow() {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    hourCycle: 'h23',
     hour12: false,
   }).formatToParts(new Date())
   const pick = (type: string) => parts.find((p) => p.type === type)?.value || '00'

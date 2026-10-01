@@ -385,9 +385,26 @@
 
 .stations-table.svc-stops-table tbody.svc-stop--live-group {
   position: relative;
-  z-index: 2;
-  outline: 4px solid var(--text-primary);
-  outline-offset: -4px;
+  z-index: 3;
+}
+
+.stations-table.svc-stops-table tbody.svc-stop--live-group .stations-table__row > td {
+  --svc-live-ring: inset 0 4px 0 0 var(--text-primary), inset 0 -4px 0 0 var(--text-primary);
+  box-shadow: var(--svc-live-ring);
+}
+
+.stations-table.svc-stops-table tbody.svc-stop--live-group .stations-table__row > td:first-child {
+  --svc-live-ring: inset 4px 0 0 0 var(--text-primary), inset 0 4px 0 0 var(--text-primary), inset 0 -4px 0 0 var(--text-primary);
+  box-shadow: var(--svc-live-ring);
+}
+
+.stations-table.svc-stops-table tbody.svc-stop--live-group .stations-table__row > td:last-child {
+  --svc-live-ring: inset -4px 0 0 0 var(--text-primary), inset 0 4px 0 0 var(--text-primary), inset 0 -4px 0 0 var(--text-primary);
+  box-shadow: var(--svc-live-ring);
+}
+
+.stations-table.svc-stops-table tbody.svc-stop--live-group td.stations-table__name {
+  z-index: 4;
 }
 
 .stations-table.svc-stops-table tbody tr.svc-stops-table__detail-row:not(.svc-stops-table__detail-row--open) {
@@ -411,6 +428,11 @@
   .stations-table.svc-stops-table tbody .svc-stops-table__detail-row--open:hover > td,
   .stations-table.svc-stops-table tbody .svc-stops-table__detail-row--open:focus-within > td {
     box-shadow: inset 0 0 0 9999px rgb(0 0 0 / 0.15);
+  }
+
+  .stations-table.svc-stops-table tbody.svc-stop--live-group .stations-table__row:hover > td,
+  .stations-table.svc-stops-table tbody.svc-stop--live-group .stations-table__row:focus-within > td {
+    box-shadow: inset 0 0 0 9999px rgb(0 0 0 / 0.15), var(--svc-live-ring);
   }
 }
 
@@ -1029,3 +1051,4 @@
     width: 4.25rem;
   }
 }
+

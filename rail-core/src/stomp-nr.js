@@ -1,26 +1,41 @@
 #!/usr/bin/env node
 /**
- * Network Rail Open Data STOMP → ingest-server.
- * Requires `stompit` on the VPS (`npm i stompit`).
+ * Network Rail Open Data STOMP → ingest-server (local TRUST).
+ * Requires `stompit` (`npm i` in rail-core).
  */
-const host = process.env.NR_STOMP_HOST ?? 'datafeeds.networkrail.co.uk'
-const port = Number(process.env.NR_STOMP_PORT ?? 61618)
-const user = process.env.NR_STOMP_USER ?? ''
-const pass = process.env.NR_STOMP_PASSWORD ?? ''
-const ingest = process.env.INGEST_ORIGIN ?? 'http://127.0.0.1:4003'
+import "./load-env.js";
+const host = process.env.NR_STOMP_HOST ?? "publicdatafeeds.networkrail.co.uk";
+const port = Number(process.env.NR_STOMP_PORT ?? 61618);
+const user = process.env.NR_STOMP_USER ?? "";
+const pass = process.env.NR_STOMP_PASSWORD ?? "";
+const ingest = process.env.INGEST_ORIGIN ?? "http://127.0.0.1:4003";
+const useSsl = process.env.NR_STOMP_SSL === "1";
 
 if (!user || !pass) {
-  console.error('NR_STOMP_USER/PASSWORD missing')
-  process.exit(0)
+  console.error("NR_STOMP_USER/PASSWORD missing");
+  process.exit(1);
 }
 
-const stompit = await import('stompit')
-const connectOptions = { host, port, connectHeaders: { host: '/', login: user, passcode: pass, 'heart-beat': '5000,5000' } }
+const stompitMod = await import("stompit");
+const stompit = stompitMod.default ?? stompitMod;
+const connectOptions = {
+  host,
+  port,
+  ssl: useSsl,
+  timeout: 30000,
+  connectHeaders: {
+    host: "/",
+    login: user,
+    passcode: pass,
+    "heart-beat": "15000,15000",
+    "accept-version": "1.1",
+  },
+};
 
 stompit.connect(connectOptions, (err, client) => {
   if (err || !client) {
-    console.error(err)
-    process.exit(1)
+    console.error(err?.message || String(err));
+    process.exit(1);
   }
   const sub = (topic, path) => {
     const headers = { destination: topic, ack: 'auto' }

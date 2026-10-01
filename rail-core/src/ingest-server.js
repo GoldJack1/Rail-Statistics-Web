@@ -1,9 +1,33 @@
+import "./load-env.js";
 import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { darwinWriteDays } from "./calendar-day.js";
 import { operatingDayYmd, openCatalog, openDayDb, refreshServiceJourney } from "./db.js";
 import { applyParsed, fingerprint, parseDarwinPayload } from "./darwin-xml.js";
-import { applyTrustMovement } from "./trust-apply.js";
+import { applyPtacUnit } from "./ptac-apply.js";
+import { timetableNeedsImportFromDb } from "./ensure-timetable.js";
+
+function mergedUnitJson(catalog, unitId, incoming) {
+  let prev = {};
+  const existing = catalog.prepare(`SELECT json FROM units WHERE unit_id = ?`).get(String(unitId));
+  try {
+    prev = existing?.json ? JSON.parse(existing.json) : {};
+  } catch {
+    prev = {};
+  }
+  const next = incoming && typeof incoming === "object" ? incoming : {};
+  const keepVehicles = prev.vehicles_json && !next.vehicles_json && !next.vehicles;
+  return {
+    ...prev,
+    ...next,
+    unit_id: String(unitId),
+    fleet_id: next.fleet_id || next.fleetId || prev.fleet_id || prev.fleetId,
+    vehicles_json: keepVehicles ? prev.vehicles_json : next.vehicles_json || prev.vehicles_json,
+    vehicles: next.vehicles || prev.vehicles,
+  };
+}
 
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
 const PORT = Number(process.env.INGEST_PORT ?? 4003);
@@ -13,10 +37,29 @@ const catalog = openCatalog(DATA_DIR);
 let dayYmd = null;
 let dayDb = null;
 
+function ridYmd(rid) {
+  const s = String(rid || "");
+  if (!/^\d{8}/.test(s)) return null;
+  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+}
+
+const dayDbs = new Map();
+
+function dbForYmd(y) {
+  const ymd = /^\d{4}-\d{2}-\d{2}$/.test(y || "") ? y : operatingDayYmd();
+  if (ymd === dayYmd && dayDb) return dayDb;
+  let db = dayDbs.get(ymd);
+  if (db) return db;
+  db = openDayDb(DATA_DIR, ymd);
+  dayDbs.set(ymd, db);
+  return db;
+}
+
 function dbForNow() {
   const y = operatingDayYmd();
   if (dayDb && dayYmd === y) return dayDb;
   if (dayDb) {
+    dayDbs.delete(dayYmd);
     try {
       dayDb.close();
     } catch {
@@ -25,6 +68,7 @@ function dbForNow() {
   }
   dayDb = openDayDb(DATA_DIR, y);
   dayYmd = y;
+  dayDbs.set(y, dayDb);
   return dayDb;
 }
 
@@ -65,18 +109,51 @@ function ingestDarwin(raw) {
       if (o && typeof o === "object") {
         const textKeys = o.text && typeof o.text === "object" ? Object.keys(o.text).slice(0, 20).join(",") : "";
         hint = `textType=${typeof o.text} textKeys=${textKeys} bytesType=${typeof o.bytes}`;
-        const emptyText = o.text && typeof o.text === "object" && Object.keys(o.text).length === 0;
-        if (emptyText) return { ok: true, skipped: true, kind: "non-ts" };
+        const emptyText =
+          o.text == null ||
+          (typeof o.text === "object" && !Array.isArray(o.text) && Object.keys(o.text).length === 0);
+        const bytes = typeof o.bytes === "string" ? o.bytes : "";
+        hint = `textType=${typeof o.text} bytesLen=${bytes.length} head=${bytes.slice(0, 70)}`;
+        if (
+          emptyText &&
+          !/"Location"\s*:/i.test(bytes) &&
+          !/"locations"\s*:/i.test(bytes) &&
+          !/"schedule"\s*:/i.test(bytes) &&
+          !/"OR"\s*:/.test(bytes) &&
+          !/"IP"\s*:/.test(bytes) &&
+          !/"PP"\s*:/.test(bytes) &&
+          !/"DT"\s*:/.test(bytes)
+        ) {
+          return { ok: true, skipped: true, kind: "non-ts" };
+        }
       }
     } catch {
       /* keep slice */
     }
     return { ok: false, error: "unparsed", hint };
   }
+  if (!globalThis.__dumpedUnparsed) {
+    globalThis.__dumpedUnparsed = true;
+    try {
+      const o = JSON.parse(String(raw));
+      const b = o.bytes;
+      const dump = {
+        keys: Object.keys(o),
+        dest: o.destination || null,
+        textType: typeof o.text,
+        bytesType: typeof b,
+        bytesLen: typeof b === "string" ? b.length : Array.isArray(b) ? b.length : null,
+        bytesHeadCodes: typeof b === "string" ? [...String(b).slice(0, 12)].map((c) => c.charCodeAt(0)) : null,
+        bytesHead: typeof b === "string" ? String(b).slice(0, 80) : null,
+      };
+      writeFileSync(join(DATA_DIR, "unparsed-sample.json"), JSON.stringify(dump).slice(0, 4000));
+    } catch {
+      writeFileSync(join(DATA_DIR, "unparsed-sample.txt"), String(raw).slice(0, 500));
+    }
+  }
   const rid = parsed.service.rid;
   if (rid && lastFp.get(rid) === fp) return { ok: true, skipped: true };
   fillCrsFromCatalog(parsed);
-  applyParsed(dbForNow(), parsed);
   const nameLookup = (crs, tpl) => {
     if (crs) {
       const byCrs = catalog.prepare(`SELECT name FROM tiploc WHERE crs = ? LIMIT 1`).get(crs);
@@ -88,70 +165,20 @@ function ingestDarwin(raw) {
     }
     return null;
   };
-  if (rid) refreshServiceJourney(dbForNow(), rid, nameLookup);
+  const op = operatingDayYmd();
+  const ssd = ridYmd(rid);
+  const hasRid = (day) => {
+    const db = day === op ? dbForNow() : dbForYmd(day);
+    return Boolean(rid && db.prepare(`SELECT 1 AS n FROM services WHERE rid = ?`).get(rid));
+  };
+  const days = darwinWriteDays(op, ssd, hasRid);
+  for (const day of days) {
+    const db = day === op ? dbForNow() : dbForYmd(day);
+    applyParsed(db, parsed);
+    if (rid) refreshServiceJourney(db, rid, nameLookup);
+  }
   if (rid) lastFp.set(rid, fp);
   return { ok: true, skipped: false, rid };
-}
-
-function mapTrustItem(item) {
-  const header = item?.header || {};
-  const body = item?.body || item || {};
-  const ts = body.actual_timestamp || body.gbtt_timestamp || body.event_time;
-  let actual = body.actual || null;
-  if (!actual && ts) {
-    const n = Number(ts);
-    const d = new Date(Number.isFinite(n) && String(ts).length > 10 ? n : Date.parse(String(ts)));
-    if (!Number.isNaN(d.getTime())) {
-      actual = new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Europe/London",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).format(d);
-    }
-  }
-  const event = String(body.event_type || body.eventType || header.msg_type || "").toUpperCase();
-  return {
-    event_id: `${body.train_id || body.trainId || "x"}-${ts || Date.now()}`,
-    train_id: body.train_id || body.trainId || null,
-    uid: body.train_uid || body.uid || null,
-    loc_stanox: body.loc_stanox || body.locStanox || null,
-    event_type: event,
-    planned: body.planned_timestamp || body.planned || null,
-    actual,
-    toc: body.toc_id || body.toc || null,
-    is_pass: event.includes("PASS"),
-    service_type: event.includes("FREIGHT") ? "freight" : "passenger",
-  };
-}
-
-function ingestTrust(body) {
-  const items = Array.isArray(body) ? body : Array.isArray(body?.messages) ? body.messages : [body];
-  const db = dbForNow();
-  for (const item of items) {
-    const mapped = mapTrustItem(item);
-    const id = mapped.event_id;
-    db.prepare(
-      `INSERT OR REPLACE INTO trust_events (event_id, train_id, uid, loc_stanox, event_type, planned, actual, json, received_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id,
-      mapped.train_id,
-      mapped.uid,
-      mapped.loc_stanox,
-      mapped.event_type,
-      mapped.planned,
-      mapped.actual,
-      JSON.stringify({ event_type: mapped.event_type, train_id: mapped.train_id, loc_stanox: mapped.loc_stanox }),
-      Date.now()
-    );
-    applyTrustMovement(DATA_DIR, mapped);
-  }
-}
-
-function ingestRtppm(json) {
-  const db = dbForNow();
-  db.prepare(`INSERT OR REPLACE INTO rtppm (snapshot_at, json) VALUES (?, ?)`).run(Date.now(), JSON.stringify(json));
 }
 
 const server = createServer(async (req, res) => {
@@ -177,50 +204,27 @@ const server = createServer(async (req, res) => {
       res.end(JSON.stringify(out));
       return;
     }
-    const body = raw ? JSON.parse(raw) : {};
     if (url.pathname === "/ingest/trust") {
-      ingestTrust(body);
+      const { trustMessages } = await import("./trust-parse.js");
+      const { applyTrustFrame } = await import("./trust-apply.js");
+      let n = 0;
+      for (const msg of trustMessages(raw)) {
+        if (applyTrustFrame(DATA_DIR, msg)) n++;
+      }
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
+      res.end(JSON.stringify({ ok: true, applied: n }));
       return;
     }
     if (url.pathname === "/ingest/rtppm") {
-      ingestRtppm(body);
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
+      res.end(JSON.stringify({ ok: true, skipped: true }));
       return;
     }
+    const body = raw ? JSON.parse(raw) : {};
     if (url.pathname === "/ingest/unit") {
-      const unitId = body.unit_id || body.unitId || body.resourceGroupId;
-      if (!unitId) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "unit_id required" }));
-        return;
-      }
-      const cls = body.class ?? null;
-      catalog.prepare(
-        `INSERT INTO units (unit_id, class, operator, json, updated_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(unit_id) DO UPDATE SET class=COALESCE(excluded.class, units.class), operator=COALESCE(excluded.operator, units.operator), json=excluded.json, updated_at=excluded.updated_at`
-      ).run(String(unitId), cls, body.operator ?? null, JSON.stringify(body.json || body), Date.now());
-      const rid = body.rid;
-      if (rid) {
-        const day = body.operating_day || operatingDayYmd();
-        const ddb = day === dayYmd ? dbForNow() : openDayDb(DATA_DIR, day);
-        ddb.prepare(
-          `INSERT INTO units (unit_id, operating_day, rid, toc, headcode, diagram)
-           VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(unit_id, operating_day, rid) DO UPDATE SET toc=excluded.toc, headcode=excluded.headcode, diagram=excluded.diagram`
-        ).run(String(unitId), day, String(rid), body.operator ?? null, body.headcode ?? null, body.diagram ?? null);
-        if (day !== dayYmd) {
-          try {
-            ddb.close();
-          } catch {
-            /* ignore */
-          }
-        }
-      }
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
+      const out = applyPtacUnit(catalog, body);
+      res.writeHead(out.ok ? 200 : 400, { "content-type": "application/json" });
+      res.end(JSON.stringify(out));
       return;
     }
     res.writeHead(404);
@@ -235,4 +239,13 @@ mkdirSync(DATA_DIR, { recursive: true });
 writeFileSync(join(DATA_DIR, "ingest.pid"), String(process.pid));
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`rail-core ingest on 127.0.0.1:${PORT}`);
+  if (timetableNeedsImportFromDb(dbForNow(), operatingDayYmd())) {
+    console.log("timetable missing on boot — fetching");
+    spawn(process.execPath, ["src/fetch-timetable.js"], {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: "inherit",
+      detached: true,
+    }).unref();
+  }
 });
