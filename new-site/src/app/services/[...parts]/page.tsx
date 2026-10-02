@@ -281,7 +281,7 @@ const ServiceDetailPage: React.FC = () => {
     rid: serviceId,
     date: historicalDate,
     at: historicalAt,
-    pollMs: historicalMode || futureTimetableMode ? 0 : 15_000,
+    pollMs: historicalMode || futureTimetableMode ? 0 : 3_000,
   })
   const { stations } = useStations()
   const canonicalId = data?.uid || serviceId

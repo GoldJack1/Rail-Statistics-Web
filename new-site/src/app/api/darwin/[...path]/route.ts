@@ -60,11 +60,8 @@ function applyDarwinCacheHeaders(
     responseHeaders.set('Netlify-CDN-Cache-Control', hist)
     return
   }
-  if (kind === 'departures' && !date) {
-    const live = 'public, s-maxage=3, stale-while-revalidate=15'
-    responseHeaders.set('Cache-Control', live)
-    responseHeaders.set('CDN-Cache-Control', live)
-    responseHeaders.set('Netlify-CDN-Cache-Control', live)
+  if (kind === 'departures' || kind === 'service') {
+    noStore()
     return
   }
   const list = listCacheControl(request, pathSegments)

@@ -66,7 +66,7 @@ export async function fetchDarwin(input: string, init?: RequestInit): Promise<Re
   while (Date.now() < deadline) {
     if (init?.signal?.aborted) throw abortError()
 
-    const res = await fetch(url, init)
+    const res = await fetch(url, { ...init, cache: 'no-store' })
     lastRes = res
 
     if (res.status !== 503 && res.status !== 429) return res

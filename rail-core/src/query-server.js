@@ -937,7 +937,7 @@ const server = createServer(async (req, res) => {
       });
       const past = ymd < operatingDayYmd();
       json(res, 200, board, {
-        "cache-control": past ? "public, max-age=3600, s-maxage=3600" : "public, max-age=3, s-maxage=3",
+        "cache-control": past ? "public, max-age=3600, s-maxage=3600" : "private, no-store",
       });
       return;
     }
@@ -948,7 +948,9 @@ const server = createServer(async (req, res) => {
         json(res, 404, { error: "not found" });
         return;
       }
-      json(res, 200, detail, { "cache-control": "public, max-age=60" });
+      json(res, 200, detail, {
+        "cache-control": svcDated[2] < operatingDayYmd() ? "public, max-age=60" : "private, no-store",
+      });
       return;
     }
     const svcRid = url.pathname.match(/^\/api\/service\/([^/]+)$/);
@@ -960,7 +962,9 @@ const server = createServer(async (req, res) => {
         json(res, 404, { error: "not found" });
         return;
       }
-      json(res, 200, detail, { "cache-control": "public, max-age=5" });
+      json(res, 200, detail, {
+        "cache-control": ymd < operatingDayYmd() ? "public, max-age=5" : "private, no-store",
+      });
       return;
     }
     const trustTrain = url.pathname.match(/^\/api\/trust\/([^/]+)$/i);
