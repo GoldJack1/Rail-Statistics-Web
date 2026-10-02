@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hhmm, openCatalog, openDayDb, operatingDayYmd, upsertCall, upsertService } from "./db.js";
 import { applyHspDetails } from "./hsp-apply.js";
+import { ridsNeedingHspSeal } from "./hsp-seal-rids.js";
 import { trustMessages } from "./trust-parse.js";
 import { applyTrustFrame } from "./trust-apply.js";
 import { clockAfter, maskCallAsOf, maskTrustOverlay } from "./replay-at.js";
@@ -77,6 +78,37 @@ test("HSP details fill public stops and leave a pass row alone", () => {
   assert.equal(pass.atp, null);
   db.close();
   cat.close();
+});
+
+test("HSP seal skips forecast-only RIDs, keeps Darwin holes and timetable-only", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hsp-rids-"));
+  const db = openDayDb(dir, "2026-10-01");
+  const svc = (rid) =>
+    db
+      .prepare(
+        `INSERT INTO services (rid, uid, train_id, rs_id, toc, operator_name, origin_crs, origin_name,
+          destination_crs, destination_name, via, service_type, cancelled, cancel_reason, delay_reason,
+          is_charter, category, headcode, updated_at)
+         VALUES (?, NULL, NULL, NULL, 'TP', 'TP', 'LDS', NULL, 'MCV', NULL, NULL, 'passenger', 0, NULL, NULL, 0, NULL, NULL, 1)`,
+      )
+      .run(rid);
+  svc("rid-darwin-hole");
+  svc("rid-forecast-only");
+  svc("rid-tt-only");
+  svc("rid-already-miss");
+  db.prepare(
+    `INSERT INTO calls (rid, tiploc, crs, seq, is_passing, cancelled, sta, std, ata, atd, atp, eta, etd, live_kind, actual_source, updated_at)
+     VALUES
+     ('rid-darwin-hole', 'LDS', 'LDS', 0, 0, 0, '16:13', '16:16', '16:14', '16:16', NULL, NULL, NULL, 'actual', 'darwin', 1),
+     ('rid-darwin-hole', 'DWBY', 'DEW', 1, 0, 0, '16:26', '16:27', NULL, NULL, NULL, NULL, NULL, 'scheduled', NULL, 1),
+     ('rid-forecast-only', 'LDS', 'LDS', 0, 0, 0, '16:13', '16:16', NULL, NULL, NULL, '16:14', '16:16', 'forecast', NULL, 1),
+     ('rid-tt-only', 'LDS', 'LDS', 0, 0, 0, '16:13', '16:16', NULL, NULL, NULL, NULL, NULL, 'scheduled', NULL, 1),
+     ('rid-already-miss', 'LDS', 'LDS', 0, 0, 0, '16:13', '16:16', NULL, NULL, NULL, NULL, NULL, 'scheduled', NULL, 1)`,
+  ).run();
+  db.prepare(`INSERT INTO meta (key, value) VALUES ('hsp_miss_rid-already-miss', '2026-10-01')`).run();
+  const rids = ridsNeedingHspSeal(db);
+  assert.deepEqual([...rids].sort(), ["rid-darwin-hole", "rid-tt-only"]);
+  db.close();
 });
 
 test("TRUST PASS writes atp onto a new reporting point", () => {

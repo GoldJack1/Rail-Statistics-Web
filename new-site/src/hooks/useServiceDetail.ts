@@ -292,3 +292,54 @@ export function useServiceDetail({
 
   return { status, data, error, ageMs, refetch: fetchOnce }
 }
+
+export async function loadServiceDetail(
+  rid: string,
+  date?: string,
+  at?: string,
+  signal?: AbortSignal,
+): Promise<ServiceDetail | null> {
+  if (!rid) return null
+  const key = serviceCacheKey(rid, date, at)
+  const cached = getCachedService(key)
+  if (cached && !cached.hspPending) return cached
+  const res = await fetchDarwin(serviceUrl(rid, date, at), signal ? { signal } : {})
+  if (!res.ok) return null
+  const detail: ServiceDetail = normalizeServiceDetail(await res.json())
+  putCachedService(key, detail, cacheTtlMs(date))
+  return detail
+}
+
+export function useServiceDetails(ids: string[], date?: string, at?: string): Map<string, ServiceDetail> {
+  const [map, setMap] = useState<Map<string, ServiceDetail>>(() => new Map())
+  const key = ids.map((id) => id.trim().toUpperCase()).filter(Boolean).sort().join('|')
+  useEffect(() => {
+    const list = key ? key.split('|') : []
+    if (!list.length) {
+      setMap(new Map())
+      return
+    }
+    const ac = new AbortController()
+    void Promise.all(
+      list.map((id) => {
+        const ridDay = /^(\d{4})(\d{2})(\d{2})/.exec(id)
+        const partnerDate = ridDay ? `${ridDay[1]}-${ridDay[2]}-${ridDay[3]}` : date
+        return loadServiceDetail(id, partnerDate, at, ac.signal).then((detail) => [id, detail] as const)
+      }),
+    )
+      .then((rows) => {
+        if (ac.signal.aborted) return
+        const next = new Map<string, ServiceDetail>()
+        for (const [id, detail] of rows) {
+          if (!detail) continue
+          next.set(id, detail)
+          next.set(detail.rid, detail)
+          if (detail.uid) next.set(detail.uid.toUpperCase(), detail)
+        }
+        setMap(next)
+      })
+      .catch(() => undefined)
+    return () => ac.abort()
+  }, [key, date, at])
+  return map
+}

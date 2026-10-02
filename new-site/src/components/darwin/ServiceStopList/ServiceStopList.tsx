@@ -1,13 +1,14 @@
 'use client'
 
-import React, { useMemo, useState } from 'react'
+import React, { useId, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { ActivityPill } from '@/components/darwin/ActivityPill'
 import { ChevronRightIcon } from '@/components/icons'
 import AutoAnimateCollapse from '@/components/misc/AutoAnimateCollapse/AutoAnimateCollapse'
+import { TextCard } from '@/components/cards'
 import { useStations } from '@/hooks/useStations'
-import type { ServiceStop } from '@/types/darwin'
+import type { ServiceAssociation, ServiceStop } from '@/types/darwin'
 import { buildStopNameLookup, displayStopName, sortStopsByJourneyTime } from '@/components/darwin/serviceStopLabel'
 import type { ServiceViewMode } from '@/components/darwin/serviceViewMode'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
@@ -133,6 +134,7 @@ function buildStopStatus(
   const delayedOngoing =
     !hasActual &&
     !historical &&
+    !live &&
     (Boolean(stop.unknownDelay) || Boolean(reason) || (deltaMinutes != null && deltaMinutes >= 1))
 
   if (delayedOngoing) {
@@ -180,6 +182,62 @@ function liveLocationIndex(stops: ServiceStop[]): number | null {
   return last >= 0 ? last : null
 }
 
+function isPublicCall(stop: ServiceStop): boolean {
+  return slotKind(stop.slot) !== 'pass'
+}
+
+function stopHasDeparted(stop: ServiceStop): boolean {
+  return Boolean(trimSeconds(stop.atd)) || stop.liveKind === 'actual'
+}
+
+function reportedIndex(stops: ServiceStop[], locationTpl?: string | null): number | null {
+  if (locationTpl) {
+    const i = stops.findIndex((stop) => stop.tpl === locationTpl)
+    if (i >= 0) return i
+  }
+  return liveLocationIndex(stops)
+}
+
+function simpleProgressLabel(
+  stops: ServiceStop[],
+  reported: number,
+  nameAt: (index: number) => string,
+): string | null {
+  const at = stops[reported]
+  if (!at || at.cancelledAtStop) return null
+  const kind = slotKind(at.slot)
+  let lastPublic = -1
+  for (let i = 0; i <= reported; i++) {
+    if (isPublicCall(stops[i]) && !stops[i].cancelledAtStop) lastPublic = i
+  }
+  let nextPublic = -1
+  for (let i = reported + 1; i < stops.length; i++) {
+    if (isPublicCall(stops[i]) && !stops[i].cancelledAtStop) {
+      nextPublic = i
+      break
+    }
+  }
+  if (kind === 'destination' || (isPublicCall(at) && !stopHasDeparted(at))) {
+    return lastPublic >= 0 ? `Arrived at ${nameAt(lastPublic)}` : null
+  }
+  if (isPublicCall(at) && stopHasDeparted(at)) {
+    return `Just departed ${nameAt(reported)}`
+  }
+  if (lastPublic >= 0 && nextPublic >= 0) {
+    return `Between ${nameAt(lastPublic)} and ${nameAt(nextPublic)}`
+  }
+  if (lastPublic >= 0) return `Just departed ${nameAt(lastPublic)}`
+  return null
+}
+
+function delayFromStop(stop: ServiceStop, kind: StopKind): number | null {
+  if (stop.unknownDelay) return null
+  const clocks = rowClocks(kind, stop)
+  const real = clocks.real || trimSeconds(stop.liveTime)
+  if (!clocks.booked || !real) return null
+  return computeDeltaMinutes(clocks.booked, real)
+}
+
 function rowClocks(kind: StopKind, stop: ServiceStop): { booked: string | null; real: string | null; estimated: boolean } {
   if (kind === 'pass') {
     const actual = trimSeconds(stop.atp)
@@ -212,6 +270,8 @@ function ServiceStopRow({
   stripeIndex,
   delayReason,
   alertText,
+  progressText,
+  delayMinutes: delayMinutesProp,
 }: {
   stop: ServiceStop
   index: number
@@ -224,6 +284,8 @@ function ServiceStopRow({
   returnTo: string
   delayReason?: string | null
   alertText?: string | null
+  progressText?: string | null
+  delayMinutes?: number | null
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -242,9 +304,7 @@ function ServiceStopRow({
         : String(platformRaw)
   const platformSource = platformSourceLabel(stop.platformSource)
   const clocks = rowClocks(kind, stop)
-  const deltaMinutes = stop.unknownDelay || !clocks.real || !clocks.booked
-    ? null
-    : computeDeltaMinutes(clocks.booked, clocks.real)
+  const deltaMinutes = delayMinutesProp ?? delayFromStop(stop, kind)
   const time = primaryTime(stop, kind)
   const status = buildStopStatus(stop, kind, deltaMinutes, time.value, historical, delayReason, alertText)
   const code = (stop.tpl || stop.crs || '').toUpperCase()
@@ -359,6 +419,15 @@ function ServiceStopRow({
           </td>
         )}
       </tr>
+      {progressText ? (
+        <tr className={[
+          'svc-stops-table__progress',
+          stripeIndex % 2 === 1 ? 'stations-table__row--striped' : '',
+          `svc-stop--${status.tone}`,
+        ].filter(Boolean).join(' ')}>
+          <td colSpan={colCount}>{progressText}</td>
+        </tr>
+      ) : null}
       {detailed && (
         <tr className={[
           'svc-stops-table__detail-row',
@@ -446,41 +515,79 @@ export function ServiceStopList({
   delayReason,
   alertText,
   location,
+  associations = [],
+  associationHref,
+  showLegend = true,
+  showAssociations = true,
+  preserveOrder = false,
+  heading = null,
 }: {
   stops: ServiceStop[]
   viewMode: ServiceViewMode
-  /** Date sent to the departures board. Null keeps the board on live today. */
   boardDate?: string | null
-  /** True for a saved historical snapshot, which changes the scheduled pill. */
   historical?: boolean
   returnTo: string
   delayReason?: string | null
   alertText?: string | null
   location?: { last?: { tiploc?: string } | null; label?: string } | null
+  associations?: ServiceAssociation[]
+  associationHref?: (a: ServiceAssociation) => string
+  showLegend?: boolean
+  showAssociations?: boolean
+  preserveOrder?: boolean
+  heading?: string | null
 }) {
   const { stations } = useStations()
   const lookup = useMemo(() => buildStopNameLookup(stations), [stations])
-  const orderedStops = useMemo(() => sortStopsByJourneyTime(stops), [stops])
+  const orderedStops = useMemo(
+    () => (preserveOrder ? stops : sortStopsByJourneyTime(stops)),
+    [preserveOrder, stops],
+  )
+  const showPasses = viewMode === 'detailed'
   const visible = orderedStops
     .map((stop, index) => ({ stop, index }))
-    .filter(({ stop }) => viewMode === 'detailed' || slotKind(stop.slot) !== 'pass')
+    .filter(({ stop }) => showPasses || slotKind(stop.slot) !== 'pass')
 
   if (visible.length === 0) {
     return <p className="unit-muted">No calling points on this service.</p>
   }
 
-  const liveIndex = historical
+  const reportedFull = historical
     ? null
-    : location?.last?.tiploc
-      ? visible.findIndex(({ stop }) => stop.tpl === location.last?.tiploc)
-      : liveLocationIndex(visible.map(({ stop }) => stop))
-  const liveIdx = liveIndex != null && liveIndex >= 0 ? liveIndex : null
+    : reportedIndex(orderedStops, location?.last?.tiploc)
+  const livePublicFull =
+    reportedFull == null
+      ? -1
+      : orderedStops.findLastIndex(
+          (stop, i) => i <= reportedFull && isPublicCall(stop) && !stop.cancelledAtStop,
+        )
+  const liveMatch =
+    reportedFull == null
+      ? -1
+      : viewMode === 'simple'
+        ? visible.findIndex(({ index }) => index === livePublicFull)
+        : visible.findIndex(({ index }) => index === reportedFull)
+  const liveIdx = liveMatch >= 0 ? liveMatch : null
+  const progressText =
+    viewMode === 'simple' && reportedFull != null && liveIdx != null && liveIdx >= 0
+      ? simpleProgressLabel(orderedStops, reportedFull, (index) =>
+          displayStopName(orderedStops, index, lookup),
+        )
+      : null
+  const [headingOpen, setHeadingOpen] = useState(true)
+  const headingPanelId = useId()
+  let carriedDelay: number | null = null
+  const delayMinutesByStripe = visible.map(({ stop }) => {
+    const kind = slotKind(stop.slot)
+    const own = delayFromStop(stop, kind)
+    if (own != null) carriedDelay = own
+    const upcoming = !isActualLiveKind(stop.liveKind)
+    if (own != null) return own
+    if (upcoming && carriedDelay != null && carriedDelay >= 1) return carriedDelay
+    return null
+  })
 
-  return (
-    <div className="stations-table-panel svc-stops-table-panel">
-      <div className="svc-stops-key-wrap">
-        <CallingColourKey />
-      </div>
+  const table = (
       <div className="stations-table-wrap">
         <table className={`stations-table svc-stops-table svc-stops-table--${viewMode}`}>
           <thead>
@@ -522,11 +629,66 @@ export function ServiceStopList({
                 returnTo={returnTo}
                 delayReason={delayReason}
                 alertText={alertText}
+                progressText={viewMode === 'simple' && liveIdx === stripeIndex ? progressText : null}
+                delayMinutes={delayMinutesByStripe[stripeIndex]}
               />
+              {showAssociations
+                ? associations
+                .filter((a) => a.tiploc && a.tiploc === stop.tpl)
+                .map((a) => {
+                  const href = associationHref?.(a) || `/services/${encodeURIComponent(a.otherUid || a.otherRid)}`
+                  const dest = a.otherDestinationName || 'another destination'
+                  const orig = a.otherOriginName || 'elsewhere'
+                  const head = a.otherTrainId ? ` ${a.otherTrainId}` : ''
+                  const text =
+                    a.category === 'VV' && a.role === 'main'
+                      ? `${head.trim() || 'Portion'} towards ${dest}`
+                      : a.category === 'VV'
+                        ? `Formed from${head} from ${orig}`
+                        : `Associated${head}`
+                  return (
+                    <tr key={`${a.category}-${a.otherRid}`} className="svc-stop-assoc">
+                      <td colSpan={viewMode === 'detailed' ? 6 : 4}>
+                        <a className="svc-stop-assoc-link" href={href}>
+                          {text}
+                        </a>
+                      </td>
+                    </tr>
+                  )
+                })
+                : null}
             </tbody>
           ))}
         </table>
       </div>
+  )
+
+  return (
+    <div className="stations-table-panel svc-stops-table-panel">
+      {showLegend ? (
+      <div className="svc-stops-key-wrap">
+        <CallingColourKey />
+      </div>
+      ) : null}
+      {heading ? (
+        <>
+          <div className={`svc-stops-heading-wrap${headingOpen ? ' svc-stops-heading-wrap--open' : ''}`}>
+            <TextCard
+              title={heading}
+              className="svc-stops-heading-card"
+              onClick={() => setHeadingOpen((open) => !open)}
+              ariaLabel={`${headingOpen ? 'Collapse' : 'Expand'} ${heading}`}
+            />
+          </div>
+          <AutoAnimateCollapse
+            isOpen={headingOpen}
+            id={headingPanelId}
+            className="svc-stops-heading-panel"
+          >
+            {table}
+          </AutoAnimateCollapse>
+        </>
+      ) : table}
     </div>
   )
 }

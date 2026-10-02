@@ -82,7 +82,7 @@ function unpackLongRangeZips(cifDir) {
   const zips = collectFiles(cifDir).filter((f) => /\.zip$/i.test(f)).sort();
   for (const zip of zips) {
     console.log("unzip", zip);
-    spawnSync("unzip", ["-o", "-j", zip, "*MCA*", "-d", cifDir], {
+    spawnSync("unzip", ["-o", "-j", zip, "-d", cifDir], {
       stdio: "inherit",
     });
   }
@@ -178,7 +178,10 @@ if (process.env.TT_IMPORT_CIF !== "0") {
     .filter((f) => /MCA|\.cif/i.test(basename(f)))
     .sort();
   const latestCif = cifFiles[cifFiles.length - 1];
-  if (latestCif) runRetry("import-tt", ["src/import-tt.js", latestCif, today]);
+  if (latestCif) {
+    const ahead = String(Math.min(28, Math.max(0, Number(process.env.TT_CIF_AHEAD_DAYS ?? 14) || 0)));
+    runRetry("import-tt", ["src/import-tt.js", latestCif, today, ahead]);
+  }
   else console.log("no CIF MCA in tt/cif");
 }
 

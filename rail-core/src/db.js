@@ -23,7 +23,27 @@ export function openDayDb(dataDir, ymd) {
   ensureUnitJoinColumns(db);
   ensureServiceFormationColumn(db);
   ensureCallLoadingColumns(db);
+  ensureAssociationsTable(db);
   return db;
+}
+
+function ensureAssociationsTable(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS associations (
+      main_rid TEXT NOT NULL,
+      assoc_rid TEXT NOT NULL,
+      category TEXT NOT NULL,
+      tiploc TEXT NOT NULL DEFAULT '',
+      main_uid TEXT,
+      assoc_uid TEXT,
+      is_cancelled INTEGER NOT NULL DEFAULT 0,
+      is_deleted INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (main_rid, assoc_rid, category, tiploc)
+    );
+    CREATE INDEX IF NOT EXISTS idx_assoc_main ON associations (main_rid);
+    CREATE INDEX IF NOT EXISTS idx_assoc_assoc ON associations (assoc_rid);
+  `);
 }
 
 function ensureCallLoadingColumns(db) {

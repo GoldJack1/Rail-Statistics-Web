@@ -1,10 +1,10 @@
 'use client'
 
-import { useRouter, usePathname, useSearchParams, useParams } from 'next/navigation'
+import { useRouter, useSearchParams, useParams } from 'next/navigation'
 import React, { useEffect, useMemo, useState } from 'react'
 import { ArrowsClockwise, ChartBar, Code, Info, MapPin, Train } from '@phosphor-icons/react'
 
-import { useServiceDetail } from '@/hooks/useServiceDetail'
+import { useServiceDetail, useServiceDetails } from '@/hooks/useServiceDetail'
 import { useStations } from '@/hooks/useStations'
 import { BUTBaseButton, BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
@@ -24,12 +24,19 @@ import SidebarDropdownSection from '@/components/misc/SidebarDropdownSection/Sid
 import type { ServiceDetail } from '@/types/darwin'
 import { resolveDarwinBrowserUrl } from '@/utils/darwinReadyFetch'
 import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
-import { paramAsString } from '@/utils/nextParams'
 import { formatLmTocName } from '@/utils/formatLmTocName'
 import { stopHasPublishedLoading } from '@/utils/darwinCoachLoading'
-import './ServiceDetailPage.css'
-
-type ServiceSection = 'overview' | 'loading' | 'formation' | 'calling' | 'raw'
+import {
+  consumeLegacyFromParam,
+  isServiceSection,
+  parseServicePath,
+  readServiceReturn,
+  replaceServiceUrl,
+  serviceHref,
+  type ServiceSection,
+} from '@/utils/serviceUrl'
+import { buildSplitWorking, joinStationNames, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from '@/utils/splitWorking'
+import '../ServiceDetailPage.css'
 
 const BASE_SERVICE_SECTIONS: AccountSection[] = [
   { id: 'overview', label: 'Overview', icon: Info },
@@ -237,29 +244,90 @@ const RawDataBody: React.FC<{ data: ServiceDetail }> = React.memo(
 
 const ServiceDetailPage: React.FC = () => {
   const params   = useParams()
-  const pathname = usePathname()
   const searchParams = useSearchParams()
-  const location = { pathname, search: searchParams.toString() ? `?${searchParams}` : '', state: null as unknown }
   const router = useRouter()
-  const rid = paramAsString(params.rid)
+  const parts = useMemo(() => {
+    const raw = params.parts
+    if (Array.isArray(raw)) return raw.map((p) => String(p))
+    if (typeof raw === 'string') return [raw]
+    return []
+  }, [params.parts])
+  const parsed = useMemo(() => parseServicePath(parts), [parts])
   const [viewMode, selectViewMode] = useServiceViewMode()
-  const [section, setSection] = useState<ServiceSection>('overview')
+  const [section, setSection] = useState<ServiceSection>(parsed.section)
 
-  const query = useMemo(() => new URLSearchParams(location.search), [location.search])
-  const historicalDate = query.get('date') || undefined
-  const historicalAt = query.get('at') || undefined
-  const from = query.get('from') || ''
+  const query = useMemo(() => new URLSearchParams(searchParams.toString()), [searchParams])
   const todayIsoDate = useMemo(() => getCurrentRailwayDayIsoUk(), [])
+  const date = parsed.date || query.get('date') || todayIsoDate
+  const serviceId = parsed.id
+  const from = useMemo(
+    () => consumeLegacyFromParam(query.get('from'), serviceId, date) || readServiceReturn(serviceId, date),
+    [query, serviceId, date],
+  )
+  const historicalAt = from.includes('/departures/') ? undefined : query.get('at') || undefined
+  const historicalDate = date
   const historicalMode = !!historicalDate && historicalDate < todayIsoDate
   const futureTimetableMode = !!historicalDate && historicalDate > todayIsoDate
 
+  useEffect(() => {
+    if (parsed.mode) selectViewMode(parsed.mode)
+  }, [parsed.mode, selectViewMode])
+
+  useEffect(() => {
+    setSection(parsed.section)
+  }, [parsed.section])
+
   const { status, data, error, ageMs, refetch } = useServiceDetail({
-    rid,
+    rid: serviceId,
     date: historicalDate,
     at: historicalAt,
     pollMs: historicalMode || futureTimetableMode || viewMode === 'simple' ? 0 : 15_000,
   })
   const { stations } = useStations()
+  const canonicalId = data?.uid || serviceId
+  const canonicalHref = serviceHref({
+    id: canonicalId,
+    date: data?.ssd || date,
+    section,
+    mode: viewMode,
+    at: historicalAt,
+  })
+
+  useEffect(() => {
+    if (!serviceId) return
+    replaceServiceUrl(canonicalHref)
+  }, [canonicalHref, serviceId])
+
+  const partnerIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const a of data?.associations || []) {
+      if (a.isDeleted) continue
+      if (a.category !== 'VV' && a.category !== 'JJ' && a.category !== 'NP') continue
+      if (a.otherRid) ids.add(a.otherRid)
+      else if (a.otherUid) ids.add(a.otherUid)
+    }
+    return [...ids]
+  }, [data])
+  const partnerMap = useServiceDetails(partnerIds, historicalDate, historicalAt)
+  const partners = useMemo(() => {
+    const seen = new Set<string>()
+    const list: ServiceDetail[] = []
+    for (const svc of partnerMap.values()) {
+      if (seen.has(svc.rid) || svc.rid === data?.rid) continue
+      seen.add(svc.rid)
+      list.push(svc)
+    }
+    return list
+  }, [partnerMap, data?.rid])
+  const splitWorking = useMemo(
+    () => (data ? buildSplitWorking(data, partners) : null),
+    [data, partners],
+  )
+  const destinationLabel = splitWorking
+    ? joinStationNames(splitWorking.portions.map((p) => p.destinationName))
+    : data
+      ? serviceDestinationLabel(data)
+      : ''
   const loadingTpl = useMemo(
     () => (data ? stopTplFromBackLink(from, data.stops, data.origin) : null),
     [data, from],
@@ -281,10 +349,10 @@ const ServiceDetailPage: React.FC = () => {
   const fallbackStopNameLookup = useMemo(() => buildStopNameLookup(stations), [stations])
 
   const title = useMemo(() => {
-    if (!data) return rid
-    const dest = data.destinationName || data.destination
+    if (!data) return serviceId
+    const dest = destinationLabel || data.destinationName || data.destination
     return `${data.trainId} · ${data.originName || data.origin} → ${dest}`
-  }, [data, rid])
+  }, [data, serviceId, destinationLabel])
 
   const subtitle = useMemo(() => {
     const serviceDate = data?.ssd ? formatDateOnly(data.ssd) : null
@@ -362,10 +430,9 @@ const ServiceDetailPage: React.FC = () => {
       sections={serviceSections}
       activeSectionId={section}
       onSelect={(id) => {
-        if (id === 'overview' || id === 'loading' || id === 'formation' || id === 'calling' || id === 'raw') {
-          if (id === 'loading' && !hasLoading) return
-          setSection(id)
-        }
+        if (!isServiceSection(id)) return
+        if (id === 'loading' && !hasLoading) return
+        setSection(id)
       }}
       ariaLabel="Service sections"
       minSectionCount={hasLoading ? 5 : 4}
@@ -374,7 +441,7 @@ const ServiceDetailPage: React.FC = () => {
           <section className="modal-section">
             <StationSectionTitle title="Service not found" icon={Info} pageHeading />
             <p className="edit-hint kb-source-hint">
-              RID <code>{rid}</code> was not found for {historicalDate || 'this date'}.
+              RID <code>{serviceId}</code> was not found for {historicalDate || 'this date'}.
               The live API may still be on the previous build, or that day’s timetable is not imported yet.
             </p>
           </section>
@@ -402,16 +469,16 @@ const ServiceDetailPage: React.FC = () => {
               aria-label="Service summary"
             >
               {data.cancelled && data.cancellation && (
-                <div className="svc-banner svc-banner--cancel">
-                  {isScheduleDeactivatedReason(data.cancellation.reason) ? (
-                    <span className="svc-banner-label">Cancelled</span>
-                  ) : (
-                    <>
-                      <span className="svc-banner-label">Cancelled —</span> {data.cancellation.reason}
-                      {data.cancellation.code && <span className="svc-banner-code"> (code {data.cancellation.code})</span>}
-                    </>
-                  )}
-                </div>
+                <TextCard
+                  static
+                  state="redAction"
+                  title="Cancelled"
+                  description={
+                    isScheduleDeactivatedReason(data.cancellation.reason)
+                      ? undefined
+                      : `${data.cancellation.reason}${data.cancellation.code ? ` (code ${data.cancellation.code})` : ''}`
+                  }
+                />
               )}
               {!data.cancelled && data.partiallyCancelled && (() => {
                 const cancelledStops = data.stops.filter((s) => s.cancelledAtStop && s.slot !== 'PP' && s.slot !== 'OPPP');
@@ -426,26 +493,52 @@ const ServiceDetailPage: React.FC = () => {
                     : `Not calling at ${names.length} stops including ${names.slice(0, 3).join(', ')}.`;
                 const distinctReason = cancelledStops.find((s) => s.cancelReasonAtStop)?.cancelReasonAtStop?.reason;
                 return (
-                  <div className="svc-banner svc-banner--cancel">
-                    <span className="svc-banner-label">Partial cancellation —</span> {summary}
-                    {distinctReason && <> {distinctReason}</>}
-                  </div>
+                  <TextCard
+                    static
+                    state="redAction"
+                    title="Partial cancellation"
+                    description={[summary, distinctReason].filter(Boolean).join(' ')}
+                  />
                 );
               })()}
               {!data.cancelled && !data.partiallyCancelled && data.delayReason && (
-                <div className="svc-banner svc-banner--delay">
-                  <span className="svc-banner-label">Delay reason —</span> {data.delayReason.reason}
-                  {data.delayReason.code && <span className="svc-banner-code"> (code {data.delayReason.code})</span>}
-                </div>
+                <TextCard
+                  static
+                  state="accent"
+                  title="Delay reason"
+                  description={`${data.delayReason.reason}${data.delayReason.code ? ` (code ${data.delayReason.code})` : ''}`}
+                />
               )}
 
               {data.alerts && data.alerts.length > 0 && data.alerts.map((al) => (
-                <div key={al.id} className="svc-banner svc-banner--alert">
-                  <span className="svc-banner-label">Alert</span>
-                  {al.source && <span className="svc-banner-source">{al.source}</span>}{' '}
-                  {al.text}
-                </div>
+                <TextCard
+                  key={al.id}
+                  static
+                  state="accent"
+                  title={al.source ? `Alert · ${al.source}` : 'Alert'}
+                  description={al.text}
+                />
               ))}
+
+              {(splitWorking?.associations || data.associations || []).map((a) => {
+                const href = serviceHref({
+                  id: a.otherUid || a.otherRid,
+                  date: data.ssd || date,
+                  section: 'overview',
+                  mode: viewMode,
+                })
+                const kind = a.category === 'VV' ? 'Divides' : a.category === 'JJ' ? 'Joins' : 'Portion'
+                return (
+                  <TextCard
+                    key={`${a.category}-${a.otherRid}-${a.tiploc}`}
+                    title={`${kind} · ${a.otherTrainId || a.otherUid || 'other portion'}`}
+                    description={describeAssociation(a)}
+                    state={a.isCancelled ? 'redAction' : 'default'}
+                    to={href}
+                    ariaLabel={`Open associated service ${a.otherTrainId || a.otherRid}`}
+                  />
+                )
+              })}
 
               <div className="modal-details-grid">
                 <StationDetailField
@@ -459,7 +552,7 @@ const ServiceDetailPage: React.FC = () => {
                 />
                 <StationDetailField label="Headcode" value={data.trainId} />
                 <StationDetailField label="Origin" value={data.originName || data.origin} />
-                <StationDetailField label="Destination" value={data.destinationName || data.destination} />
+                <StationDetailField label="Destination" value={destinationLabel || data.destinationName || data.destination} />
               </div>
             </section>
             {viewMode === 'detailed' && (
@@ -511,6 +604,46 @@ const ServiceDetailPage: React.FC = () => {
         {data && section === 'formation' && (
             <section className="modal-section svc-formation-section" aria-label="Formation">
               <StationSectionTitle title="Formation" icon={Train} pageHeading />
+              {splitWorking ? (
+                <div className="svc-split-portions">
+                  <SidebarDropdownSection title={splitTogetherLabel(splitWorking)} defaultExpanded>
+                    <CarriageMap
+                      formation={data.formation}
+                      consist={splitWorking.togetherConsist}
+                      stops={splitWorking.togetherStops}
+                      reverse={data.reverseFormation}
+                      initialTpl={loadingTpl}
+                      layout="stock-only"
+                      onUnitClick={(unitId) => {
+                        const qp = new URLSearchParams()
+                        if (historicalDate) qp.set('unitDay', historicalDate)
+                        router.push(`/units/${encodeURIComponent(unitId)}${qp.toString() ? `?${qp.toString()}` : ''}`)
+                      }}
+                    />
+                  </SidebarDropdownSection>
+                  {splitWorking.portions.map((portion) => (
+                    <SidebarDropdownSection
+                      key={portion.rid}
+                      title={splitPortionLabel(portion, splitWorking.splitName)}
+                      defaultExpanded
+                    >
+                      <CarriageMap
+                        formation={portion.rid === data.rid ? data.formation : null}
+                        consist={portion.consist}
+                        stops={portion.stops}
+                        reverse={false}
+                        layout="stock-only"
+                        onUnitClick={(unitId) => {
+                          const qp = new URLSearchParams()
+                          if (historicalDate) qp.set('unitDay', historicalDate)
+                          router.push(`/units/${encodeURIComponent(unitId)}${qp.toString() ? `?${qp.toString()}` : ''}`)
+                        }}
+                      />
+                    </SidebarDropdownSection>
+                  ))}
+                  <ServiceVehicleDetails consist={data.consist} />
+                </div>
+              ) : (
               <div className="svc-formation-panel">
               <SidebarDropdownSection title="Coach map" defaultExpanded>
               <CarriageMap
@@ -529,42 +662,65 @@ const ServiceDetailPage: React.FC = () => {
               </SidebarDropdownSection>
               <ServiceVehicleDetails consist={data.consist} />
               </div>
-              {data.associations && data.associations.length > 0 && (
-                <div className="svc-association-list">
-                  {data.associations.map((a) => {
-                    const next = new URLSearchParams()
-                    if (historicalDate) next.set('date', historicalDate)
-                    if (historicalAt) next.set('at', historicalAt)
-                    if (from) next.set('from', from)
-                    const href = `/services/${encodeURIComponent(a.otherRid)}${next.toString() ? `?${next.toString()}` : ''}`
-                    return (
-                      <TextCard
-                        key={`${a.category}-${a.otherRid}-${a.tiploc}`}
-                        title={describeAssociation(a)}
-                        description={a.isCancelled ? 'Cancelled' : undefined}
-                        state={a.isCancelled ? 'redAction' : 'default'}
-                        to={href}
-                        ariaLabel={`Open associated service ${a.otherTrainId || a.otherRid}`}
-                      />
-                    )
-                  })}
-                </div>
               )}
             </section>
         )}
 
         {data && section === 'calling' && (
             <section className="modal-section svc-pattern-card" aria-label="Calling pattern">
+              {splitWorking ? (
+                <div className="svc-split-portions">
+                  <ServiceStopList
+                    stops={splitWorking.togetherStops}
+                    viewMode={viewMode}
+                    boardDate={historicalMode || futureTimetableMode ? historicalDate || null : null}
+                    historical={historicalMode || futureTimetableMode}
+                    returnTo={canonicalHref}
+                    delayReason={data.delayReason?.reason}
+                    alertText={data.alerts?.[0]?.text}
+                    location={data.location}
+                    showAssociations={false}
+                    preserveOrder
+                    heading={splitTogetherLabel(splitWorking)}
+                  />
+                  {splitWorking.portions.map((portion) => (
+                    <ServiceStopList
+                      key={portion.rid}
+                      stops={portion.stops}
+                      viewMode={viewMode}
+                      boardDate={historicalMode || futureTimetableMode ? historicalDate || null : null}
+                      historical={historicalMode || futureTimetableMode}
+                      returnTo={canonicalHref}
+                      delayReason={portion.rid === data.rid ? data.delayReason?.reason : null}
+                      location={portion.rid === data.rid ? data.location : null}
+                      showLegend={false}
+                      showAssociations={false}
+                      preserveOrder
+                      heading={splitPortionLabel(portion, splitWorking.splitName)}
+                    />
+                  ))}
+                </div>
+              ) : (
               <ServiceStopList
                 stops={data.stops}
                 viewMode={viewMode}
                 boardDate={historicalMode || futureTimetableMode ? historicalDate || null : null}
                 historical={historicalMode || futureTimetableMode}
-                returnTo={`/services/${encodeURIComponent(data.rid)}${location.search || ''}`}
+                returnTo={canonicalHref}
                 delayReason={data.delayReason?.reason}
                 alertText={data.alerts?.[0]?.text}
                 location={data.location}
+                associations={data.associations}
+                associationHref={(a) =>
+                  serviceHref({
+                    id: a.otherUid || a.otherRid,
+                    date: data.ssd || date,
+                    section: 'overview',
+                    mode: viewMode,
+                  })
+                }
               />
+              )}
             </section>
         )}
 

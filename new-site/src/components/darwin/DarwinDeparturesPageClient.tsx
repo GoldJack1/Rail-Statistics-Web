@@ -27,6 +27,8 @@ import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { parseHistoryDatesList } from '@/utils/normalizeRailCore'
 import { peekHotHealth, peekHotHistoryDates } from '@/utils/darwinHotCache'
 import { prefetchDarwinService } from '@/hooks/useServiceDetail'
+import { goToServicePath } from '@/utils/serviceUrl'
+import { boardDestinationLabel } from '@/utils/splitWorking'
 import { formatLmTocName } from '@/utils/formatLmTocName'
 import { isoDateToDdMmYyyy } from '@/utils/dateDdMmYyyy'
 import '@/styles/browsePageLayout.css'
@@ -201,25 +203,26 @@ const DarwinDepartureRowCard = React.memo(function DarwinDepartureRowCard({
   const detailPhrase =
     row.movement === 'arrival'
       ? `arrival ${formatTime(row.scheduledAt)} from ${row.originName || row.origin}`
-      : `${formatTime(row.scheduledAt)} to ${row.destinationName || row.destination}`
+      : `${formatTime(row.scheduledAt)} to ${boardDestinationLabel(row)}`
   const ariaState = row.cancelled ? 'cancelled' : historicalMode ? 'historical snapshot' : 'live status'
 
   const onClick = useCallback(() => {
-    const qp = new URLSearchParams()
     const now = getLiveNowPartsUk()
     const frozen = Boolean(historyDate) && (historyDate !== now.date || (historyTime && historyTime !== now.time))
-    const serviceDate = frozen ? historyDate : undefined
-    const serviceAt = frozen && historyTime ? historyTime : undefined
-    if (serviceDate) qp.set('date', serviceDate)
-    if (serviceAt) qp.set('at', serviceAt)
+    const serviceDate = frozen ? historyDate : now.date
     const backQs = new URLSearchParams()
     backQs.set('hours', String(hours))
-    if (serviceDate) backQs.set('date', serviceDate)
-    if (serviceAt) backQs.set('at', serviceAt)
-    qp.set('from', `/departures/${encodeURIComponent(code)}?${backQs.toString()}`)
-    prefetchDarwinService(row.rid, serviceDate, serviceAt)
-    router.push(`/services/${encodeURIComponent(row.rid)}?${qp.toString()}`)
-  }, [router, historyDate, historyTime, code, hours, row.rid])
+    if (frozen && serviceDate) backQs.set('date', serviceDate)
+    if (frozen && historyTime) backQs.set('at', historyTime)
+    prefetchDarwinService(row.rid, frozen ? historyDate : undefined)
+    router.push(
+      goToServicePath({
+        id: row.uid || row.rid,
+        date: serviceDate,
+        from: `/departures/${encodeURIComponent(code)}?${backQs.toString()}`,
+      }),
+    )
+  }, [router, historyDate, historyTime, code, hours, row.rid, row.uid])
 
   return (
     <div
@@ -228,7 +231,7 @@ const DarwinDepartureRowCard = React.memo(function DarwinDepartureRowCard({
         if (!detailedInfo) return
         const now = getLiveNowPartsUk()
         const frozen = Boolean(historyDate) && (historyDate !== now.date || (historyTime && historyTime !== now.time))
-        prefetchDarwinService(row.rid, frozen ? historyDate : undefined, frozen && historyTime ? historyTime : undefined)
+        prefetchDarwinService(row.rid, frozen ? historyDate : undefined)
       }}
     >
       <DarwinServiceCard

@@ -95,3 +95,40 @@ test("two diagrams same unit keep separate consist JSON", () => {
   assert.equal(JSON.parse(b.json).allocations[0].diagramNo, "B");
   cat.close();
 });
+
+test("PTAC unit_ids follow the latest diagram and drop detached units", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ptac-drop-"));
+  const cat = openCatalog(dir);
+  const three = {
+    allocations: [
+      { resourceGroups: [{ unitId: "185128" }] },
+      { resourceGroups: [{ unitId: "185129" }] },
+      { resourceGroups: [{ unitId: "185130" }] },
+    ],
+  };
+  const two = {
+    allocations: [
+      { resourceGroups: [{ unitId: "185128" }] },
+      { resourceGroups: [{ unitId: "185129" }] },
+    ],
+  };
+  applyPtacUnit(cat, {
+    unit_id: "185130",
+    uid: "G16307",
+    operating_day: "2026-10-02",
+    headcode: "1P23",
+    originHHMM: "11:30",
+    json: three,
+  });
+  applyPtacUnit(cat, {
+    unit_id: "185128",
+    uid: "G16307",
+    operating_day: "2026-10-02",
+    headcode: "1P23",
+    originHHMM: "11:30",
+    json: two,
+  });
+  const row = lookupConsist(cat, { uid: "G16307", ssd: "2026-10-02", originHHMM: "11:30" });
+  assert.deepEqual(JSON.parse(row.unit_ids), ["185128", "185129"]);
+  cat.close();
+});

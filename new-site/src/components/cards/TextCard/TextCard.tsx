@@ -95,7 +95,7 @@ const TextCard: React.FC<TextCardProps> = ({
           <span className="rs-text-card__description">{description}</span>
         ) : null}
       </span>
-      <span className="rs-text-card__chevron">{trailingIcon ?? <DefaultChevron />}</span>
+      <span className="rs-text-card__chevron">{trailingIcon === null ? null : (trailingIcon ?? <DefaultChevron />)}</span>
       <span className="rs-text-card__inner-shadow" aria-hidden="true" />
     </>
   )

@@ -12,6 +12,7 @@ import {
   formatCoachLoad,
 } from '@/utils/darwinCoachLoading'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
+import { boardDestinationLabel } from '@/utils/splitWorking'
 import '../StationCard/StationCard.css'
 import '../StationCardActionBar/StationCardActionBar.css'
 import '@/components/buttons/base/BUTBaseButton/BUTBaseButton.css'
@@ -65,7 +66,7 @@ function buildHeadline(row: DepartureRow): string {
   if (row.movement === 'arrival') {
     return `${time} from ${row.originName || row.origin}`
   }
-  return `${time} to ${row.destinationName || row.destination}`
+  return `${time} to ${boardDestinationLabel(row)}`
 }
 
 function platformNumber(row: DepartureRow): string | null {

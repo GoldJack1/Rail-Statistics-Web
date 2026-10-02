@@ -97,6 +97,8 @@ export interface DepartureRow {
   destination: string;         // TIPLOC
   destinationName: string | null;
   destinationCrs: string | null;
+  /** Extra divide destinations when the published name is still a single station. */
+  associationDestinations?: string[];
   /** Short via line for the card (not full calling-after arrays). */
   via?: string | null;
 
@@ -293,6 +295,7 @@ export interface ServiceAssociation {
   /** Whether this RID is the main side of the association or the associated side. */
   role: 'main' | 'associated';
   otherRid: string;
+  otherUid: string | null;
   otherTrainId: string | null;
   otherToc: string | null;
   otherOriginName: string | null;

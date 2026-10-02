@@ -6,7 +6,8 @@
 import "./load-env.js";
 import { openCatalog, openDayDb, operatingDayYmd, walCheckpoint } from "./db.js";
 import { applyHspDetails } from "./hsp-apply.js";
-import { hspServiceDetails } from "./hsp-client.js";
+import { hspServiceDetails, mapHspLimited } from "./hsp-client.js";
+import { ridsNeedingHspSeal } from "./hsp-seal-rids.js";
 
 function yesterdayYmd() {
   const today = operatingDayYmd();
@@ -21,12 +22,7 @@ if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd ?? "")) {
 }
 
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
-const perSec = Math.max(0.5, Number(process.env.HSP_DETAILS_PER_SEC || 2));
-const gapMs = Math.round(1000 / perSec);
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+const skipForecastOnly = process.env.HSP_SKIP_FORECAST_ONLY !== "0";
 
 const catalog = openCatalog(DATA_DIR);
 const db = openDayDb(DATA_DIR, ymd);
@@ -39,44 +35,46 @@ if (!process.env.NRDP_HSP_USER) {
   process.exit(0);
 }
 
-const rids = db
-  .prepare(
-    `SELECT s.rid FROM services s
-     WHERE IFNULL(s.service_type, 'passenger') != 'freight'
-       AND EXISTS (
-         SELECT 1 FROM calls c
-         WHERE c.rid = s.rid AND IFNULL(c.is_passing, 0) = 0
-           AND (c.sta IS NOT NULL OR c.std IS NOT NULL)
-           AND (c.ata IS NULL AND c.atd IS NULL)
-       )`,
-  )
-  .all()
-  .map((r) => r.rid);
+const rids = ridsNeedingHspSeal(db, { skipForecastOnly });
+console.log(`HSP seal ${ymd}: ${rids.length} RIDs (skipForecastOnly=${skipForecastOnly})`);
 
 let filled = 0;
 let skipped404 = 0;
 let errors = 0;
 let authFail = 0;
-for (const rid of rids) {
+let stop = false;
+
+const results = await mapHspLimited(rids, async (rid, idx) => {
+  if (stop) return { rid, skip: true };
   try {
     const details = await hspServiceDetails(rid);
-    filled += applyHspDetails(db, catalog, details, ymd, rid).filled || 0;
-    authFail = 0;
+    return { rid, details };
   } catch (err) {
-    if (err.status === 404) skipped404++;
-    else {
-      errors++;
-      console.error("HSP", rid, err.message);
-      if (err.status === 401 || err.status === 403) {
-        authFail++;
-        if (authFail >= 3) {
-          console.error("HSP auth failing — stopping seal");
-          break;
-        }
-      }
+    if (err.status === 404) return { rid, miss: true };
+    if (err.status === 401 || err.status === 403) {
+      authFail++;
+      if (authFail >= 3) stop = true;
     }
+    return { rid, err };
+  } finally {
+    if ((idx + 1) % 250 === 0) console.log(`HSP seal progress ${idx + 1}/${rids.length}`);
   }
-  await sleep(gapMs);
+});
+
+const mark = db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)`);
+for (const row of results) {
+  if (!row || row.skip) continue;
+  if (row.miss) {
+    skipped404++;
+    mark.run(`hsp_miss_${row.rid}`, ymd);
+    continue;
+  }
+  if (row.err) {
+    errors++;
+    console.error("HSP", row.rid, row.err.message);
+    continue;
+  }
+  filled += applyHspDetails(db, catalog, row.details, ymd, row.rid).filled || 0;
 }
 
 db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('sealed', ?)`).run(new Date().toISOString());

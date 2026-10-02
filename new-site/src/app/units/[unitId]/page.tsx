@@ -29,8 +29,10 @@ import { peekHotUnitsCatalog } from '@/utils/darwinHotCache'
 import { stopHasPublishedLoading } from '@/utils/darwinCoachLoading'
 import { isPlausibleUnitOperatingDay, ukCalendarYmd } from '@/utils/unitOperatingDay'
 import { withUnitDay } from '@/utils/unitClassBands'
+import { goToServicePath } from '@/utils/serviceUrl'
+import { serviceDestinationLabel } from '@/utils/splitWorking'
 import './UnitLookupPage.css'
-import '../../services/[rid]/ServiceDetailPage.css'
+import '../../services/ServiceDetailPage.css'
 
 type UnitDetailTab = 'overview' | 'service' | 'logs' | 'services'
 
@@ -571,7 +573,7 @@ const UnitLookupPage: React.FC = () => {
                   <>
                     <div className="unit-service-heading">
                       <p className="svc-pattern-title">
-                        {`${latestService.trainId} · ${latestService.originName || latestService.origin} → ${latestService.destinationName || latestService.destination}`}
+                        {`${latestService.trainId} · ${latestService.originName || latestService.origin} → ${serviceDestinationLabel(latestService)}`}
                       </p>
                       <p className="unit-muted">
                         RID {latestService.rid}
@@ -583,12 +585,14 @@ const UnitLookupPage: React.FC = () => {
                         colorVariant="accent"
                         instantAction
                         onClick={() => {
-                          const qp = new URLSearchParams()
-                          const serviceDate = snapshotDay(selectedDay) || latestService.historicalDate || null
-                          if (serviceDate) qp.set('date', serviceDate)
-                          if (selectedDay && selectedDay !== 'all') qp.set('unitDay', selectedDay)
-                          qp.set('from', `${location.pathname}${location.search || ''}`)
-                          router.push(`/services/${encodeURIComponent(latestService.rid)}${qp.toString() ? `?${qp.toString()}` : ''}`)
+                          const serviceDate = snapshotDay(selectedDay) || latestService.historicalDate || latestService.ssd
+                          router.push(
+                            goToServicePath({
+                              id: latestService.uid || latestService.rid,
+                              date: serviceDate,
+                              from: `${location.pathname}${location.search || ''}`,
+                            }),
+                          )
                         }}
                       >
                         Open full service
@@ -660,12 +664,14 @@ const UnitLookupPage: React.FC = () => {
                       description={`${formatDateFromDateTime(svc.start)} · RID ${svc.rid}${svc.position != null ? ` · Pos ${svc.position}` : ''}${svc.reversed ? ' · Reversed' : ''}`}
                       state="default"
                       onClick={() => {
-                        const qp = new URLSearchParams()
                         const serviceDate = snapshotDay(selectedDay)
-                        if (serviceDate) qp.set('date', serviceDate)
-                        if (selectedDay && selectedDay !== 'all') qp.set('unitDay', selectedDay)
-                        qp.set('from', `${location.pathname}${location.search || ''}`)
-                        router.push(`/services/${encodeURIComponent(svc.rid)}${qp.toString() ? `?${qp.toString()}` : ''}`)
+                        router.push(
+                          goToServicePath({
+                            id: svc.rid,
+                            date: serviceDate || ukCalendarYmd(),
+                            from: `${location.pathname}${location.search || ''}`,
+                          }),
+                        )
                       }}
                       ariaLabel={`Open service ${svc.headcode || svc.rid}`}
                     />

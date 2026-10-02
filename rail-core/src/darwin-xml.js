@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { adoptUidOntoRid, hhmm, liveKind, openCatalog, openDayDb, operatingDayYmd, platformText, upsertCall, upsertService } from "./db.js";
+import { extractDarwinAssociationsJson, extractDarwinAssociationsXml, upsertAssociation } from "./associations.js";
 import { publicJourneyEnds } from "./journey-order.js";
 
 function text(el) {
@@ -105,8 +106,13 @@ function parseFormationJson(ts, getCI, pick) {
 
 /** Minimal Darwin PPort XML: extract TS and schedule-like attributes from a raw string. */
 export function parseDarwinPportXml(xml) {
+  const associationsEarly = extractDarwinAssociationsXml(xml);
   const rid = xml.match(/\brid="([^"]+)"/)?.[1];
-  if (!rid) return null;
+  if (!rid) {
+    return associationsEarly.length
+      ? { service: null, calls: [], associations: associationsEarly, fullJourney: false }
+      : null;
+  }
   const uid = xml.match(/\buid="([^"]+)"/)?.[1] ?? null;
   const toc = normalizeToc(xml.match(/\btoc="([^"]+)"/)?.[1]);
   const trainId = xml.match(/\btrainId="([^"]+)"/)?.[1] ?? null;
@@ -176,6 +182,7 @@ export function parseDarwinPportXml(xml) {
     });
   }
   const formation = parseFormationXml(xml);
+  const associations = extractDarwinAssociationsXml(xml);
   if (!locations.length) {
     if (!formation) return null;
     return {
@@ -203,6 +210,7 @@ export function parseDarwinPportXml(xml) {
       },
       calls: [],
       fullJourney: false,
+      associations,
     };
   }
   const calls = mergeCallsByTiploc(locations);
@@ -232,6 +240,7 @@ export function parseDarwinPportXml(xml) {
     },
     calls,
     fullJourney,
+    associations,
   };
 }
 
@@ -482,6 +491,7 @@ export function parseDarwinPportJson(obj) {
     },
     calls,
     fullJourney,
+    associations: extractDarwinAssociationsJson(flat),
   };
 }
 
@@ -609,7 +619,14 @@ export function parseDarwinPayload(raw) {
       }
     }
   }
-  return parseDarwinPportJson(obj);
+  const parsed = parseDarwinPportJson(obj);
+  const extra = extractDarwinAssociationsJson(obj);
+  if (parsed) {
+    parsed.associations = [...(parsed.associations || []), ...extra];
+    return parsed;
+  }
+  if (extra.length) return { service: null, calls: [], associations: extra, fullJourney: false };
+  return parsed;
 }
 
 export function rdmInnerObject(raw) {
@@ -627,12 +644,14 @@ export function rdmInnerObject(raw) {
 
 export function applyParsed(db, parsed) {
   if (!parsed) return false;
+  for (const assoc of parsed.associations || []) upsertAssociation(db, assoc);
+  if (!parsed.service) return Boolean(parsed.associations?.length);
   const overlay = parsed.fullJourney === false;
   upsertService(db, parsed.service, { overlay });
   if (!overlay && parsed.service?.uid && parsed.service?.rid) {
     adoptUidOntoRid(db, parsed.service.uid, parsed.service.rid);
   }
-  for (const call of parsed.calls) upsertCall(db, call, { overlay });
+  for (const call of parsed.calls || []) upsertCall(db, call, { overlay });
   return true;
 }
 

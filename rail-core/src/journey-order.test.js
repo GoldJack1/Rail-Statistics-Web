@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, sortCallsByJourneyTime } from "./journey-order.js";
 
 test("orders a same-evening run from first time to last", () => {
   const rows = [
@@ -39,6 +39,19 @@ test("post-midnight public stops stay after evening stops on the railway day", (
   );
 });
 
+test("keeps a sleeper in order past 02:00", () => {
+  const rows = [
+    { tiploc: "EUS", seq: 0, std: "21:15" },
+    { tiploc: "PRE", seq: 1, sta: "00:30" },
+    { tiploc: "EDB", seq: 2, sta: "04:40" },
+    { tiploc: "INV", seq: 3, sta: "08:37" },
+  ];
+  assert.deepEqual(
+    sortCallsByJourneyTime(rows).map((r) => r.tiploc),
+    ["EUS", "PRE", "EDB", "INV"],
+  );
+});
+
 test("orders a short afternoon service 10:00 to 12:00", () => {
   const rows = [
     { tiploc: "B", seq: 0, std: "11:00" },
@@ -49,4 +62,20 @@ test("orders a short afternoon service 10:00 to 12:00", () => {
     sortCallsByJourneyTime(rows).map((r) => r.tiploc),
     ["A", "B", "C"],
   );
+});
+
+test("collapses the same TIPLOC copied from an adjacent day file", () => {
+  const rows = [
+    { tiploc: "EUS", seq: 0, std: "21:15" },
+    { tiploc: "EDB", seq: 80, sta: "04:40", std: "04:52" },
+    { tiploc: "INV", seq: 119, sta: "08:45" },
+    { tiploc: "EUS", seq: 0, std: "21:15", ata: "21:16" },
+    { tiploc: "EDB", seq: 80, sta: "04:40", std: "04:52" },
+    { tiploc: "INV", seq: 119, sta: "08:45" },
+  ];
+  assert.deepEqual(
+    collapseCallsByTiploc(rows).map((r) => r.tiploc),
+    ["EUS", "EDB", "INV"],
+  );
+  assert.equal(collapseCallsByTiploc(rows)[0].ata, "21:16");
 });

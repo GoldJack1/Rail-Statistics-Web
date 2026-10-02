@@ -4,11 +4,12 @@
  */
 import { platformText } from "./db.js";
 import { tocDisplayName } from "./toc-names.js";
-import { sortCallsByJourneyTime } from "./journey-order.js";
+import { callScheduledMinutes, sortCallsByJourneyTime } from "./journey-order.js";
 import { maskCallAsOf, maskCallsAsOf, maskTrustOverlay, maskTrustOverlayCalls } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
-import { lookupConsistsForUids } from "./ptac-apply.js";
-import { callOnBoardDate, londonInstant } from "./calendar-day.js";
+import { lookupConsistsForUids, unitIdsAtBoardCall } from "./ptac-apply.js";
+import { associationsForRid, combinedDestinationName, filterDisplayAssociations, inferAssociationsFromConsist, mergeAssociations } from "./associations.js";
+import { callOnBoardDate, isOvernightSleeperJourney, londonInstant, ridVisibleOnBoard } from "./calendar-day.js";
 
 const UK_RAIL_ROLLOVER_MINUTES = 2 * 60;
 const LIVE_ACTUAL_HOLD_MS = 30_000;
@@ -41,6 +42,48 @@ export function adjustScheduledInstantForRailwayOvernight(scheduledAt, scheduled
   return scheduledAt;
 }
 
+function overnightSleeperRidSet(db, rows) {
+  const out = new Set();
+  const gwNeedTimes = [];
+  const seen = new Set();
+  for (const r of rows || []) {
+    const rid = r.s_rid || r.rid;
+    if (!rid || seen.has(rid)) continue;
+    seen.add(rid);
+    const toc = String(r.toc || "").toUpperCase();
+    if (toc === "CS") {
+      out.add(rid);
+      continue;
+    }
+    if (toc !== "GW") continue;
+    if (isOvernightSleeperJourney(toc, r.category, null, null)) {
+      out.add(rid);
+      continue;
+    }
+    gwNeedTimes.push(rid);
+  }
+  if (!gwNeedTimes.length) return out;
+  const chunk = 400;
+  for (let i = 0; i < gwNeedTimes.length; i += chunk) {
+    const part = gwNeedTimes.slice(i, i + chunk);
+    const ins = part.map(() => "?").join(",");
+    const calls = db.prepare(`SELECT * FROM calls WHERE rid IN (${ins})`).all(...part);
+    const byRid = new Map();
+    for (const c of calls) {
+      if (!byRid.has(c.rid)) byRid.set(c.rid, []);
+      byRid.get(c.rid).push(c);
+    }
+    for (const rid of part) {
+      const pax = sortCallsByJourneyTime(byRid.get(rid) || []).filter((c) => !Number(c.is_passing));
+      if (pax.length < 2) continue;
+      const first = callScheduledMinutes(pax[0]);
+      const last = callScheduledMinutes(pax[pax.length - 1]);
+      if (isOvernightSleeperJourney("GW", null, first, last)) out.add(rid);
+    }
+  }
+  return out;
+}
+
 function parseHmToMinutes(hhmm) {
   if (!hhmm || typeof hhmm !== "string") return null;
   const m = /^(\d{1,2}):(\d{2})/.exec(hhmm.trim());
@@ -49,6 +92,52 @@ function parseHmToMinutes(hhmm) {
   const mm = Number(m[2]);
   if (!Number.isFinite(h) || !Number.isFinite(mm) || h < 0 || h > 23 || mm < 0 || mm > 59) return null;
   return h * 60 + mm;
+}
+
+function liveRank(row) {
+  const k = String(row.liveKind || "");
+  if (k.startsWith("actual")) return 3;
+  if (k.startsWith("est")) return 2;
+  if (k === "working") return 1;
+  return 0;
+}
+
+function sameBoardTrain(a, b) {
+  if ((a.movement || "departure") !== (b.movement || "departure")) return false;
+  if (Boolean(a.isPassing) !== Boolean(b.isPassing)) return false;
+  const ha = String(a.trainId || "").toUpperCase();
+  const hb = String(b.trainId || "").toUpperCase();
+  if (!ha || ha !== hb) return false;
+  const da = String(a.destinationCrs || "").toUpperCase();
+  const db = String(b.destinationCrs || "").toUpperCase();
+  if (da && db && da !== db) return false;
+  const ta = parseHmToMinutes(a.scheduledTime);
+  const tb = parseHmToMinutes(b.scheduledTime);
+  if (ta == null || tb == null) return false;
+  let d = Math.abs(ta - tb);
+  if (d > 720) d = 1440 - d;
+  return d <= 2;
+}
+
+function preferBoardRow(a, b) {
+  const score = (row) =>
+    liveRank(row) * 10 +
+    (row.unitIds?.length ? 2 : 0) +
+    (row.originCrs ? 1 : 0) +
+    (row.destinationCrs ? 1 : 0) +
+    (row.destinationName ? 1 : 0);
+  return score(a) >= score(b) ? a : b;
+}
+
+/** Same headcode, within 2 minutes — Darwin next-day RID next to today's live row. */
+export function collapseDuplicateBoardRows(rows) {
+  const out = [];
+  for (const row of rows || []) {
+    const i = out.findIndex((keep) => sameBoardTrain(keep, row));
+    if (i < 0) out.push(row);
+    else out[i] = preferBoardRow(out[i], row);
+  }
+  return out.sort((a, b) => String(a.scheduledAt || "").localeCompare(String(b.scheduledAt || "")));
 }
 
 export function computeDelayMinutes(scheduledTime, liveTime, liveKind) {
@@ -189,7 +278,45 @@ export function buildStationBoard({
      FROM calls c JOIN services s ON s.rid = c.rid
      WHERE ${tiplocOnly ? `c.tiploc IN (${placeholders})` : `(c.crs = ? ${tpls.length ? `OR c.tiploc IN (${placeholders})` : ""})`}`
   );
-  const rows = tiplocOnly ? q.all(...tpls) : q.all(code, ...tpls);
+  const allRows = tiplocOnly ? q.all(...tpls) : q.all(code, ...tpls);
+
+  const clock = now instanceof Date ? now : new Date();
+  const historical = Boolean(historicalDate);
+  const dateKey = boardDate || historicalDate || ymd;
+  const skipWindow = Boolean(fullDay) || historical;
+  const horizon = new Date(clock.getTime() + Math.max(1, hours) * 3600_000);
+
+  const sleeperRids = overnightSleeperRidSet(db, allRows);
+  const rows = allRows.filter((raw) => {
+    const r = cisMode ? maskTrustOverlay(maskCallAsOf(raw, at)) : maskCallAsOf(raw, at);
+    const schedClock = r.std || r.sta || r.wtd || r.wta || r.wtp;
+    if (!schedClock || !String(schedClock).includes(":")) return false;
+    if (dateKey && !callOnBoardDate(ymd, schedClock, dateKey)) return false;
+    if (
+      dateKey &&
+      !ridVisibleOnBoard(r.s_rid, schedClock, dateKey, {
+        overnightSleeper: sleeperRids.has(r.s_rid),
+      })
+    ) {
+      return false;
+    }
+    if (skipWindow) return true;
+    let scheduledAt = anchorTime(schedClock, ymd);
+    if (!scheduledAt) return false;
+    scheduledAt = adjustScheduledInstantForRailwayOvernight(scheduledAt, schedClock, railwayOvernight);
+    const clockLive = liveClockFromCall(r, r.std || r.wtd || r.wtp ? "departure" : "arrival");
+    return keepBoardRow({
+      now: clock,
+      horizon,
+      scheduledAt,
+      liveTime: clockLive.time,
+      liveKind: clockLive.kind,
+      ssd: ymd,
+      cancelled: Boolean(r.s_cancelled || r.cancelled),
+      railwayOvernight,
+    });
+  });
+
   if (!consistByUid && catalog) {
     consistByUid = lookupConsistsForUids(
       catalog,
@@ -216,16 +343,11 @@ export function buildStationBoard({
       callsByRid.set(rid, sortCallsByJourneyTime(list));
     }
   }
-
-  const clock = now instanceof Date ? now : new Date();
-  const historical = Boolean(historicalDate);
-  const dateKey = boardDate || historicalDate || ymd;
-  const skipWindow = Boolean(fullDay) || historical;
-  const horizon = new Date(clock.getTime() + Math.max(1, hours) * 3600_000);
   const departures = [];
   const arrivals = [];
   const seenDepRid = new Set();
   const seenArrRid = new Set();
+  const assocByRid = new Map();
 
   for (const raw of rows) {
     const asOf = maskCallsAsOf(callsByRid.get(raw.s_rid) || [], at);
@@ -255,7 +377,6 @@ export function buildStationBoard({
     if (passengersOnly && serviceType !== "passenger" && serviceType !== "rail-replacement") continue;
 
     const schedClock = r.std || r.sta || r.wtd || r.wta || r.wtp;
-    if (dateKey && schedClock && !callOnBoardDate(ymd, schedClock, dateKey)) continue;
 
     const slot = slotOf(r, pax.length ? pax : journey);
     const sourceTpl = String(r.tiploc || "").toUpperCase();
@@ -266,12 +387,45 @@ export function buildStationBoard({
     const toc = r.toc || "";
     const tocName = tocDisplayName(toc) || (toc.length === 2 ? null : r.operator_name) || null;
     const consistRow = consistByUid?.get(String(r.uid || "").toUpperCase()) || null;
-    let unitIds = [];
-    try {
-      unitIds = consistRow?.unit_ids ? JSON.parse(consistRow.unit_ids) : [];
-    } catch {
-      unitIds = [];
+    let consistDoc = null;
+    if (consistRow?.json) {
+      try {
+        consistDoc = typeof consistRow.json === "object" ? consistRow.json : JSON.parse(consistRow.json);
+      } catch {
+        consistDoc = null;
+      }
     }
+    let associations = assocByRid.get(r.s_rid);
+    if (!associations) {
+      associations = filterDisplayAssociations(
+        mergeAssociations(
+          associationsForRid(db, r.s_rid, stationName),
+          consistDoc
+            ? inferAssociationsFromConsist({
+                db,
+                catalog,
+                ymd,
+                svc: { rid: r.s_rid, uid: r.uid },
+                consist: consistDoc,
+                stationName,
+              })
+            : [],
+        ),
+        toc,
+        pax.map((c) => c.tiploc),
+      );
+      assocByRid.set(r.s_rid, associations);
+    }
+    const destNameShown = combinedDestinationName(destName, associations, toc, pax.map((c) => c.tiploc));
+    const associationDestinations = [...new Set(
+      (associations || [])
+        .filter((a) => a.category === "VV" && a.role === "main" && !a.isCancelled && a.otherDestinationName)
+        .map((a) => a.otherDestinationName),
+    )];
+    const movement = r.std || r.wtd ? "departure" : "arrival";
+    const unitIds = consistRow
+      ? unitIdsAtBoardCall(consistRow, { tiploc: sourceTpl, hhmm: schedClock, movement })
+      : [];
     const cancelInfo = r.s_cancelled || r.cancelled ? { source: "ts", reason: r.cancel_reason || "Cancelled" } : null;
     const plat = platformText(r.platform);
     const isPassing = slot === "PP";
@@ -288,8 +442,9 @@ export function buildStationBoard({
       originName,
       originCrs,
       destination: destTpl,
-      destinationName: destName,
+      destinationName: destNameShown,
       destinationCrs: destCrs,
+      associationDestinations,
       via,
       callingAfter: [],
       callingAfterNames: [],
@@ -304,7 +459,7 @@ export function buildStationBoard({
       loadingPercentage: r.loading_percentage ?? null,
       coachLoading: coachLoadingFromCall(r.coach_loading),
       reverseFormation: false,
-      hasAssociations: false,
+      hasAssociations: associations.some((a) => a.category === "VV" && a.role === "main"),
       hasAlerts: false,
       hasConsist: unitIds.length > 0,
       hasFormation: false,
@@ -407,6 +562,8 @@ export function buildStationBoard({
 
   departures.sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
   arrivals.sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+  const depOut = collapseDuplicateBoardRows(departures);
+  const arrOut = collapseDuplicateBoardRows(arrivals);
   const generatedAt = new Date().toISOString();
   const nameTpl = tpls[0] || null;
   const station = (typeof stationName === "function" ? stationName(code, nameTpl) : null) || code;
@@ -425,10 +582,10 @@ export function buildStationBoard({
     historicalAt: at || null,
     windowHours: hours,
     counts: {
-      departures: departures.length,
-      arrivals: arrivals.length,
-      cancelled: [...departures, ...arrivals].filter((s) => s.cancelled).length,
-      withDelay: [...departures, ...arrivals].filter((s) => s.delayReason).length,
+      departures: depOut.length,
+      arrivals: arrOut.length,
+      cancelled: [...depOut, ...arrOut].filter((s) => s.cancelled).length,
+      withDelay: [...depOut, ...arrOut].filter((s) => s.delayReason).length,
       messages: 0,
     },
     messages: [],
@@ -438,9 +595,9 @@ export function buildStationBoard({
       startedAt: generatedAt,
       lastMessageAt: generatedAt,
     },
-    services: departures,
-    departures,
-    arrivals,
+    services: depOut,
+    departures: depOut,
+    arrivals: arrOut,
     timetableFile: "",
   };
 }

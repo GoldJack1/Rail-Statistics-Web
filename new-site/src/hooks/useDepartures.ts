@@ -113,6 +113,7 @@ function seedCache(key: string, snap: DeparturesSnapshot) {
 export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
   const {
     code,
+    hours = 24,
     pollMs = DEFAULT_POLL_MS,
     staleAfterMs = DEFAULT_STALE_MS,
     date,
@@ -122,7 +123,8 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
     initialSnapshot = null,
   } = opts
   const queryAt = historicalDayBoard ? undefined : at
-  const cacheKey = `${code}|${date ?? ''}|${queryAt ?? ''}|${cisMode ? 'cis' : 'wtt'}`
+  const requestHours = historicalDayBoard ? 24 : Math.max(1, Math.min(24, Number(hours) || 24))
+  const cacheKey = `${code}|${date ?? ''}|${queryAt ?? ''}|${cisMode ? 'cis' : 'wtt'}|${requestHours}`
 
   const [awaitingHsp, setAwaitingHsp] = useState(false)
   const [data, setData]     = useState<DeparturesSnapshot | null>(() => {
@@ -175,7 +177,7 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
     inflightKeyRef.current = key
     try {
       const sp = new URLSearchParams()
-      sp.set('hours', '24')
+      sp.set('hours', String(requestHours))
       if (date) sp.set('date', date)
       if (queryAt) sp.set('at', queryAt)
       if (cisMode) sp.set('passengers', '1')
@@ -221,7 +223,7 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
     } finally {
       if (inflightKeyRef.current === key) inflightKeyRef.current = null
     }
-  }, [applySnapshot, queryAt, code, date, cisMode, putCache])
+  }, [applySnapshot, queryAt, code, date, cisMode, putCache, requestHours])
 
   const refetch = useCallback(() => {
     if (!code) return

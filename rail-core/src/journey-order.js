@@ -12,8 +12,9 @@ export function parseHmMinutes(value) {
   return (hh % 24) * 60 + mm;
 }
 
-export function railwayDayMinutes(clockMins) {
+export function railwayDayMinutes(clockMins, overnightLong = false) {
   if (clockMins == null) return null;
+  if (overnightLong) return clockMins < 12 * 60 ? clockMins + 1440 : clockMins;
   return clockMins < RAILWAY_DAY_START_MINUTES ? clockMins + 1440 : clockMins;
 }
 
@@ -23,19 +24,53 @@ export function callScheduledMinutes(c) {
   );
 }
 
-export function journeyKey(minutes, _allMinutes, seq = 0) {
+export function journeyKey(minutes, overnightLong = false, seq = 0) {
   if (minutes == null) return 10_000_000 + (seq ?? 0);
-  return railwayDayMinutes(minutes) * 1000 + (seq ?? 0);
+  return railwayDayMinutes(minutes, overnightLong) * 1000 + (seq ?? 0);
+}
+
+function isOvernightLongRun(rows) {
+  let seenEvening = false;
+  const ordered = [...(rows || [])].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
+  for (const row of ordered) {
+    const mins = callScheduledMinutes(row);
+    if (mins == null) continue;
+    if (mins >= 18 * 60) seenEvening = true;
+    if (seenEvening && mins < 12 * 60) return true;
+  }
+  return false;
+}
+
+function richerCall(a, b) {
+  const score = (c) =>
+    ["ata", "atd", "atp", "eta", "etd", "etp", "sta", "std", "wta", "wtd", "wtp"].reduce(
+      (n, k) => n + (c?.[k] ? 1 : 0),
+      0,
+    );
+  return score(b) > score(a) ? { ...a, ...b } : { ...b, ...a };
+}
+
+/** Adjacent Darwin day files often copy the same RID; keep one row per TIPLOC. */
+export function collapseCallsByTiploc(rows) {
+  const by = new Map();
+  for (const c of rows || []) {
+    const k = String(c.tiploc || "").toUpperCase();
+    if (!k) continue;
+    const prev = by.get(k);
+    by.set(k, prev ? richerCall(prev, c) : c);
+  }
+  return sortCallsByJourneyTime([...by.values()]);
 }
 
 export function sortCallsByJourneyTime(rows) {
-  const all = rows.map(callScheduledMinutes);
-  return [...rows].sort((a, b) => {
+  const list = rows || [];
+  const overnightLong = isOvernightLongRun(list);
+  return [...list].sort((a, b) => {
     const d =
-      journeyKey(callScheduledMinutes(a), all, a.seq) -
-      journeyKey(callScheduledMinutes(b), all, b.seq);
+      journeyKey(callScheduledMinutes(a), overnightLong, a.seq) -
+      journeyKey(callScheduledMinutes(b), overnightLong, b.seq);
     if (d) return d;
-    return String(a.tiploc || "").localeCompare(String(b.tiploc || ""));
+    return (Number(a.seq) || 0) - (Number(b.seq) || 0) || String(a.tiploc || "").localeCompare(String(b.tiploc || ""));
   });
 }
 

@@ -49,8 +49,20 @@ export async function ensureDayImported(ymd) {
           .map((n) => join(TT_DIR, n))
           .sort()
       : [];
-    if (!files[0]) return serviceCount(ymd) > 0;
-    await run(process.execPath, ["src/import-pptimetable.js", files[0], ymd]);
+    if (files[0]) {
+      await run(process.execPath, ["src/import-pptimetable.js", files[0], ymd]);
+      return serviceCount(ymd) > 0;
+    }
+    const cifDir = join(TT_DIR, "cif");
+    const mca = existsSync(cifDir)
+      ? readdirSync(cifDir, { recursive: true })
+          .map((n) => join(cifDir, n))
+          .filter((p) => /MCA|\.cif$/i.test(p))
+          .sort()
+          .at(-1)
+      : null;
+    if (!mca) return serviceCount(ymd) > 0;
+    await run(process.execPath, ["src/import-tt.js", mca, ymd, "0"]);
     return serviceCount(ymd) > 0;
   })();
   importing.set(ymd, job);

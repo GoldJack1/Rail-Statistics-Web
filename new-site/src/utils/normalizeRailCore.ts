@@ -82,6 +82,9 @@ function rowFromRailCore(r: Record<string, unknown>): DepartureRow {
     destination: String(r.destination || r.destinationCrs || ''),
     destinationName: r.destinationName ? String(r.destinationName) : null,
     destinationCrs: r.destinationCrs ? String(r.destinationCrs) : null,
+    associationDestinations: Array.isArray(r.associationDestinations)
+      ? (r.associationDestinations as unknown[]).map((n) => String(n)).filter(Boolean)
+      : [],
     via: typeof r.via === 'string' ? r.via : null,
     callingAfter: Array.isArray(r.callingAfter) ? (r.callingAfter as string[]) : [],
     callingAfterNames: Array.isArray(r.callingAfterNames) ? (r.callingAfterNames as (string | null)[]) : [],
@@ -97,7 +100,7 @@ function rowFromRailCore(r: Record<string, unknown>): DepartureRow {
     unitIds: Array.isArray(r.unitIds) ? (r.unitIds as string[]) : null,
     actualSource: r.actualSource ? String(r.actualSource) : null,
     locationLabel: r.locationLabel ? String(r.locationLabel) : null,
-    hasAssociations: false,
+    hasAssociations: Boolean(r.hasAssociations),
     hasAlerts: false,
     status: String(r.status || (cancelled ? 'Cancelled' : delayMinutes ? `Delayed ${delayMinutes} min` : 'On time')),
   }

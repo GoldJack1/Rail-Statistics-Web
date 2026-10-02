@@ -124,17 +124,27 @@ function stopScheduledMinutes(stop: NonNullable<ServiceDetail['stops']>[number])
   return parseHmMinutes(stop.ptd || stop.pta || stop.wtd || stop.wta || stop.wtp)
 }
 
-function railwayDayMinutes(clockMins: number): number {
+function railwayDayMinutes(clockMins: number, overnightLong = false): number {
+  if (overnightLong) return clockMins < 12 * 60 ? clockMins + 1440 : clockMins;
   return clockMins < RAILWAY_DAY_START_MINUTES ? clockMins + 1440 : clockMins
 }
 
 /** Start of the run → end of the run on the 02:00–01:59 railway day. */
 export function sortStopsByJourneyTime<T extends NonNullable<ServiceDetail['stops']>[number]>(stops: T[]): T[] {
-  return [...stops].sort((a, b) => {
-    const am = stopScheduledMinutes(a)
-    const bm = stopScheduledMinutes(b)
-    const ak = am == null ? 10_000_000 : railwayDayMinutes(am)
-    const bk = bm == null ? 10_000_000 : railwayDayMinutes(bm)
-    return ak - bk
+  let seenEvening = false
+  const overnightLong = stops.some((stop, i, list) => {
+    const m = stopScheduledMinutes(stop)
+    if (m == null) return false
+    if (m >= 18 * 60) seenEvening = true
+    return seenEvening && m < 12 * 60 && i > 0
   })
+  return stops.map((stop, index) => ({ stop, index })).sort((a, b) => {
+    const am = stopScheduledMinutes(a.stop)
+    const bm = stopScheduledMinutes(b.stop)
+    if (am == null && bm == null) return a.index - b.index
+    if (am == null) return 1
+    if (bm == null) return -1
+    const d = railwayDayMinutes(am, overnightLong) - railwayDayMinutes(bm, overnightLong)
+    return d || a.index - b.index
+  }).map((row) => row.stop)
 }

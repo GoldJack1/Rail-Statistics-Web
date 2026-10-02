@@ -58,6 +58,22 @@ export function ssdFromRid(rid) {
   return `${m[1]}-${m[2]}-${m[3]}`;
 }
 
+/**
+ * CS is always a sleeper. GWR Night Riviera is CIF category SL/SZ, or any GW
+ * passenger run that starts in the evening and finishes the next morning.
+ * Do not key this off headcodes — they change.
+ */
+export function isOvernightSleeperJourney(toc, category, firstMins, lastMins) {
+  const t = String(toc || "").toUpperCase();
+  if (t === "CS") return true;
+  if (t !== "GW") return false;
+  const cat = String(category || "").toUpperCase();
+  if (cat === "SL" || cat === "SZ") return true;
+  if (firstMins == null || lastMins == null) return false;
+  // Night Riviera runs into the following morning — not last-trains that finish ~00:00–02:00.
+  return firstMins >= 21 * 60 && lastMins >= 4 * 60 && lastMins < 12 * 60;
+}
+
 /** Day sqlite files to merge for a location search on calendar date D. */
 export function locationBoardDays(boardDate) {
   const d = String(boardDate);
@@ -101,4 +117,20 @@ export function callCalendarYmd(ssd, hhmm) {
 /** True when this call belongs on Darwin railway day `boardDate` (02:00–01:59). */
 export function callOnBoardDate(ssd, hhmm, boardDate) {
   return String(ssd) === String(boardDate);
+}
+
+/**
+ * Next-day Darwin activations (new RID, afternoon times) must not appear on
+ * today's CIS board. Overnight 00:00–01:59 on SSD+1 still belongs here.
+ */
+export function ridVisibleOnBoard(rid, hhmm, boardDate, meta = {}) {
+  const ridDay = ssdFromRid(rid);
+  if (!ridDay || !boardDate) return true;
+  const mins = clockMinutes(hhmm);
+  if (meta.overnightSleeper && ridDay < boardDate) {
+    // After 02:00 this is yesterday's train: keep morning calls, drop last night's 21:00+ origin.
+    return mins != null && mins < 12 * 60;
+  }
+  if (ridDay <= boardDate) return true;
+  return mins != null && mins < 120 && ridDay === addCalendarDays(boardDate, 1);
 }

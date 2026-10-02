@@ -90,7 +90,24 @@ export function lookupConsistsForUids(catalog, ssd, uids) {
   return map;
 }
 
+function unitIdsFromAllocations(json) {
+  const inner = parseJson(json);
+  const ids = [];
+  const seen = new Set();
+  for (const a of inner.allocations || []) {
+    for (const g of a.resourceGroups || []) {
+      const id = g?.unitId != null ? String(g.unitId) : "";
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
 function unitIdsFromRow(row) {
+  const fromJson = unitIdsFromAllocations(row?.json);
+  if (fromJson.length) return fromJson;
   try {
     const ids = JSON.parse(row?.unit_ids || "[]");
     return Array.isArray(ids) ? ids.map(String) : [];
@@ -157,6 +174,45 @@ export function unitIdsFromConsistRow(row) {
   return unitIdsFromRow(row);
 }
 
+function clockMinutes(raw) {
+  const m = String(raw || "").match(/(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/**
+ * Units physically on the train at a board call. Uses PTAC allocation
+ * windows so a detached portion is not shown after the divide.
+ */
+export function unitIdsAtBoardCall(row, { tiploc, hhmm, movement } = {}) {
+  const parsed = parseJson(row?.json);
+  const allocs = parsed.allocations || [];
+  if (!allocs.length) return unitIdsFromRow(row);
+  const here = String(tiploc || "").toUpperCase();
+  const t = clockMinutes(hhmm);
+  const ids = new Set();
+  let matched = false;
+  for (const a of allocs) {
+    const orig = String(a.allocationOrigin?.tiploc || "").toUpperCase();
+    const dest = String(a.allocationDestination?.tiploc || "").toUpperCase();
+    const o = clockMinutes(a.allocationOriginDateTime);
+    const d = clockMinutes(a.allocationDestinationDateTime);
+    let cover = false;
+    if (movement === "departure" && here && orig === here) cover = true;
+    else if (movement === "arrival" && here && dest === here) cover = true;
+    else if (t != null && o != null && d != null) {
+      cover = o <= d ? t >= o && t <= d : t >= o || t <= d;
+    }
+    if (!cover) continue;
+    matched = true;
+    for (const g of a.resourceGroups || []) {
+      if (g.unitId) ids.add(String(g.unitId));
+    }
+  }
+  if (!matched) return unitIdsFromRow(row);
+  return [...ids];
+}
+
 /** Fleet metadata only — does not store the live diagram. */
 function upsertFleet(catalog, unitId, body) {
   const inner = body.json && typeof body.json === "object" ? body.json : {};
@@ -198,20 +254,23 @@ export function applyPtacUnit(catalog, _dbOrBody, maybeBody, fallbackDay) {
 
   const uid = join.uid || "";
   const consistJson = body.json && typeof body.json === "object" ? body.json : { ...(body.json || {}) };
-  let unitIds = [];
-  try {
-    const prev = uid
-      ? catalog.prepare(`SELECT unit_ids FROM consists WHERE uid = ? AND ssd = ? AND origin_hhmm = ?`).get(
-          uid,
-          day,
-          join.originHHMM || "",
-        )
-      : null;
-    unitIds = prev?.unit_ids ? JSON.parse(prev.unit_ids) : [];
-  } catch {
-    unitIds = [];
+  const fromAlloc = unitIdsFromAllocations(consistJson);
+  let unitIds = fromAlloc;
+  if (!unitIds.length) {
+    try {
+      const prev = uid
+        ? catalog.prepare(`SELECT unit_ids FROM consists WHERE uid = ? AND ssd = ? AND origin_hhmm = ?`).get(
+            uid,
+            day,
+            join.originHHMM || "",
+          )
+        : null;
+      unitIds = prev?.unit_ids ? JSON.parse(prev.unit_ids) : [];
+    } catch {
+      unitIds = [];
+    }
+    if (!unitIds.includes(unitId)) unitIds.push(unitId);
   }
-  if (!unitIds.includes(unitId)) unitIds.push(unitId);
 
   if (uid) {
     catalog.prepare(

@@ -17,6 +17,7 @@ import { exportBashPlanPdf } from '@/utils/exportBashPlanPdf'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { filterStationsLikeFaresSearch } from '@/utils/darwinStationFaresSearch'
 import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
+import { goToServicePath } from '@/utils/serviceUrl'
 import '@/styles/browsePageLayout.css'
 import '@/app/bash-planner/BashPlannerPage.css'
 
@@ -528,11 +529,14 @@ const BashPlannerPageClient: React.FC = () => {
                   const historicalMode = Boolean(result.date && result.date < now.date)
                   const hops = result.hops || []
                   const openService = (leg: BashPlanLeg) => {
-                    const qp = new URLSearchParams()
-                    if (result.date || date) qp.set('date', result.date || date)
-                    if (result.at || time) qp.set('at', result.at || time)
-                    qp.set('from', '/bash-planner')
-                    router.push(`/services/${encodeURIComponent(leg.rid)}?${qp.toString()}`)
+                    router.push(
+                      goToServicePath({
+                        id: leg.board?.uid || leg.rid,
+                        date: result.date || date,
+                        at: result.at || time,
+                        from: '/bash-planner',
+                      }),
+                    )
                   }
                   return (
                     <article key={`${hop.fromCrs}-${hop.toCrs}-${index}`} className="bash-hop">
@@ -614,7 +618,7 @@ const BashPlannerPageClient: React.FC = () => {
                           <ul className="bash-leg-list">
                             {hop.riskyConnections.map((risky) => (
                               <li key={`${risky.rid}-${risky.dep}`}>
-                                <Link href={`/services/${encodeURIComponent(risky.rid)}?date=${encodeURIComponent(result.date || date)}&at=${encodeURIComponent(result.at || time)}`}>
+                                <Link href={goToServicePath({ id: risky.rid, date: result.date || date, at: result.at || time, from: '/bash-planner' })}>
                                   Get {risky.trainId || 'train'} at {risky.dep} (+{risky.minsAfterArrival}m) toward {risky.destName}
                                 </Link>
                               </li>

@@ -6,12 +6,22 @@ import { addCalendarDays, locationBoardDays, londonCalendarYmd, londonInstant, s
 import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
-import { sortCallsByJourneyTime } from "./journey-order.js";
-import { buildStationBoard, liveClockFromCall } from "./board-build.js";
+import { collapseCallsByTiploc, sortCallsByJourneyTime } from "./journey-order.js";
+import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
 import { ensureDayImported, ridNeedsHsp, ridsNeedHsp, startBoardHspFill } from "./ensure-history-day.js";
 import { consistDocument, lookupConsist, normalizePtacVehicles, unitIdsFromConsistRow } from "./ptac-apply.js";
+import {
+  associationsForRid,
+  combinedDestinationName,
+  inferAssociationsFromConsist,
+  inferScheduleDivides,
+  mergeAssociations,
+  collapseOvernightAssociates,
+  filterDisplayAssociations,
+  persistInferred,
+} from "./associations.js";
 
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
 const PORT = Number(process.env.QUERY_PORT ?? 4001);
@@ -236,9 +246,9 @@ async function liveDepartures(crs, opts) {
   const cisMode = opts.passengersOnly === true;
   const hours = Math.max(1, Number(opts.hours) || 24);
   const loc = resolveBoardLocation(crs);
-  const snapKey = `${String(crs).toUpperCase()}|${ymd}|${cisMode ? "cis" : "wtt"}|${at || ""}`;
+  const snapKey = `${String(crs).toUpperCase()}|${ymd}|${cisMode ? "cis" : "wtt"}|${hours}|${at || ""}`;
   const hit = boardSnap.get(snapKey);
-  if (hit && Date.now() - hit.at < (ymd < today ? 3_600_000 : 2_500)) return hit.board;
+  if (hit && Date.now() - hit.at < (ymd < today ? 3_600_000 : 4_000)) return hit.board;
 
   const days = locationBoardDays(ymd);
   for (const d of days) {
@@ -266,7 +276,7 @@ async function liveDepartures(crs, opts) {
       matchBy: loc.matchedAs,
       at,
       historicalDate,
-      fullDay: true,
+      fullDay: Boolean(historicalDate) || hours >= 24,
       boardDate: ymd,
       cisMode,
       catalog,
@@ -293,6 +303,10 @@ async function liveDepartures(crs, opts) {
   board.generatedAt = new Date().toISOString();
   board.updatedAt = board.generatedAt;
   boardSnap.set(snapKey, { at: Date.now(), board });
+  if (boardSnap.size > 200) {
+    const oldest = [...boardSnap.entries()].sort((a, b) => a[1].at - b[1].at);
+    for (let i = 0; i < boardSnap.size - 200; i++) boardSnap.delete(oldest[i][0]);
+  }
   return board;
 }
 
@@ -335,6 +349,7 @@ function trimCallsToDestination(rows, svc) {
   const ordered = collapseCalls(rows);
   if (!destCrs && destTpl.length < 3 && destName.length < 3) return ordered;
   let seenPublic = false;
+  const destHits = [];
   const out = [];
   for (const c of ordered) {
     out.push(c);
@@ -344,11 +359,19 @@ function trimCallsToDestination(rows, svc) {
     const crs = String(c.crs || "").toUpperCase();
     const tpl = String(c.tiploc || "").toUpperCase();
     const name = String(stationName(crs, tpl) || "").trim().toUpperCase();
-    if (seenPublic && destCrs && crs === destCrs) break;
-    if (seenPublic && destTpl && tpl === destTpl) break;
-    if (seenPublic && destName && (name === destName || tpl === destName)) break;
+    if (seenPublic && destCrs && crs === destCrs) destHits.push(out.length - 1);
+    if (seenPublic && destTpl && tpl === destTpl) destHits.push(out.length - 1);
+    if (seenPublic && destName && (name === destName || tpl === destName)) destHits.push(out.length - 1);
   }
-  return out.length ? out : ordered;
+  if (!destHits.length) return out.length ? out : ordered;
+  const cut = destHits[destHits.length - 1];
+  const laterAdvertised = out.slice(cut + 1).some((c) => {
+    const pass = Boolean(Number(c.is_passing)) || Boolean(c.wtp && !c.sta && !c.std);
+    if (pass) return false;
+    return Boolean(String(c.crs || "").trim()) && Boolean(c.sta || c.std);
+  });
+  if (laterAdvertised) return out;
+  return out.slice(0, cut + 1);
 }
 
 function parseCoachLoading(raw) {
@@ -403,10 +426,12 @@ function dayHasRid(ymd, rid) {
 function mergeBoardRows(a, b) {
   const map = new Map();
   for (const row of [...(a || []), ...(b || [])]) {
-    const key = `${row.rid}|${row.std || row.sta || ""}|${row.movement || ""}`;
-    if (!map.has(key)) map.set(key, row);
+    const key = `${row.rid}|${row.scheduledTime || ""}|${row.movement || ""}`;
+    const prev = map.get(key);
+    if (!prev) map.set(key, row);
+    else if ((row.liveKind || "").startsWith("actual") && !(prev.liveKind || "").startsWith("actual")) map.set(key, row);
   }
-  return [...map.values()].sort((x, y) => String(x.scheduledAt || "").localeCompare(String(y.scheduledAt || "")));
+  return collapseDuplicateBoardRows([...map.values()]);
 }
 
 function isLiveServiceDay(ymd) {
@@ -414,25 +439,56 @@ function isLiveServiceDay(ymd) {
   return ymd === op || ymd === addCalendarDays(op, -1) || ymd === addCalendarDays(op, 1);
 }
 
-function ridLiveScore(ymd, rid) {
+function findService(db, id, ymd) {
+  const s = String(id || "");
+  if (!s || !db) return null;
+  const byRid = db.prepare(`SELECT * FROM services WHERE rid = ?`).get(s);
+  if (byRid) return byRid;
+  const uid = s.toUpperCase();
+  const rows = db.prepare(`SELECT * FROM services WHERE UPPER(IFNULL(uid,'')) = ?`).all(uid);
+  if (!rows.length) return null;
+  const compact = String(ymd || "").replace(/-/g, "");
+  const dated = compact ? rows.find((r) => String(r.rid || "").startsWith(compact)) : null;
+  if (dated) return dated;
+  const leftover = rows[0];
+  if (compact && leftover) {
+    const sameWorking = db
+      .prepare(
+        `SELECT * FROM services
+         WHERE rid LIKE ?
+           AND IFNULL(headcode, train_id) = ?
+           AND IFNULL(origin_crs,'') = IFNULL(?, '')
+         LIMIT 1`,
+      )
+      .get(`${compact}%`, leftover.headcode || leftover.train_id, leftover.origin_crs);
+    if (sameWorking) return sameWorking;
+  }
+  return leftover;
+}
+
+function ridLiveScore(ymd, id) {
   const db = openDay(ymd);
   if (!db) return -1;
-  if (!db.prepare(`SELECT 1 AS n FROM services WHERE rid = ?`).get(rid)) return -1;
+  const svc = findService(db, id, ymd);
+  if (!svc) return -1;
   return db
     .prepare(
       `SELECT COUNT(*) AS n FROM calls
        WHERE rid = ? AND (ata IS NOT NULL OR atd IS NOT NULL OR eta IS NOT NULL OR etd IS NOT NULL)`,
     )
-    .get(rid).n;
+    .get(svc.rid).n;
 }
 
-function resolveServiceYmd(rid, dateParam) {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateParam || "")) return dateParam;
+function resolveServiceYmd(id, dateParam) {
+  const fromRid = /^\d{8}/.test(String(id)) ? ssdFromRid(id) || ridYmd(id) : null;
+  if (fromRid && dayHasRid(fromRid, id)) return fromRid;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateParam || "")) {
+    if (dayHasRid(dateParam, id)) return dateParam;
+    const nearby = lookupServiceAnyDay(id, dateParam);
+    if (nearby) return nearby.day;
+    return dateParam;
+  }
   const today = operatingDayYmd();
-  const fromRid = ssdFromRid(rid) || ridYmd(rid);
-  // A Darwin rid is often dated tomorrow while the live overlay sits on today's
-  // railway-day file. Prefer the day that actually has live times, with today
-  // and yesterday ahead of a future rid date when scores tie.
   const candidates = [today, addCalendarDays(today, -1), fromRid, addCalendarDays(today, 1)];
   let best = null;
   let bestScore = -1;
@@ -440,7 +496,7 @@ function resolveServiceYmd(rid, dateParam) {
   for (const y of candidates) {
     if (!y || seen.has(y)) continue;
     seen.add(y);
-    const score = ridLiveScore(y, rid);
+    const score = ridLiveScore(y, id);
     if (score > bestScore) {
       bestScore = score;
       best = y;
@@ -457,18 +513,149 @@ function serviceHspPending(db, ymd, rid) {
   return true;
 }
 
+function lookupServiceAnyDay(id, ymd) {
+  const days = [ymd, addCalendarDays(ymd, 1), addCalendarDays(ymd, -1)];
+  for (const day of days) {
+    const db = openDay(day);
+    if (!db) continue;
+    const svc = findService(db, id, day);
+    if (svc) return { db, day, svc };
+  }
+  return null;
+}
+
+function publicEndName(db, svc) {
+  const rows = sortCallsByJourneyTime(
+    db.prepare(`SELECT * FROM calls WHERE rid = ? AND IFNULL(is_passing,0)=0`).all(svc.rid),
+  );
+  const last = rows[rows.length - 1];
+  const first = rows[0];
+  return {
+    origin: stationName(first?.crs, first?.tiploc) || svc.origin_name,
+    dest: stationName(last?.crs, last?.tiploc) || svc.destination_name,
+  };
+}
+
+function gatherServiceCalls(ymd, svc) {
+  const db = openDay(ymd);
+  if (!db) return [];
+  const rows = db.prepare(`SELECT * FROM calls WHERE rid = ?`).all(svc.rid);
+  for (const day of [addCalendarDays(ymd, -1), addCalendarDays(ymd, 1)]) {
+    const other = openDay(day);
+    if (!other) continue;
+    const extra = other.prepare(`SELECT * FROM calls WHERE rid = ?`).all(svc.rid);
+    const seen = new Set(rows.map((c) => `${String(c.tiploc || "").toUpperCase()}|${c.seq ?? ""}`));
+    for (const c of extra) {
+      const key = `${String(c.tiploc || "").toUpperCase()}|${c.seq ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(c);
+    }
+  }
+  return collapseCallsByTiploc(rows);
+}
+
+function concatCallsAtTpl(first, second, tpl) {
+  const t = String(tpl || "").toUpperCase();
+  if (!t || !second.length) return first;
+  let cut = -1;
+  for (let i = 0; i < first.length; i++) {
+    if (String(first[i].tiploc || "").toUpperCase() === t) cut = i;
+  }
+  const head = cut >= 0 ? first.slice(0, cut + 1) : first;
+  let start = 0;
+  for (let i = 0; i < second.length; i++) {
+    if (String(second[i].tiploc || "").toUpperCase() === t) start = i + 1;
+  }
+  return sortCallsByJourneyTime([...head, ...second.slice(start)]);
+}
+
+function hydrateAssociations(ymd, associations) {
+  return (associations || []).map((a) => {
+    const hit = lookupServiceAnyDay(a.otherRid || a.otherUid, ymd);
+    if (!hit) return a;
+    const ends = publicEndName(hit.db, hit.svc);
+    return {
+      ...a,
+      otherRid: hit.svc.rid,
+      otherUid: hit.svc.uid || a.otherUid,
+      otherTrainId: hit.svc.headcode || hit.svc.train_id || a.otherTrainId,
+      otherDestinationName: ends.dest || a.otherDestinationName,
+      otherOriginName: ends.origin || a.otherOriginName,
+    };
+  });
+}
+
+function adjacentServiceDatabases(ymd) {
+  return [addCalendarDays(ymd, -1), ymd, addCalendarDays(ymd, 1)]
+    .filter(Boolean)
+    .map((day) => ({ ymd: day, db: openDay(day) }))
+    .filter((row) => row.db);
+}
+
 async function serviceDetail(ymd, rid, atRaw) {
   const at = parseAtParam(atRaw);
-  if (ymd !== londonCalendarYmd()) await ensureDayImported(ymd);
-  const db = openDay(ymd);
+  for (const day of [ymd, addCalendarDays(ymd, -1), addCalendarDays(ymd, 1)]) {
+    if (day && day !== londonCalendarYmd()) await ensureDayImported(day);
+  }
+  let db = openDay(ymd);
   if (!db) return null;
-  const svc = db.prepare(`SELECT * FROM services WHERE rid = ?`).get(rid);
-  if (!svc) return null;
-  const rawCalls = db
-    .prepare(`SELECT * FROM calls WHERE rid = ? ORDER BY seq, COALESCE(std, sta, wtd, wta, wtp, '99:99')`)
-    .all(rid);
-  const calls = maskCallsAsOf(trimCallsToDestination(sortCallsByJourneyTime(rawCalls), svc), at);
+  let svc = findService(db, rid, ymd);
+  if (!svc) {
+    const hit = lookupServiceAnyDay(rid, ymd);
+    if (!hit) return null;
+    ymd = hit.day;
+    db = hit.db;
+    svc = hit.svc;
+  }
+  const resolvedRid = svc.rid;
+  let rawCalls = gatherServiceCalls(ymd, svc);
+  let storedAssoc = hydrateAssociations(ymd, associationsForRid(db, resolvedRid, stationName));
   const consist = consistForService(ymd, svc);
+  const consistInferred = inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, stationName });
+  const inferredAssoc = hydrateAssociations(
+    ymd,
+    mergeAssociations(
+      consistInferred,
+      inferScheduleDivides({ db, svc, stationName, ymd, databases: adjacentServiceDatabases(ymd) }),
+    ),
+  );
+  const journeyTpls = rawCalls.filter((c) => !Number(c.is_passing)).map((c) => c.tiploc);
+  let associations = filterDisplayAssociations(
+    collapseOvernightAssociates(
+      mergeAssociations(storedAssoc, inferredAssoc),
+      ssdFromRid(resolvedRid) || ymd,
+    ),
+    svc.toc,
+    journeyTpls,
+  );
+  persistInferred(db, resolvedRid, []);
+  const seenPortions = new Set([resolvedRid, svc.uid].filter(Boolean).map((v) => String(v).toUpperCase()));
+  for (const a of associations) {
+    if (a.category !== "NP" || a.isDeleted) continue;
+    const otherId = a.otherUid || a.otherRid;
+    if (!otherId || seenPortions.has(String(otherId).toUpperCase())) continue;
+    const hit = lookupServiceAnyDay(otherId, ymd);
+    if (!hit) continue;
+    seenPortions.add(hit.svc.rid.toUpperCase());
+    if (hit.svc.uid) seenPortions.add(String(hit.svc.uid).toUpperCase());
+    const otherCalls = gatherServiceCalls(hit.day, hit.svc);
+    rawCalls = a.role === "main"
+      ? concatCallsAtTpl(rawCalls, otherCalls, a.tiploc)
+      : concatCallsAtTpl(otherCalls, rawCalls, a.tiploc);
+    associations = filterDisplayAssociations(
+      collapseOvernightAssociates(
+        mergeAssociations(
+          associations,
+          hydrateAssociations(hit.day, associationsForRid(hit.db, hit.svc.rid, stationName)),
+        ),
+        ssdFromRid(resolvedRid) || ymd,
+      ),
+      svc.toc,
+      journeyTpls,
+    );
+  }
+  const calls = maskCallsAsOf(trimCallsToDestination(sortCallsByJourneyTime(rawCalls), svc), at);
   const units = Array.isArray(consist?.allocations)
     ? [...new Set(consist.allocations.flatMap((a) => (a.resourceGroups || []).map((g) => g.unitId).filter(Boolean)))]
     : [];
@@ -525,11 +712,12 @@ async function serviceDetail(ymd, rid, atRaw) {
     coachLoading: parseCoachLoading(c.coach_loading),
     actualSource: c.actualSource,
   }));
-  const hspPending = serviceHspPending(db, ymd, rid);
-  if (hspPending) startBoardHspFill(ymd, [rid]);
+  const hspPending = serviceHspPending(db, ymd, resolvedRid);
+  if (hspPending) startBoardHspFill(ymd, [resolvedRid]);
   const originStop = stops.find((s) => s.slot === "OR") || stops.find((s) => s.crs && s.slot !== "PP");
   const destStop = [...stops].reverse().find((s) => s.slot === "DT") || [...stops].reverse().find((s) => s.crs && s.slot !== "PP");
   const location = computeServiceLocation(calls, { stationName, ymd, now: at ? londonInstant(ymd, at) || new Date() : new Date() });
+  const ownDest = destStop?.name || stationName(destStop?.crs, destStop?.tpl) || svc.destination_name;
   return {
     rid: svc.rid,
     uid: svc.uid,
@@ -542,7 +730,7 @@ async function serviceDetail(ymd, rid, atRaw) {
     origin: originStop?.crs || svc.origin_crs || "",
     originName: originStop?.name || stationName(originStop?.crs, originStop?.tpl) || svc.origin_name,
     destination: destStop?.crs || svc.destination_crs || "",
-    destinationName: destStop?.name || stationName(destStop?.crs, destStop?.tpl) || svc.destination_name,
+    destinationName: combinedDestinationName(ownDest, associations, svc.toc, journeyTpls),
     cancelled: Boolean(svc.cancelled),
     cancellation: null,
     partiallyCancelled: false,
@@ -550,7 +738,7 @@ async function serviceDetail(ymd, rid, atRaw) {
     reverseFormation: false,
     formation: storedFormation(svc.formation),
     consist,
-    associations: [],
+    associations,
     alerts: [],
     units,
     stops,
@@ -740,9 +928,10 @@ const server = createServer(async (req, res) => {
       const date = url.searchParams.get("date");
       const ymd = /^\d{4}-\d{2}-\d{2}$/.test(date || "") ? date : operatingDayYmd();
       const cis = url.searchParams.get("passengers") === "1" || url.searchParams.get("cis") === "1";
+      const hours = Math.max(1, Math.min(24, Number(url.searchParams.get("hours") || 24) || 24));
       const board = await liveDepartures(dep[1], {
         passengersOnly: cis,
-        hours: 24,
+        hours,
         ymd,
         at: url.searchParams.get("at"),
       });

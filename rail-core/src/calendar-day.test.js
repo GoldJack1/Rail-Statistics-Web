@@ -5,8 +5,10 @@ import {
   callCalendarYmd,
   callOnBoardDate,
   darwinWriteDays,
+  isOvernightSleeperJourney,
   locationBoardDays,
   londonCalendarYmd,
+  ridVisibleOnBoard,
   ssdFromRid,
 } from "./calendar-day.js";
 
@@ -26,6 +28,32 @@ test("tomorrow's Darwin rid still overlays a timetable stored on today", () => {
 
 test("a tomorrow-only rid is not copied onto today", () => {
   assert.deepEqual(darwinWriteDays("2026-10-01", "2026-10-02", () => false), ["2026-10-02"]);
+});
+
+test("next-day afternoon Darwin rids stay off today's board", () => {
+  assert.equal(ridVisibleOnBoard("202610037115918", "14:42", "2026-10-02"), false);
+  assert.equal(ridVisibleOnBoard("202610027115900", "14:40", "2026-10-02"), true);
+  assert.equal(ridVisibleOnBoard("202610030000001", "01:15", "2026-10-02"), true);
+});
+
+test("last night's sleeper origin is not tonight's 21:15 after railway-day changeover", () => {
+  const cs = { overnightSleeper: true };
+  assert.equal(ridVisibleOnBoard("202610016704570", "21:15", "2026-10-02", cs), false);
+  assert.equal(ridVisibleOnBoard("202610016704570", "04:40", "2026-10-02", cs), true);
+  assert.equal(ridVisibleOnBoard("202610026704570", "21:15", "2026-10-02", cs), true);
+  const gw = { overnightSleeper: true };
+  assert.equal(ridVisibleOnBoard("202610011234567", "23:45", "2026-10-02", gw), false);
+  assert.equal(ridVisibleOnBoard("202610011234567", "08:15", "2026-10-02", gw), true);
+});
+
+test("GWR sleeper is the overnight pattern, not a particular headcode", () => {
+  assert.equal(isOvernightSleeperJourney("CS", "XX", 21 * 60 + 15, 8 * 60 + 45), true);
+  assert.equal(isOvernightSleeperJourney("GW", "SL", null, null), true);
+  assert.equal(isOvernightSleeperJourney("GW", "XX", 23 * 60 + 45, 8 * 60 + 15), true);
+  assert.equal(isOvernightSleeperJourney("GW", "XX", 21 * 60 + 45, 5 * 60 + 8), true);
+  assert.equal(isOvernightSleeperJourney("GW", "XX", 22 * 60 + 30, 3), false);
+  assert.equal(isOvernightSleeperJourney("GW", "XX", 21 * 60, 22 * 60 + 30), false);
+  assert.equal(isOvernightSleeperJourney("GW", "XX", 18 * 60, 21 * 60), false);
 });
 
 test("overnight 00:00–01:59 stays on the Darwin SSD railway day", () => {
