@@ -80,3 +80,15 @@ test("collapses next-day Darwin twin next to today's live row", () => {
   assert.equal(rows[0].rid, "202610027115900");
   assert.equal(rows[0].scheduledTime, "14:40");
 });
+
+test("departure movement keeps actual-arr while at platform", async () => {
+  const { liveClockFromCall } = await import("./board-build.js");
+  assert.deepEqual(
+    liveClockFromCall({ ata: "17:13", etd: "17:13" }, "departure"),
+    { time: "17:13", kind: "actual-arr" },
+  );
+  assert.deepEqual(
+    liveClockFromCall({ ata: "17:13", atd: "17:15", etd: "17:13" }, "departure"),
+    { time: "17:15", kind: "actual" },
+  );
+});

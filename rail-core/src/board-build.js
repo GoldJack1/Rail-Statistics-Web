@@ -202,10 +202,11 @@ export function liveClockFromCall(call, movement) {
     return { time: null, kind: null };
   }
   if (call.atd) return { time: call.atd, kind: "actual" };
+  // Arrived, not yet departed: treat as at platform even when an ETD is still published.
+  if (call.ata) return { time: call.ata, kind: "actual-arr" };
   if (call.etd) return { time: call.etd, kind: "est" };
   if (call.atp) return { time: call.atp, kind: "actual" };
   if (call.etp) return { time: call.etp, kind: "est" };
-  if (call.ata) return { time: call.ata, kind: "actual-arr" };
   if (call.eta) return { time: call.eta, kind: "est-arr" };
   return { time: null, kind: null };
 }
