@@ -260,7 +260,7 @@ async function liveDepartures(crs, opts) {
   let now = londonNow();
   if (at) {
     const t = londonInstant(ymd, at);
-    if (!Number.isNaN(t.getTime())) now = t;
+    if (t && !Number.isNaN(t.getTime())) now = t;
   }
   let board = emptyBoard(loc.crs, hours, loc.matchedAs);
   for (const fileYmd of days) {
@@ -297,7 +297,8 @@ async function liveDepartures(crs, opts) {
     board.hspPending = false;
   }
   if (historicalDate) board.historicalDate = historicalDate;
-  else board.historicalDate = ymd;
+  else if (at) board.historicalDate = ymd;
+  else board.historicalDate = null;
   if (at) board.historicalAt = at;
   board.windowHours = hours;
   board.matchedAs = loc.matchedAs;

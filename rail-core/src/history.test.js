@@ -374,7 +374,7 @@ test("?at= hides later actuals", () => {
   assert.equal(masked.atd, null);
   const evening = maskCallAsOf({ etd: "23:01", atd: "23:01", live_kind: "actual" }, "11:00");
   assert.equal(evening.atd, null);
-  assert.equal(evening.etd, null);
+  assert.equal(evening.etd, "23:01");
   const trust = maskTrustOverlay({ atd: "16:36", actual_source: "trust", live_kind: "actual" });
   assert.equal(trust.atd, null);
   assert.equal(trust.actual_source, null);

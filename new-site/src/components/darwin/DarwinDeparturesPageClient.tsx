@@ -600,10 +600,17 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       const stopModeMatch = showDetailedInfo
         ? selectedStopModes.includes(stopMode)
         : stopMode === 'calling'
-      const timeMatch = scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
+      const sliceInUi = historicalMode || futureTimetableMode || (datedBoard && !historyTime)
+      const timeMatch = sliceInUi
+        ? scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
+        : true
+      const sliceInUi = historicalMode || futureTimetableMode || (datedBoard && !historyTime)
+      const timeMatch = sliceInUi
+        ? scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
+        : true
       return tocMatch && serviceTypeMatch && stopModeMatch && timeMatch
     })
-  }, [data, selectedTocs, selectedServiceTypes, selectedStopModes, showDetailedInfo, datedBoard, historyTime, historyWindowStart, hours])
+  }, [data, selectedTocs, selectedServiceTypes, selectedStopModes, showDetailedInfo, datedBoard, historyTime, historyWindowStart, hours, historicalMode, futureTimetableMode])
 
   const filteredArrivals = useMemo(() => {
     if (!data) return []
@@ -613,10 +620,13 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       const tocMatch = selectedTocs.includes(tocLabel)
       const rowServiceType = row.serviceType || 'other'
       const serviceTypeMatch = selectedServiceTypes.includes(rowServiceType)
-      const timeMatch = scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
+      const sliceInUi = historicalMode || futureTimetableMode || (datedBoard && !historyTime)
+      const timeMatch = sliceInUi
+        ? scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
+        : true
       return tocMatch && serviceTypeMatch && timeMatch
     })
-  }, [data, selectedTocs, selectedServiceTypes, datedBoard, historyTime, historyWindowStart, hours])
+  }, [data, selectedTocs, selectedServiceTypes, datedBoard, historyTime, historyWindowStart, hours, historicalMode, futureTimetableMode])
 
   const activeFilteredRows =
     boardMode === 'departures' ? filteredDepartures : filteredArrivals

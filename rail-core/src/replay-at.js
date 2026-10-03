@@ -12,12 +12,11 @@ export function clockAfter(at, clock) {
 export function maskCallAsOf(call, at) {
   if (!at || !call) return call;
   const next = { ...call };
+  // Actuals are events: hide those that had not happened yet.
+  // Forecasts are predictions: keep eta/etd/etp even when the predicted clock is after `at`.
   if (next.ata && clockAfter(at, next.ata)) next.ata = null;
   if (next.atd && clockAfter(at, next.atd)) next.atd = null;
   if (next.atp && clockAfter(at, next.atp)) next.atp = null;
-  if (next.eta && clockAfter(at, next.eta)) next.eta = null;
-  if (next.etd && clockAfter(at, next.etd)) next.etd = null;
-  if (next.etp && clockAfter(at, next.etp)) next.etp = null;
   next.live_kind = liveKind(next);
   return next;
 }
