@@ -591,7 +591,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
   if (!db) return null;
   let svc = findService(db, rid, ymd);
   if (!svc) {
-    const hit = lookupServiceAnyDay(rid, ymd);
+    const hit = /^\d{15}$/.test(String(rid || "")) ? lookupServiceAnyDay(rid, ymd) : null;
     if (!hit) return null;
     ymd = hit.day;
     db = hit.db;
