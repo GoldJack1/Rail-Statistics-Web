@@ -107,6 +107,34 @@ export function sortCallsByJourneyTime(rows) {
 }
 
 /** CIF often appends another working after Darwin's public terminus (seq jumps backward in time). */
+function clockGapMinutes(a, b) {
+  const am = parseHmMinutes(a);
+  const bm = parseHmMinutes(b);
+  if (am == null || bm == null) return null;
+  let d = Math.abs(am - bm);
+  if (d > 720) d = 1440 - d;
+  return d;
+}
+
+/** Darwin schedule overlays sometimes copy an actual onto std/sta. Prefer WTT when they disagree. */
+export function recoverBookedPublic(c) {
+  if (!c) return c;
+  const out = { ...c };
+  const std = publicCallTime(c.std, c);
+  const sta = publicCallTime(c.sta, c);
+  if (c.wtd && std && clockGapMinutes(std, c.wtd) >= 8) {
+    if (!c.atd || clockGapMinutes(std, c.atd) <= 2 || clockGapMinutes(std, c.wtd) >= 12) {
+      out.std = String(c.wtd).slice(0, 5);
+    }
+  }
+  if (c.wta && sta && clockGapMinutes(sta, c.wta) >= 8) {
+    if (!c.ata || clockGapMinutes(sta, c.ata) <= 2 || clockGapMinutes(sta, c.wta) >= 12) {
+      out.sta = String(c.wta).slice(0, 5);
+    }
+  }
+  return out;
+}
+
 export function dropCifTailAfterPublicTerminus(rows) {
   const ordered = [...(rows || [])].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
   let lastAdvMins = null;

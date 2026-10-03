@@ -79,4 +79,36 @@ describe('normalizeRailCore', () => {
     expect(detail.stops[1].liveKind).toBe('est')
     expect(detail.stops[1].liveTime).toBe('18:21')
   })
+
+  it('keeps Darwin liveKind when eta/etd were omitted from the payload', () => {
+    const detail = normalizeServiceDetail({
+      rid: 'G15982',
+      uid: 'G15982',
+      trainId: '1P83',
+      stops: [
+        {
+          tpl: 'DEWSBRY',
+          name: 'Dewsbury',
+          crs: 'DEW',
+          slot: 'IP',
+          pta: '17:59',
+          ptd: '18:01',
+          wta: '17:59',
+          wtd: '18:01',
+          wtp: null,
+          ata: null,
+          atd: null,
+          atp: null,
+          eta: null,
+          etd: null,
+          etp: null,
+          liveTime: '18:23',
+          liveKind: 'est',
+        },
+      ],
+    })
+    expect(detail.stops[0].liveKind).toBe('est')
+    expect(detail.stops[0].liveTime).toBe('18:23')
+    expect(detail.stops[0].etd).toBe('18:23')
+  })
 })

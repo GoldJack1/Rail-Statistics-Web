@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, publicJourneyEnds, sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
 
 test("orders a same-evening run from first time to last", () => {
   const rows = [
@@ -119,4 +119,17 @@ test("drops a CIF working glued on after the public terminus", () => {
     dropCifTailAfterPublicTerminus(rows).map((r) => r.tiploc),
     ["MNCRIAP", "LEEDS", "SBRN"],
   );
+});
+
+test("recovers public dep when Darwin copied the actual onto std", () => {
+  const recovered = recoverBookedPublic({
+    tiploc: "MNCRVIC",
+    crs: "MCV",
+    sta: "17:08",
+    std: "16:59",
+    wta: "17:13",
+    wtd: "17:15",
+    atd: "16:59",
+  });
+  assert.equal(recovered.std, "17:15");
 });

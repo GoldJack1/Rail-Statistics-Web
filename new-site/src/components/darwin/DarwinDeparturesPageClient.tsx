@@ -599,7 +599,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       const stopMode: StopModeFilter = row.isPassing ? 'passing' : 'calling'
       const stopModeMatch = showDetailedInfo
         ? selectedStopModes.includes(stopMode)
-        : true
+        : stopMode === 'calling'
       const timeMatch = scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
       return tocMatch && serviceTypeMatch && stopModeMatch && timeMatch
     })

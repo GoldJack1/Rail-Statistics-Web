@@ -35,7 +35,7 @@ function liveFromCall(c: RailCoreCall): { liveTime: string | null; liveKind: Ser
 }
 
 function hydrateStopLive(stop: ServiceStop): ServiceStop {
-  const live = liveFromCall({
+  const derived = liveFromCall({
     ata: stop.ata,
     atd: stop.atd,
     atp: stop.atp,
@@ -47,16 +47,28 @@ function hydrateStopLive(stop: ServiceStop): ServiceStop {
     wtd: stop.wtd,
     wtp: stop.wtp,
   })
-  const booked = stop.ptd || stop.pta || stop.wtd || stop.wta || stop.wtp
-  const liveLooksBooked =
-    live.liveKind === 'scheduled' &&
-    stop.liveTime &&
-    booked &&
-    String(stop.liveTime).slice(0, 5) === String(booked).slice(0, 5)
+  const incomingKind = stop.liveKind
+  const keepIncoming =
+    incomingKind === 'actual' ||
+    incomingKind === 'actual-arr' ||
+    incomingKind === 'est' ||
+    incomingKind === 'est-arr'
+  const liveKind =
+    derived.liveKind && derived.liveKind !== 'scheduled'
+      ? derived.liveKind
+      : keepIncoming
+        ? incomingKind
+        : derived.liveKind || incomingKind || 'scheduled'
+  const liveTime =
+    derived.liveTime ||
+    (liveKind && liveKind !== 'scheduled' && liveKind !== 'working' ? stop.liveTime : null) ||
+    (derived.liveKind === 'working' ? derived.liveTime : null)
   return {
     ...stop,
-    liveTime: live.liveTime ?? (liveLooksBooked ? null : stop.liveTime),
-    liveKind: live.liveKind || stop.liveKind || 'scheduled',
+    liveTime,
+    liveKind,
+    etd: stop.etd || (liveKind === 'est' ? liveTime : stop.etd) || null,
+    eta: stop.eta || (liveKind === 'est-arr' ? liveTime : stop.eta) || null,
   }
 }
 

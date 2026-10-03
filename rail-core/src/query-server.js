@@ -7,7 +7,7 @@ import { longRangeAheadDays } from "./cif-schedule.js";
 import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
-import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isWorkingPass, publicJourneyEnds, sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
 import { isPassengerHeadcode } from "./headcode.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
@@ -543,7 +543,7 @@ function gatherServiceCalls(ymd, svc) {
   const db = openDay(ymd);
   if (!db) return [];
   const rows = db.prepare(`SELECT * FROM calls WHERE rid = ?`).all(svc.rid);
-  return collapseCallsByTiploc(dropCifTailAfterPublicTerminus(rows));
+  return collapseCallsByTiploc(dropCifTailAfterPublicTerminus(rows)).map(recoverBookedPublic);
 }
 
 function concatCallsAtTpl(first, second, tpl) {
