@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useId, useMemo, useState } from 'react'
+import React, { useEffect, useId, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { ActivityPill } from '@/components/darwin/ActivityPill'
@@ -12,6 +12,8 @@ import type { ServiceAssociation, ServiceStop } from '@/types/darwin'
 import { buildStopNameLookup, displayStopName, sortStopsByJourneyTime } from '@/components/darwin/serviceStopLabel'
 import type { ServiceViewMode } from '@/components/darwin/serviceViewMode'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
+import { betweenStationsLabel, inferProgressIndex } from '@/utils/serviceProgress'
+import { railwayDayMinutesFromHhmm } from '@/utils/railwayOperatingDayUk'
 import '@/components/cards/StationsTableView/StationsTableView.css'
 import './ServiceStopList.css'
 
@@ -175,20 +177,20 @@ function isActualLiveKind(kind?: string | null): boolean {
   return kind === 'actual' || kind === 'actual-arr'
 }
 
-function liveLocationIndex(stops: ServiceStop[]): number | null {
-  let last = -1
-  for (let i = 0; i < stops.length; i++) {
-    if (isActualLiveKind(stops[i].liveKind) && !stops[i].cancelledAtStop) last = i
-  }
-  return last >= 0 ? last : null
+function londonNowRailwayMinutes(): number | null {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    hour12: false,
+  }).formatToParts(new Date())
+  const pick = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || '00'
+  return railwayDayMinutesFromHhmm(`${pick('hour')}:${pick('minute')}`)
 }
 
 function isPublicCall(stop: ServiceStop): boolean {
   return slotKind(stop.slot) !== 'pass'
-}
-
-function stopHasDeparted(stop: ServiceStop): boolean {
-  return Boolean(trimSeconds(stop.atd)) || stop.liveKind === 'actual'
 }
 
 function reportedIndex(stops: ServiceStop[], locationTpl?: string | null): number | null {
@@ -196,7 +198,7 @@ function reportedIndex(stops: ServiceStop[], locationTpl?: string | null): numbe
     const i = stops.findIndex((stop) => stop.tpl === locationTpl)
     if (i >= 0) return i
   }
-  return liveLocationIndex(stops)
+  return inferProgressIndex(stops, null)
 }
 
 function simpleProgressLabel(
@@ -204,31 +206,7 @@ function simpleProgressLabel(
   reported: number,
   nameAt: (index: number) => string,
 ): string | null {
-  const at = stops[reported]
-  if (!at || at.cancelledAtStop) return null
-  const kind = slotKind(at.slot)
-  let lastPublic = -1
-  for (let i = 0; i <= reported; i++) {
-    if (isPublicCall(stops[i]) && !stops[i].cancelledAtStop) lastPublic = i
-  }
-  let nextPublic = -1
-  for (let i = reported + 1; i < stops.length; i++) {
-    if (isPublicCall(stops[i]) && !stops[i].cancelledAtStop) {
-      nextPublic = i
-      break
-    }
-  }
-  if (kind === 'destination' || (isPublicCall(at) && !stopHasDeparted(at))) {
-    return lastPublic >= 0 ? `Arrived at ${nameAt(lastPublic)}` : null
-  }
-  if (isPublicCall(at) && stopHasDeparted(at)) {
-    return `Just departed ${nameAt(reported)}`
-  }
-  if (lastPublic >= 0 && nextPublic >= 0) {
-    return `Between ${nameAt(lastPublic)} and ${nameAt(nextPublic)}`
-  }
-  if (lastPublic >= 0) return `Just departed ${nameAt(lastPublic)}`
-  return null
+  return betweenStationsLabel(stops, reported, nameAt)
 }
 
 function delayFromStop(stop: ServiceStop, kind: StopKind): number | null {
@@ -544,6 +522,14 @@ export function ServiceStopList({
     () => (preserveOrder ? stops : sortStopsByJourneyTime(stops)),
     [preserveOrder, stops],
   )
+  const [nowMins, setNowMins] = useState<number | null>(() => londonNowRailwayMinutes())
+  useEffect(() => {
+    if (historical) return
+    const tick = () => setNowMins(londonNowRailwayMinutes())
+    tick()
+    const id = window.setInterval(tick, 15_000)
+    return () => window.clearInterval(id)
+  }, [historical, orderedStops])
   const showPasses = viewMode === 'detailed'
   const visible = orderedStops
     .map((stop, index) => ({ stop, index }))
@@ -555,7 +541,7 @@ export function ServiceStopList({
 
   const reportedFull = historical
     ? null
-    : reportedIndex(orderedStops, location?.last?.tiploc)
+    : inferProgressIndex(orderedStops, nowMins) ?? reportedIndex(orderedStops, location?.last?.tiploc)
   const livePublicFull =
     reportedFull == null
       ? -1

@@ -137,10 +137,16 @@ function earlyLabel(row: DepartureRow, minutes: number, ongoing: boolean): strin
   return time ? `${word} ${mins} early at ${time}` : `${word} ${mins} early`
 }
 
-function delayedWithReasonAndEta(row: DepartureRow): string {
+export function delayedBoardStatusLabel(row: DepartureRow, historicalMode: boolean): string {
   const reason = (row.delayReason?.reason || '').replace(/\s+/g, ' ').trim()
-  const eta = row.liveTime ? String(row.liveTime).slice(0, 5) : ''
-  const detail = [reason, eta ? `Expected at ${eta}` : ''].filter(Boolean).join(' · ')
+  const time = liveClock(row)
+  if (historicalMode) {
+    const isArrivalEvent = row.movement === 'arrival' || row.liveKind === 'actual-arr' || row.liveKind === 'est-arr'
+    const verb = row.isPassing ? 'Passed' : isArrivalEvent ? 'Arrived' : 'Departed'
+    const event = time ? `${verb} at ${time}` : verb
+    return reason ? `Was Delayed\u00a0|\u00a0${event} · ${reason}` : `Was Delayed\u00a0|\u00a0${event}`
+  }
+  const detail = [reason, time ? `Expected at ${time}` : ''].filter(Boolean).join(' · ')
   return detail ? `Delayed\u00a0|\u00a0${detail}` : 'Delayed'
 }
 
@@ -175,7 +181,7 @@ function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: b
   }
 
   if (row.unknownDelay || row.manualUnknownDelay) {
-    return { tone: punctualityTone(delayMinutes, 'delay-16'), label: delayedWithReasonAndEta(row), mode }
+    return { tone: punctualityTone(delayMinutes, 'delay-16'), label: delayedBoardStatusLabel(row, historicalMode), mode }
   }
 
   if (historicalMode && (row.liveKind === 'scheduled' || row.liveKind === 'working')) {
@@ -196,7 +202,7 @@ function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: b
     if (delayMinutes != null && delayMinutes < 0) {
       return { tone: 'early', label: earlyLabel(row, delayMinutes, true), mode }
     }
-    return { tone: punctualityTone(delayMinutes), label: delayedWithReasonAndEta(row), mode }
+    return { tone: punctualityTone(delayMinutes), label: delayedBoardStatusLabel(row, historicalMode), mode }
   }
 
   return { tone: 'ontime', label: 'On Time', mode }

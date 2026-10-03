@@ -396,3 +396,25 @@ test("location at_station when arrived and not departed", () => {
   assert.match(loc.label, /Dewsbury/);
 });
 
+test("location between names the next pass not the next public call", () => {
+  const names = { LDS: "Leeds", CG: "Cross Gates", GF: "Garforth", YRK: "York" };
+  const calls = [
+    { tiploc: "LEEDS", crs: "LDS", seq: 0, sta: "12:00", std: "12:02", ata: "12:00", atd: "12:02", is_passing: 0 },
+    { tiploc: "CRGT", crs: "CG", seq: 1, wtp: "12:06", is_passing: 1 },
+    { tiploc: "GARF", crs: "GF", seq: 2, wtp: "12:10", is_passing: 1 },
+    { tiploc: "YORK", crs: "YRK", seq: 3, sta: "12:25", is_passing: 0 },
+  ];
+  const early = computeServiceLocation(calls, {
+    stationName: (crs) => names[crs],
+    ymd: "2026-10-03",
+    now: new Date("2026-10-03T11:04:00Z"),
+  });
+  assert.equal(early.label, "Between Leeds and Cross Gates");
+  const later = computeServiceLocation(calls, {
+    stationName: (crs) => names[crs],
+    ymd: "2026-10-03",
+    now: new Date("2026-10-03T11:11:00Z"),
+  });
+  assert.equal(later.label, "Between Garforth and York");
+});
+
