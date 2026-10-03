@@ -443,3 +443,45 @@ export function refreshServiceJourney(db, rid, lookupName) {
       destination_crs = ?, destination_name = COALESCE(?, ?) WHERE rid = ?`
   ).run(origin.crs, originName, dest.crs, destName, dest.tiploc, rid);
 }
+
+/** Drop CIF/DTD rows whose RID date is after this day file (next-day ghosts). */
+export function pruneFutureDayRids(db, ymd) {
+  const compact = String(ymd || "").replace(/-/g, "");
+  if (!/^\d{8}$/.test(compact)) return { services: 0, calls: 0 };
+  const extra = db.prepare(`SELECT rid FROM services WHERE substr(rid, 1, 8) > ?`).all(compact);
+  if (!extra.length) return { services: 0, calls: 0 };
+  const delCalls = db.prepare(`DELETE FROM calls WHERE rid = ?`);
+  const delSvc = db.prepare(`DELETE FROM services WHERE rid = ?`);
+  let calls = 0;
+  db.exec("BEGIN");
+  for (const row of extra) {
+    calls += delCalls.run(row.rid).changes;
+    delSvc.run(row.rid);
+  }
+  db.exec("COMMIT");
+  return { services: extra.length, calls };
+}
+
+export function snapshotCallLive(db, rid) {
+  return db
+    .prepare(
+      `SELECT tiploc, ata, atd, atp, eta, etd, etp, live_kind, actual_source, platform
+       FROM calls WHERE rid = ?
+         AND (ata IS NOT NULL OR atd IS NOT NULL OR atp IS NOT NULL
+           OR eta IS NOT NULL OR etd IS NOT NULL OR etp IS NOT NULL)`,
+    )
+    .all(rid);
+}
+
+export function restoreCallLive(db, rid, rows) {
+  const stmt = db.prepare(
+    `UPDATE calls SET
+        ata=COALESCE(@ata, ata), atd=COALESCE(@atd, atd), atp=COALESCE(@atp, atp),
+        eta=COALESCE(@eta, eta), etd=COALESCE(@etd, etd), etp=COALESCE(@etp, etp),
+        live_kind=COALESCE(@live_kind, live_kind),
+        actual_source=COALESCE(@actual_source, actual_source),
+        platform=COALESCE(@platform, platform)
+     WHERE rid=@rid AND tiploc=@tiploc`,
+  );
+  for (const row of rows || []) stmt.run({ ...row, rid });
+}

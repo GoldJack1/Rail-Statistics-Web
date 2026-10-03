@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { liveKind, openDayDb, operatingDayYmd, upsertCall, upsertService } from "./db.js";
+import { liveKind, openDayDb, operatingDayYmd, pruneFutureDayRids, upsertCall, upsertService } from "./db.js";
 import { applyParsed, parseDarwinPayload, parseDarwinPportXml } from "./darwin-xml.js";
 
 test("operating day rolls at 02:00 UK conceptually (returns yyyy-mm-dd)", () => {
@@ -606,5 +606,33 @@ test("Darwin overlay still adopts a CIF uid stub onto the 15-digit RID", () => {
   });
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM services WHERE uid='L89273'`).get().n, 1);
   assert.equal(db.prepare(`SELECT rid, toc FROM services WHERE uid='L89273'`).get().rid, "202610037689273");
+  db.close();
+});
+
+test("pruneFutureDayRids drops next-day RIDs from today's file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rail-core-"));
+  const db = openDayDb(dir, "2026-10-03");
+  upsertService(db, {
+    rid: "202610037115982",
+    uid: "G15982",
+    service_type: "passenger",
+    cancelled: 0,
+    is_charter: 0,
+    updated_at: 1,
+  });
+  upsertService(db, {
+    rid: "202610046724632",
+    uid: "C24632",
+    service_type: "passenger",
+    cancelled: 0,
+    is_charter: 0,
+    updated_at: 1,
+  });
+  upsertCall(db, { rid: "202610037115982", tiploc: "MNCRVIC", seq: 0, std: "17:00" });
+  upsertCall(db, { rid: "202610046724632", tiploc: "MNCRIAP", seq: 0, std: "16:44" });
+  const pruned = pruneFutureDayRids(db, "2026-10-03");
+  assert.equal(pruned.services, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM services`).get().n, 1);
+  assert.equal(db.prepare(`SELECT rid FROM services`).get().rid, "202610037115982");
   db.close();
 });
