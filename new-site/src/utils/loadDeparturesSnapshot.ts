@@ -23,7 +23,8 @@ export async function loadDeparturesSnapshot(opts: {
     const res = await fetch(url, {
       headers,
       cache: 'no-store',
-      signal: AbortSignal.timeout(25000),
+      // Live windows are cheap; don't hold HTML for a 24h board-style timeout.
+      signal: AbortSignal.timeout(opts.hours >= 24 ? 25_000 : 8_000),
     })
     if (!res.ok) return null
     return normalizeDeparturesSnapshot(await res.json(), code)
