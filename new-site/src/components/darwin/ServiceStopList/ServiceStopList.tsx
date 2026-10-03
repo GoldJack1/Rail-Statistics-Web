@@ -162,7 +162,8 @@ function buildStopStatus(
     verb = ''
   } else if (hasEst && !hasActual) verb = 'Expected'
   else if (hasActual && kind === 'pass') verb = 'Passed'
-  else if (hasActual && (kind === 'destination' || stop.liveKind === 'actual-arr')) verb = 'Stopped'
+  else if (hasActual && kind === 'destination') verb = 'Arrived'
+  else if (hasActual && stop.liveKind === 'actual-arr') verb = 'Stopped'
   else if (hasActual) verb = 'Departed'
 
   const delay = (hasActual || hasEst) ? formatDelayLabel(deltaMinutes) : ''
@@ -555,8 +556,21 @@ export function ServiceStopList({
         ? visible.findIndex(({ index }) => index === livePublicFull)
         : visible.findIndex(({ index }) => index === reportedFull)
   const liveIdx = liveMatch >= 0 ? liveMatch : null
+  const liveVisible = liveIdx != null ? visible[liveIdx]?.stop : null
+  const arrivedAtDestination = Boolean(
+    liveVisible &&
+      slotKind(liveVisible.slot) === 'destination' &&
+      (trimSeconds(liveVisible.ata) ||
+        liveVisible.liveKind === 'actual-arr' ||
+        trimSeconds(liveVisible.atd) ||
+        liveVisible.liveKind === 'actual'),
+  )
+  const liveHighlightIdx = arrivedAtDestination ? null : liveIdx
   const progressText =
-    viewMode === 'simple' && reportedFull != null && liveIdx != null && liveIdx >= 0
+    viewMode === 'simple' &&
+    reportedFull != null &&
+    liveHighlightIdx != null &&
+    liveHighlightIdx >= 0
       ? simpleProgressLabel(orderedStops, reportedFull, (index) =>
           displayStopName(orderedStops, index, lookup),
         )
@@ -602,7 +616,7 @@ export function ServiceStopList({
           {visible.map(({ stop, index }, stripeIndex) => (
             <tbody
               key={`${stop.tpl}-${stop.slot}-${index}`}
-              className={liveIdx === stripeIndex ? 'svc-stop--live-group' : undefined}
+              className={liveHighlightIdx === stripeIndex ? 'svc-stop--live-group' : undefined}
             >
               <ServiceStopRow
                 stop={stop}
@@ -616,7 +630,7 @@ export function ServiceStopList({
                 returnTo={returnTo}
                 delayReason={delayReason}
                 alertText={alertText}
-                progressText={viewMode === 'simple' && liveIdx === stripeIndex ? progressText : null}
+                progressText={viewMode === 'simple' && liveHighlightIdx === stripeIndex ? progressText : null}
                 delayMinutes={delayMinutesByStripe[stripeIndex]}
               />
               {showAssociations

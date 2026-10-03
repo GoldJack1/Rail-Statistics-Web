@@ -77,8 +77,11 @@ export function betweenStationsLabel(
   if (!at || at.cancelledAtStop) return null
   const publicCall = !isPassSlot(at.slot)
   const departed = Boolean(trimSeconds(at.atd)) || at.liveKind === 'actual'
-  if (publicCall && !departed) return `Arrived at ${nameAt(reported)}`
   const next = nextOpenIndex(stops, reported)
+  if (publicCall && !departed) {
+    if (next == null) return null
+    return `Arrived at ${nameAt(reported)}`
+  }
   if (next == null) return publicCall ? `Just departed ${nameAt(reported)}` : null
   return `Between ${nameAt(reported)} and ${nameAt(next)}`
 }

@@ -61,4 +61,12 @@ describe('betweenStationsLabel', () => {
     expect(betweenStationsLabel(leedsYork, 0, (i) => leedsYork[i].name)).toBe('Between Leeds and Cross Gates')
     expect(betweenStationsLabel(leedsYork, 1, (i) => leedsYork[i].name)).toBe('Between Cross Gates and Garforth')
   })
+
+  it('does not add an Arrived-at caption once the train is at the destination', () => {
+    const arrived = [
+      ...leedsYork.slice(0, -1),
+      stop('YORK', 'York', 'DT', { pta: '12:25', ata: '12:26', liveKind: 'actual-arr' }),
+    ]
+    expect(betweenStationsLabel(arrived, 6, (i) => arrived[i].name)).toBeNull()
+  })
 })
