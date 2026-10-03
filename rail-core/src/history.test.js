@@ -374,7 +374,10 @@ test("?at= hides later actuals", () => {
   assert.equal(masked.atd, null);
   const evening = maskCallAsOf({ etd: "23:01", atd: "23:01", live_kind: "actual" }, "11:00");
   assert.equal(evening.atd, null);
-  assert.equal(evening.etd, null);
+  assert.equal(evening.etd, "23:01");
+  const actualOnly = maskCallAsOf({ atd: "18:23", etd: null, live_kind: "actual" }, "18:00");
+  assert.equal(actualOnly.atd, null);
+  assert.equal(actualOnly.etd, "18:23");
   const trust = maskTrustOverlay({ atd: "16:36", actual_source: "trust", live_kind: "actual" });
   assert.equal(trust.atd, null);
   assert.equal(trust.actual_source, null);
@@ -391,5 +394,27 @@ test("location at_station when arrived and not departed", () => {
   );
   assert.equal(loc.phase, "at_station");
   assert.match(loc.label, /Dewsbury/);
+});
+
+test("location between names the next pass not the next public call", () => {
+  const names = { LDS: "Leeds", CG: "Cross Gates", GF: "Garforth", YRK: "York" };
+  const calls = [
+    { tiploc: "LEEDS", crs: "LDS", seq: 0, sta: "12:00", std: "12:02", ata: "12:00", atd: "12:02", is_passing: 0 },
+    { tiploc: "CRGT", crs: "CG", seq: 1, wtp: "12:06", is_passing: 1 },
+    { tiploc: "GARF", crs: "GF", seq: 2, wtp: "12:10", is_passing: 1 },
+    { tiploc: "YORK", crs: "YRK", seq: 3, sta: "12:25", is_passing: 0 },
+  ];
+  const early = computeServiceLocation(calls, {
+    stationName: (crs) => names[crs],
+    ymd: "2026-10-03",
+    now: new Date("2026-10-03T11:04:00Z"),
+  });
+  assert.equal(early.label, "Between Leeds and Cross Gates");
+  const later = computeServiceLocation(calls, {
+    stationName: (crs) => names[crs],
+    ymd: "2026-10-03",
+    now: new Date("2026-10-03T11:11:00Z"),
+  });
+  assert.equal(later.label, "Between Garforth and York");
 });
 

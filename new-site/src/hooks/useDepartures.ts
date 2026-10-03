@@ -3,6 +3,7 @@ import type { DeparturesSnapshot } from '@/types/darwin'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { normalizeDeparturesSnapshot } from '@/utils/normalizeRailCore'
 import { recallBoard, rememberBoard, rememberRecentCrs } from '@/utils/darwinHotCache'
+import { currentRailwayOperatingDayIso } from '@/utils/railwayOperatingDayUk'
 
 export type DeparturesStatus =
   | 'idle'
@@ -140,7 +141,8 @@ export function useDepartures(opts: UseDeparturesOptions): UseDeparturesResult {
     }
     return null
   })
-  const effectivePollMs = awaitingHsp ? 4_000 : date ? 0 : pollMs
+  const frozenSnapshot = Boolean(at) || Boolean(historicalDayBoard) || Boolean(date && date !== currentRailwayOperatingDayIso())
+  const effectivePollMs = awaitingHsp ? 4_000 : frozenSnapshot ? 0 : pollMs
   const [error, setError]   = useState<string | null>(null)
   const [status, setStatus] = useState<DeparturesStatus>(() => {
     if (!code) return 'idle'

@@ -298,7 +298,8 @@ export function upsertCall(db, row, opts = {}) {
         `UPDATE calls SET
           crs=COALESCE(crs, @crs),
           wta=COALESCE(wta, @wta), wtd=COALESCE(wtd, @wtd), wtp=COALESCE(wtp, @wtp),
-          sta=COALESCE(sta, @sta), std=COALESCE(std, @std)
+          sta=COALESCE(sta, @sta), std=COALESCE(std, @std),
+          platform=COALESCE(platform, @platform)
          WHERE rid=@rid AND tiploc=@tiploc`,
       ).run({
         rid: payload.rid,
@@ -309,6 +310,7 @@ export function upsertCall(db, row, opts = {}) {
         wtp: payload.wtp,
         sta: payload.sta,
         std: payload.std,
+        platform: payload.platform,
       });
       return;
     }
@@ -438,6 +440,68 @@ export function refreshServiceJourney(db, rid, lookupName) {
   const destName = lookupName ? lookupName(dest.crs, dest.tiploc) : null;
   db.prepare(
     `UPDATE services SET origin_crs = ?, origin_name = COALESCE(?, origin_name),
-      destination_crs = ?, destination_name = COALESCE(?, destination_name) WHERE rid = ?`
-  ).run(origin.crs, originName, dest.crs, destName, rid);
+      destination_crs = ?, destination_name = COALESCE(?, ?) WHERE rid = ?`
+  ).run(origin.crs, originName, dest.crs, destName, dest.tiploc, rid);
+}
+
+function deleteRids(db, extra) {
+  if (!extra.length) return { services: 0, calls: 0 };
+  const delCalls = db.prepare(`DELETE FROM calls WHERE rid = ?`);
+  const delSvc = db.prepare(`DELETE FROM services WHERE rid = ?`);
+  let calls = 0;
+  db.exec("BEGIN");
+  for (const row of extra) {
+    calls += delCalls.run(row.rid).changes;
+    delSvc.run(row.rid);
+  }
+  db.exec("COMMIT");
+  return { services: extra.length, calls };
+}
+
+/** Drop CIF/DTD rows whose RID date is after this day file (next-day ghosts). */
+export function pruneFutureDayRids(db, ymd) {
+  const compact = String(ymd || "").replace(/-/g, "");
+  if (!/^\d{8}$/.test(compact)) return { services: 0, calls: 0 };
+  const extra = db.prepare(`SELECT rid FROM services WHERE substr(rid, 1, 8) > ?`).all(compact);
+  return deleteRids(db, extra);
+}
+
+/** YYYYMMDD+UID stubs left on a Darwin operating day (no 15-digit RID). */
+export function pruneCifUidStubRids(db) {
+  const hasDarwin = db
+    .prepare(
+      `SELECT 1 AS ok FROM services WHERE rid GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]' LIMIT 1`,
+    )
+    .get();
+  if (!hasDarwin) return { services: 0, calls: 0 };
+  const extra = db
+    .prepare(
+      `SELECT rid FROM services WHERE rid NOT GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'`,
+    )
+    .all();
+  return deleteRids(db, extra);
+}
+
+export function snapshotCallLive(db, rid) {
+  return db
+    .prepare(
+      `SELECT tiploc, ata, atd, atp, eta, etd, etp, live_kind, actual_source, platform
+       FROM calls WHERE rid = ?
+         AND (ata IS NOT NULL OR atd IS NOT NULL OR atp IS NOT NULL
+           OR eta IS NOT NULL OR etd IS NOT NULL OR etp IS NOT NULL)`,
+    )
+    .all(rid);
+}
+
+export function restoreCallLive(db, rid, rows) {
+  const stmt = db.prepare(
+    `UPDATE calls SET
+        ata=COALESCE(@ata, ata), atd=COALESCE(@atd, atd), atp=COALESCE(@atp, atp),
+        eta=COALESCE(@eta, eta), etd=COALESCE(@etd, etd), etp=COALESCE(@etp, etp),
+        live_kind=COALESCE(@live_kind, live_kind),
+        actual_source=COALESCE(@actual_source, actual_source),
+        platform=COALESCE(@platform, platform)
+     WHERE rid=@rid AND tiploc=@tiploc`,
+  );
+  for (const row of rows || []) stmt.run({ ...row, rid });
 }

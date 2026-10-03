@@ -30,7 +30,6 @@ import { prefetchDarwinService } from '@/hooks/useServiceDetail'
 import { goToServicePath } from '@/utils/serviceUrl'
 import { boardDestinationLabel } from '@/utils/splitWorking'
 import { formatLmTocName } from '@/utils/formatLmTocName'
-import { isoDateToDdMmYyyy } from '@/utils/dateDdMmYyyy'
 import '@/styles/browsePageLayout.css'
 import '@/app/departures/DarwinDeparturesPage.css'
 
@@ -177,6 +176,7 @@ function writeFormationPreference(enabled: boolean): void {
 type DarwinDepartureRowCardProps = {
   row: DepartureRow
   historicalMode: boolean
+  pastTimes: boolean
   detailedInfo: boolean
   showFormation: boolean
   code: string
@@ -192,6 +192,7 @@ type DarwinDepartureRowCardProps = {
 const DarwinDepartureRowCard = React.memo(function DarwinDepartureRowCard({
   row,
   historicalMode,
+  pastTimes,
   detailedInfo,
   showFormation,
   code,
@@ -237,6 +238,7 @@ const DarwinDepartureRowCard = React.memo(function DarwinDepartureRowCard({
       <DarwinServiceCard
         row={row}
         historicalMode={historicalMode}
+        pastTimes={pastTimes}
         detailedInfo={detailedInfo}
         showFormation={showFormation}
         onClick={onClick}
@@ -599,11 +601,14 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       const stopMode: StopModeFilter = row.isPassing ? 'passing' : 'calling'
       const stopModeMatch = showDetailedInfo
         ? selectedStopModes.includes(stopMode)
+        : stopMode === 'calling'
+      const sliceInUi = historicalMode || futureTimetableMode || (datedBoard && !historyTime)
+      const timeMatch = sliceInUi
+        ? scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
         : true
-      const timeMatch = scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
       return tocMatch && serviceTypeMatch && stopModeMatch && timeMatch
     })
-  }, [data, selectedTocs, selectedServiceTypes, selectedStopModes, showDetailedInfo, datedBoard, historyTime, historyWindowStart, hours])
+  }, [data, selectedTocs, selectedServiceTypes, selectedStopModes, showDetailedInfo, datedBoard, historyTime, historyWindowStart, hours, historicalMode, futureTimetableMode])
 
   const filteredArrivals = useMemo(() => {
     if (!data) return []
@@ -613,10 +618,13 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       const tocMatch = selectedTocs.includes(tocLabel)
       const rowServiceType = row.serviceType || 'other'
       const serviceTypeMatch = selectedServiceTypes.includes(rowServiceType)
-      const timeMatch = scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
+      const sliceInUi = historicalMode || futureTimetableMode || (datedBoard && !historyTime)
+      const timeMatch = sliceInUi
+        ? scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
+        : true
       return tocMatch && serviceTypeMatch && timeMatch
     })
-  }, [data, selectedTocs, selectedServiceTypes, datedBoard, historyTime, historyWindowStart, hours])
+  }, [data, selectedTocs, selectedServiceTypes, datedBoard, historyTime, historyWindowStart, hours, historicalMode, futureTimetableMode])
 
   const activeFilteredRows =
     boardMode === 'departures' ? filteredDepartures : filteredArrivals
@@ -828,9 +836,8 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
               </div>
 
               <SidebarDropdownSection
-                key={hasStationSelected ? 'search-station' : 'search-home'}
                 title="Search"
-                defaultExpanded={!hasStationSelected}
+                defaultExpanded
               >
                 <div className="search-container tickets-od-stack">
                   <TXTINPBUTIconWideButtonSearch
@@ -933,10 +940,9 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
               </SidebarDropdownSection>
 
               <SidebarDropdownSection
-                key={hasStationSelected ? 'datetime-station' : 'datetime-home'}
                 title="Date and time"
                 className="dep-datetime-section"
-                defaultExpanded={!hasStationSelected}
+                defaultExpanded
               >
                 <div className="dep-history-controls">
                   <button
@@ -949,32 +955,21 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   </button>
                   <div className="dep-history-field">
                     <span className="dep-filter-label">Date</span>
-                    <div className="dep-picker-shell">
-                      <TXTINPBUTWideButton
-                        id="dep-history-date-display"
-                        value={isoDateToDdMmYyyy(historyDateDraft)}
-                        placeholder="DD/MM/YYYY"
-                        readOnly
-                        tabIndex={-1}
-                        showClear={false}
-                        ariaLabel="Date"
-                        colorVariant="primary"
-                      />
-                      <input
-                        id="dep-history-date"
-                        className="dep-native-picker-input"
-                        type="date"
-                        lang="en-GB"
-                        value={historyDateDraft}
-                        min={minPickerDateIso}
-                        max={maxFutureDateIso}
-                        aria-label="Choose date"
-                        onChange={(event) => {
-                          setHistoryDateDraft(event.target.value)
-                          if (historyDateError) setHistoryDateError(null)
-                        }}
-                      />
-                    </div>
+                    <TXTINPBUTWideButton
+                      id="dep-history-date"
+                      type="date"
+                      lang="en-GB"
+                      value={historyDateDraft}
+                      min={minPickerDateIso}
+                      max={maxFutureDateIso}
+                      onChange={(value) => {
+                        setHistoryDateDraft(value)
+                        if (historyDateError) setHistoryDateError(null)
+                      }}
+                      showClear={false}
+                      ariaLabel="Date"
+                      colorVariant="primary"
+                    />
                   </div>
                   <div className="dep-history-field">
                     <span className="dep-filter-label">Time</span>
@@ -1176,6 +1171,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                         key={`${row.rid}-${row.movement ?? 'departure'}`}
                         row={row}
                         historicalMode={historicalMode}
+                        pastTimes={historicalMode || timedCurrentDayMode}
                         code={code}
                         hours={hours}
                         historyDate={historyDate}

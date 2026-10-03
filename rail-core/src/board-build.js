@@ -4,7 +4,8 @@
  */
 import { platformText } from "./db.js";
 import { tocDisplayName } from "./toc-names.js";
-import { callScheduledMinutes, sortCallsByJourneyTime } from "./journey-order.js";
+import { callScheduledMinutes, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
+import { isPassengerHeadcode } from "./headcode.js";
 import { maskCallAsOf, maskCallsAsOf, maskTrustOverlay, maskTrustOverlayCalls } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
 import { lookupConsistsForUids, unitIdsAtBoardCall } from "./ptac-apply.js";
@@ -105,26 +106,32 @@ function liveRank(row) {
 function sameBoardTrain(a, b) {
   if ((a.movement || "departure") !== (b.movement || "departure")) return false;
   if (Boolean(a.isPassing) !== Boolean(b.isPassing)) return false;
+  const ta = parseHmToMinutes(a.scheduledTime);
+  const tb = parseHmToMinutes(b.scheduledTime);
+  if (ta == null || tb == null) return false;
+  let d = Math.abs(ta - tb);
+  if (d > 720) d = 1440 - d;
+  if (d > 2) return false;
+  const ua = String(a.uid || "").toUpperCase();
+  const ub = String(b.uid || "").toUpperCase();
+  if (ua && ub && ua === ub) return true;
   const ha = String(a.trainId || "").toUpperCase();
   const hb = String(b.trainId || "").toUpperCase();
   if (!ha || ha !== hb) return false;
   const da = String(a.destinationCrs || "").toUpperCase();
   const db = String(b.destinationCrs || "").toUpperCase();
   if (da && db && da !== db) return false;
-  const ta = parseHmToMinutes(a.scheduledTime);
-  const tb = parseHmToMinutes(b.scheduledTime);
-  if (ta == null || tb == null) return false;
-  let d = Math.abs(ta - tb);
-  if (d > 720) d = 1440 - d;
-  return d <= 2;
+  return true;
 }
 
 function preferBoardRow(a, b) {
   const score = (row) =>
+    (/^\d{15}$/.test(String(row.rid || "")) ? 20 : 0) +
     liveRank(row) * 10 +
     (row.unitIds?.length ? 2 : 0) +
     (row.originCrs ? 1 : 0) +
     (row.destinationCrs ? 1 : 0) +
+    (row.toc ? 1 : 0) +
     (row.destinationName ? 1 : 0);
   return score(a) >= score(b) ? a : b;
 }
@@ -212,13 +219,11 @@ export function liveClockFromCall(call, movement) {
 }
 
 function isPassengerCall(c) {
-  if (Number(c.is_passing)) return false;
-  if (!c.crs) return false;
-  return Boolean(c.sta || c.std);
+  return isPublicPassengerCall(c);
 }
 
 function slotOf(call, journey) {
-  if (Number(call.is_passing) || (!call.sta && !call.std && call.wtp)) return "PP";
+  if (Number(call.is_passing) || isWorkingPass(call)) return "PP";
   const pax = journey.filter(isPassengerCall);
   if (!pax.length) return "IP";
   if (pax[0] === call || (pax[0].tiploc === call.tiploc && pax[0].seq === call.seq)) return "OR";
@@ -289,7 +294,7 @@ export function buildStationBoard({
 
   const sleeperRids = overnightSleeperRidSet(db, allRows);
   const rows = allRows.filter((raw) => {
-    const r = cisMode ? maskTrustOverlay(maskCallAsOf(raw, at)) : maskCallAsOf(raw, at);
+    const r = recoverBookedPublic(cisMode ? maskTrustOverlay(maskCallAsOf(raw, at)) : maskCallAsOf(raw, at));
     const schedClock = r.std || r.sta || r.wtd || r.wta || r.wtp;
     if (!schedClock || !String(schedClock).includes(":")) return false;
     if (dateKey && !callOnBoardDate(ymd, schedClock, dateKey)) return false;
@@ -341,7 +346,7 @@ export function buildStationBoard({
       }
     }
     for (const [rid, list] of callsByRid) {
-      callsByRid.set(rid, sortCallsByJourneyTime(list));
+      callsByRid.set(rid, sortCallsByJourneyTime(dropCifTailAfterPublicTerminus(list)));
     }
   }
   const departures = [];
@@ -353,14 +358,14 @@ export function buildStationBoard({
   for (const raw of rows) {
     const asOf = maskCallsAsOf(callsByRid.get(raw.s_rid) || [], at);
     const journey = cisMode ? maskTrustOverlayCalls(asOf) : asOf;
-    const r = cisMode ? maskTrustOverlay(maskCallAsOf(raw, at)) : maskCallAsOf(raw, at);
+    const r = recoverBookedPublic(cisMode ? maskTrustOverlay(maskCallAsOf(raw, at)) : maskCallAsOf(raw, at));
     const loc = computeServiceLocation(journey, { stationName, now: clock, ymd });
     const locFresh = !historical && !at && loc.last?.at && locationIsFresh(loc.last.at, ymd, clock);
     const pax = journey.filter(isPassengerCall);
     const originCall = pax[0];
     const destCall = pax[pax.length - 1];
-    const originCrs = originCall?.crs || r.origin_crs || null;
-    const destCrs = destCall?.crs || r.destination_crs || null;
+    const originCrs = originCall?.crs || (originCall ? null : r.origin_crs) || null;
+    const destCrs = destCall?.crs || (destCall ? null : r.destination_crs) || null;
     const originTpl = originCall?.tiploc || r.origin_name || originCrs || "";
     const destTpl = destCall?.tiploc || r.destination_name || destCrs || "";
     const originName = stationName(originCrs, originTpl) || r.origin_name || originCrs || originTpl;
@@ -376,6 +381,7 @@ export function buildStationBoard({
       destinationName: destName,
     });
     if (passengersOnly && serviceType !== "passenger" && serviceType !== "rail-replacement") continue;
+    if (passengersOnly && trainId && !isPassengerHeadcode(trainId)) continue;
 
     const schedClock = r.std || r.sta || r.wtd || r.wta || r.wtp;
 
@@ -414,6 +420,7 @@ export function buildStationBoard({
         ),
         toc,
         pax.map((c) => c.tiploc),
+        consistDoc,
       );
       assocByRid.set(r.s_rid, associations);
     }
@@ -430,6 +437,7 @@ export function buildStationBoard({
     const cancelInfo = r.s_cancelled || r.cancelled ? { source: "ts", reason: r.cancel_reason || "Cancelled" } : null;
     const plat = platformText(r.platform);
     const isPassing = slot === "PP";
+    if (passengersOnly && isPassing) continue;
 
     const baseRow = () => ({
       rid: r.s_rid,

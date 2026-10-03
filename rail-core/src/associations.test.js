@@ -11,6 +11,7 @@ import {
   inferAssociationsFromConsist,
   inferScheduleDivides,
   parseCifAa,
+  filterDisplayAssociations,
 } from "./associations.js";
 import { unitIdsAtBoardCall } from "./ptac-apply.js";
 
@@ -141,6 +142,83 @@ test("PTAC inference links a detached unit to the onward UID", () => {
   assert.equal(inferred[0].otherRid, "R2");
   assert.equal(inferred[0].otherTrainId, "1C64");
   assert.equal(inferred[0].otherDestinationName, "Plymouth");
+  db.close();
+  catalog.close();
+});
+
+test("PTAC inference does not treat an en-route unit swap as a divide", () => {
+  const dir = mkdtempSync(join(tmpdir(), "assoc-swap-"));
+  const db = openDayDb(dir, "2026-10-03");
+  const catalog = openCatalog(dir);
+  db.prepare(
+    `INSERT INTO services (rid, uid, train_id, rs_id, toc, operator_name, origin_crs, origin_name,
+      destination_crs, destination_name, via, service_type, cancelled, cancel_reason, delay_reason,
+      is_charter, category, headcode, updated_at)
+     VALUES (?, ?, ?, null, 'TP', 'TP', null, ?, null, ?, null, 'passenger', 0, null, null, 0, 'XX', ?, 1)`,
+  ).run("R1", "G16125", "1P40", "Scarborough", "Manchester Airport", "1P40");
+  db.prepare(
+    `INSERT INTO services (rid, uid, train_id, rs_id, toc, operator_name, origin_crs, origin_name,
+      destination_crs, destination_name, via, service_type, cancelled, cancel_reason, delay_reason,
+      is_charter, category, headcode, updated_at)
+     VALUES (?, ?, ?, null, 'TP', 'TP', null, ?, null, ?, null, 'passenger', 0, null, null, 0, 'OO', ?, 1)`,
+  ).run("R2", "C24765", "2U86", "York", "Wakefield Kirkgate", "2U86");
+  db.prepare(`INSERT INTO calls (rid, tiploc, crs, seq, is_passing, cancelled, updated_at, live_kind) VALUES
+    ('R2','YORK',null,0,0,0,1,'scheduled'),
+    ('R2','WKFLDKG',null,1,0,0,1,'scheduled')`).run();
+
+  const consist = {
+    allocations: [
+      {
+        trainOrigin: { tiploc: "SCARBRO" },
+        trainDest: { tiploc: "MNCRIAP" },
+        allocationOrigin: { tiploc: "SCARBRO" },
+        allocationOriginDateTime: "2026-10-03T19:53:00",
+        allocationDestination: { tiploc: "YORK" },
+        allocationDestinationDateTime: "2026-10-03T20:46:00",
+        resourceGroups: [{ unitId: "185103" }],
+      },
+      {
+        trainOrigin: { tiploc: "SCARBRO" },
+        trainDest: { tiploc: "MNCRIAP" },
+        allocationOrigin: { tiploc: "YORK" },
+        allocationOriginDateTime: "2026-10-03T20:57:00",
+        allocationDestination: { tiploc: "MNCRIAP" },
+        allocationDestinationDateTime: "2026-10-03T23:14:00",
+        reversed: true,
+        resourceGroups: [{ unitId: "185118" }],
+      },
+    ],
+  };
+  catalog.prepare(
+    `INSERT INTO consists (uid, ssd, origin_hhmm, headcode, origin_tpl, unit_ids, json, updated_at)
+     VALUES (?, '2026-10-03', '', '2U86', 'YORK', ?, ?, 1)`,
+  ).run(
+    "C24765",
+    JSON.stringify(["185103"]),
+    JSON.stringify({
+      allocations: [
+        {
+          trainOrigin: { tiploc: "YORK" },
+          trainDest: { tiploc: "WKFLDKG" },
+          allocationOrigin: { tiploc: "YORK" },
+          allocationOriginDateTime: "2026-10-03T21:06:00",
+          allocationDestination: { tiploc: "WKFLDKG" },
+          allocationDestinationDateTime: "2026-10-03T21:50:00",
+          resourceGroups: [{ unitId: "185103" }],
+        },
+      ],
+    }),
+  );
+
+  const inferred = inferAssociationsFromConsist({
+    db,
+    catalog,
+    ymd: "2026-10-03",
+    svc: { rid: "R1", uid: "G16125" },
+    consist,
+    stationName: (_c, tpl) => tpl,
+  });
+  assert.equal(inferred.length, 0);
   db.close();
   catalog.close();
 });
@@ -318,4 +396,30 @@ test("schedule inference does not attach ordinary CrossCountry connections", () 
     ('R2','NOTNGHM','NOT',5,0,0,1,'scheduled','17:20',null)`).run();
   const svc = db.prepare(`SELECT * FROM services WHERE rid = 'R1'`).get();
   assert.equal(inferScheduleDivides({ db, svc, stationName: () => "X" }).length, 0);
+});
+
+test("display associations drop ECS and freight headcodes", () => {
+  const rows = filterDisplayAssociations([
+    {
+      category: "NP",
+      role: "main",
+      otherRid: "N63312",
+      otherTrainId: "5P83",
+      tiploc: "MIA",
+      isCancelled: false,
+      isDeleted: false,
+    },
+    {
+      category: "VV",
+      role: "main",
+      otherRid: "R2",
+      otherTrainId: "1C64",
+      tiploc: "GLOSTER",
+      otherDestinationName: "Plymouth",
+      isCancelled: false,
+      isDeleted: false,
+    },
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].otherTrainId, "1C64");
 });

@@ -8,7 +8,7 @@
 | PPTimetable | 04:00 **Europe/London** `DARWINTTFILES/PPTimetable` (retry ~35m until today’s v8) |
 | RDM NLC / CORPUS | after v8 import succeeds |
 | TOPS locations | after v8 import succeeds |
-| Long-range CIF | after v8 import succeeds (`timetable_full.zip`) |
+| Long-range CIF | after v8: `timetable_full.zip` into **future** day files only (never today’s Darwin timetable) |
 | HSP | overnight seal + background fill for historical public actuals |
 
 Location boards use **Europe/London calendar dates** (Realtime Trains). Default board is a working line-up (passes, freight, TRUST). CIS passenger boards: `?passengers=1`.

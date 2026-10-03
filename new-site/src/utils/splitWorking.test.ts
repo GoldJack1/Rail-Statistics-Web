@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boardDestinationLabel, buildSplitWorking, joinStationNames, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from './splitWorking'
+import { boardDestinationLabel, buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from './splitWorking'
 import type { ServiceDetail, ServiceStop } from '../types/darwin'
 
 function stop(tpl: string, name: string, slot: string): ServiceStop {
@@ -66,6 +66,17 @@ describe('boardDestinationLabel', () => {
       destinationName: 'Cardiff Central',
       associationDestinations: ['Plymouth'],
     })).toBe('Cardiff Central & Plymouth')
+  })
+})
+
+describe('isPassengerHeadcode', () => {
+  it('keeps passenger 1/2/9 and drops ECS/freight 0 and 3–8', () => {
+    expect(isPassengerHeadcode('1P83')).toBe(true)
+    expect(isPassengerHeadcode('2A00')).toBe(true)
+    expect(isPassengerHeadcode('9W01')).toBe(true)
+    expect(isPassengerHeadcode('5P83')).toBe(false)
+    expect(isPassengerHeadcode('0B00')).toBe(false)
+    expect(isPassengerHeadcode('')).toBe(true)
   })
 })
 
@@ -258,5 +269,116 @@ describe('buildSplitWorking', () => {
     const split = buildSplitWorking(main, [other])
     expect(split?.togetherStops.map((s) => s.tpl)).toEqual(['EDINBUR', 'NWCSTLE', 'DRHM', 'GLOSTER'])
     expect(split?.portions.find((p) => p.trainId === '1V64')?.stops.map((s) => s.tpl)).toEqual(['GLOSTER', 'CRDFCEN'])
+  })
+
+  it('does not replace this service with the train it joins', () => {
+    const portion = svc({
+      rid: 'R2',
+      uid: 'G01082',
+      trainId: '1S53',
+      originName: 'Penzance',
+      destinationName: 'Edinburgh',
+      stops: [
+        stop('PENZNCE', 'Penzance', 'OR'),
+        stop('PLYMTH', 'Plymouth', 'IP'),
+        stop('EDINBUR', 'Edinburgh', 'DT'),
+      ],
+      associations: [{
+        category: 'VV',
+        tiploc: 'PLYMTH',
+        tiplocName: 'Plymouth',
+        tiplocCrs: null,
+        mainRid: 'R1',
+        assocRid: 'R2',
+        role: 'associated',
+        otherRid: 'R1',
+        otherUid: 'G01135',
+        otherTrainId: '1V46',
+        otherToc: 'XC',
+        otherOriginName: 'York',
+        otherDestinationName: 'Plymouth',
+        mainTime: null,
+        assocTime: null,
+        isCancelled: false,
+        isDeleted: false,
+      }],
+    })
+    const other = svc({
+      rid: 'R1',
+      uid: 'G01135',
+      trainId: '1V46',
+      stops: [stop('YORK', 'York', 'OR'), stop('PLYMTH', 'Plymouth', 'DT')],
+    })
+    expect(buildSplitWorking(portion, [other])).toBeNull()
+  })
+
+  it('ignores ECS headcodes such as 5P83 so they do not look like a split', () => {
+    const main = svc({
+      rid: 'R1',
+      uid: 'G15982',
+      trainId: '1P83',
+      destinationName: 'Saltburn',
+      stops: [stop('MNCROXR', 'Manchester Oxford Road', 'OR'), stop('SLTB', 'Saltburn', 'DT')],
+      associations: [{
+        category: 'VV',
+        tiploc: 'MNCROXR',
+        tiplocName: 'Manchester Oxford Road',
+        tiplocCrs: null,
+        mainRid: 'R1',
+        assocRid: 'R2',
+        role: 'main',
+        otherRid: 'R2',
+        otherUid: 'N63312',
+        otherTrainId: '5P83',
+        otherToc: 'TP',
+        otherOriginName: 'Manchester',
+        otherDestinationName: 'Manchester Depot',
+        mainTime: null,
+        assocTime: null,
+        isCancelled: false,
+        isDeleted: false,
+      }],
+    })
+    const ecs = svc({
+      rid: 'R2',
+      uid: 'N63312',
+      trainId: '5P83',
+      stops: [stop('MNCROXR', 'Manchester Oxford Road', 'OR')],
+    })
+    expect(buildSplitWorking(main, [ecs])).toBeNull()
+  })
+})
+
+describe('previousNextWorkings', () => {
+  const np = (role: 'main' | 'associated', trainId: string): ServiceDetail['associations'][number] => ({
+    category: 'NP',
+    tiploc: 'SBRN',
+    tiplocName: 'Saltburn',
+    tiplocCrs: 'SLB',
+    mainRid: 'MAIN',
+    assocRid: 'ASSOC',
+    role,
+    otherRid: role === 'main' ? 'NEXT' : 'PREV',
+    otherUid: role === 'main' ? 'G11111' : 'G00000',
+    otherTrainId: trainId,
+    otherToc: 'NT',
+    otherOriginName: role === 'main' ? 'Saltburn' : 'Newcastle',
+    otherDestinationName: role === 'main' ? 'Middlesbrough' : 'Saltburn',
+    mainTime: null,
+    assocTime: null,
+    isCancelled: false,
+    isDeleted: false,
+  })
+
+  it('phrases previous and next passenger workings', () => {
+    const { previous, next } = previousNextWorkings([np('associated', '1P83'), np('main', '1P85')])
+    expect(previousWorkingSentence(previous[0])).toBe('This train previously ran as 1P83 from Newcastle to Saltburn')
+    expect(nextWorkingSentence(next[0])).toBe('This train then runs as 1P85 from Saltburn to Middlesbrough')
+  })
+
+  it('drops ECS next portions', () => {
+    const { previous, next } = previousNextWorkings([np('main', '5P85')])
+    expect(previous).toEqual([])
+    expect(next).toEqual([])
   })
 })

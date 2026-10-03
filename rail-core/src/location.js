@@ -1,9 +1,8 @@
 import { londonInstant } from "./calendar-day.js";
-import { parseHmMinutes } from "./journey-order.js";
-import { sortCallsByJourneyTime } from "./journey-order.js";
+import { isWorkingPass, parseHmMinutes, sortCallsByJourneyTime } from "./journey-order.js";
 
 function isPass(c) {
-  return Boolean(Number(c.is_passing)) || Boolean(c.wtp && !c.sta && !c.std);
+  return isWorkingPass(c);
 }
 
 function actualClock(c) {
@@ -51,8 +50,32 @@ export function computeServiceLocation(calls, opts = {}) {
     };
   }
 
+  const seedIdx = lastIdx;
+  const seedCall = journey[seedIdx];
+  const seedAct = actualClock(seedCall);
+
+  // After leaving a public stop, name the next working location (including
+  // passes) once its booked time has elapsed — not the next advertised call.
+  if (seedAct && !(!isPass(seedCall) && seedCall.ata && !seedCall.atd)) {
+    while (lastIdx + 1 < journey.length) {
+      const nxt = journey[lastIdx + 1];
+      if (actualClock(nxt)) {
+        lastIdx += 1;
+        continue;
+      }
+      if (!isPass(nxt)) break;
+      const booked = nxt.atp || nxt.etp || nxt.wtp || nxt.wtd || nxt.wta || nxt.std || nxt.sta;
+      const inst = booked && ymd ? londonInstant(ymd, String(booked).slice(0, 5)) : null;
+      if (inst && now.getTime() >= inst.getTime()) {
+        lastIdx += 1;
+        continue;
+      }
+      break;
+    }
+  }
+
   const lastCall = journey[lastIdx];
-  const act = actualClock(lastCall);
+  const act = actualClock(lastCall) || seedAct;
   const last = {
     ...point(lastCall),
     at: act.at,

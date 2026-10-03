@@ -22,6 +22,8 @@ import './DarwinServiceCard.css'
 type DarwinServiceCardProps = {
   row: DepartureRow
   historicalMode: boolean
+  /** Same-day `at=` snapshots and previous days: Was Delayed | Departed/Arrived at. */
+  pastTimes?: boolean
   detailedInfo?: boolean
   showFormation?: boolean
   onClick: () => void
@@ -137,10 +139,21 @@ function earlyLabel(row: DepartureRow, minutes: number, ongoing: boolean): strin
   return time ? `${word} ${mins} early at ${time}` : `${word} ${mins} early`
 }
 
-function delayedWithReasonAndEta(row: DepartureRow): string {
+export function delayedLateSuffix(minutes: number, compact: boolean): string {
+  if (compact) return ` (${minutes}L)`
+  return ` (${minutes} min${minutes === 1 ? '' : 's'} Late)`
+}
+
+export function delayedBoardStatusLabel(row: DepartureRow, pastTimes: boolean): string {
   const reason = (row.delayReason?.reason || '').replace(/\s+/g, ' ').trim()
-  const eta = row.liveTime ? String(row.liveTime).slice(0, 5) : ''
-  const detail = [reason, eta ? `Expected at ${eta}` : ''].filter(Boolean).join(' · ')
+  const time = liveClock(row)
+  if (pastTimes) {
+    const isArrivalEvent = row.movement === 'arrival' || row.liveKind === 'actual-arr' || row.liveKind === 'est-arr'
+    const verb = row.isPassing ? 'Passed' : isArrivalEvent ? 'Arrived' : 'Departed'
+    const event = time ? `${verb} at ${time}` : verb
+    return reason ? `Was Delayed\u00a0|\u00a0${event} · ${reason}` : `Was Delayed\u00a0|\u00a0${event}`
+  }
+  const detail = [reason, time ? `Expected at ${time}` : ''].filter(Boolean).join(' · ')
   return detail ? `Delayed\u00a0|\u00a0${detail}` : 'Delayed'
 }
 
@@ -149,40 +162,45 @@ function punctualityTone(delayMinutes: number | null, fallback: CallingPatternTo
   return fallback
 }
 
-function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: boolean): {
+function buildStatus(row: DepartureRow, detailedInfo: boolean, pastTimes: boolean): {
   tone: StatusTone
   label: string
   mode: string | null
+  lateMins: number | null
 } {
   const mode = detailedInfo ? (row.isPassing ? '(Passing)' : '(Stopping)') : null
   const delayMinutes = typeof row.delayMinutes === 'number' ? row.delayMinutes : null
+  const lateMins = pastTimes && delayMinutes != null && delayMinutes >= 1 ? delayMinutes : null
   const isArrivalEvent = row.movement === 'arrival' || row.liveKind === 'actual-arr'
   const verb = row.isPassing ? 'Passed' : isArrivalEvent ? 'Arrived' : 'Departed'
 
   if (row.cancelled) {
-    return { tone: 'cancelled', label: 'Cancelled', mode }
+    return { tone: 'cancelled', label: 'Cancelled', mode, lateMins: null }
   }
 
   const isActual = row.liveKind === 'actual' || row.liveKind === 'actual-arr'
   if (isActual) {
     if (delayMinutes != null && delayMinutes < 0) {
-      return { tone: 'early', label: earlyLabel(row, delayMinutes, false), mode }
+      return { tone: 'early', label: earlyLabel(row, delayMinutes, false), mode, lateMins: null }
     }
     if (delayMinutes != null && delayMinutes > 0) {
-      return { tone: punctualityTone(delayMinutes), label: `${verb} ${formatDelayAbs(delayMinutes)} late`, mode }
+      if (pastTimes) {
+        return { tone: punctualityTone(delayMinutes), label: delayedBoardStatusLabel(row, true), mode, lateMins }
+      }
+      return { tone: punctualityTone(delayMinutes), label: `${verb} ${formatDelayAbs(delayMinutes)} late`, mode, lateMins: null }
     }
-    return { tone: 'ontime', label: 'On Time', mode }
+    return { tone: 'ontime', label: 'On Time', mode, lateMins: null }
   }
 
   if (row.unknownDelay || row.manualUnknownDelay) {
-    return { tone: punctualityTone(delayMinutes, 'delay-16'), label: delayedWithReasonAndEta(row), mode }
+    return { tone: punctualityTone(delayMinutes, 'delay-16'), label: delayedBoardStatusLabel(row, pastTimes), mode, lateMins }
   }
 
-  if (historicalMode && (row.liveKind === 'scheduled' || row.liveKind === 'working')) {
+  if (pastTimes && (row.liveKind === 'scheduled' || row.liveKind === 'working')) {
     const scheduledAt = Date.parse(row.scheduledAt)
     const alreadyRun = Number.isFinite(scheduledAt) && scheduledAt < Date.now() - 60_000
     if (alreadyRun) {
-      return { tone: 'ontime', label: verb, mode }
+      return { tone: 'ontime', label: verb, mode, lateMins: null }
     }
   }
 
@@ -194,12 +212,12 @@ function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: b
 
   if (expectedOffSchedule) {
     if (delayMinutes != null && delayMinutes < 0) {
-      return { tone: 'early', label: earlyLabel(row, delayMinutes, true), mode }
+      return { tone: 'early', label: earlyLabel(row, delayMinutes, !pastTimes), mode, lateMins: null }
     }
-    return { tone: punctualityTone(delayMinutes), label: delayedWithReasonAndEta(row), mode }
+    return { tone: punctualityTone(delayMinutes), label: delayedBoardStatusLabel(row, pastTimes), mode, lateMins }
   }
 
-  return { tone: 'ontime', label: 'On Time', mode }
+  return { tone: 'ontime', label: 'On Time', mode, lateMins: null }
 }
 
 const MAX_COACH_PILLS = 24
@@ -215,6 +233,7 @@ function coachClassName(index: number, count: number): string {
 const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
   row,
   historicalMode,
+  pastTimes,
   detailedInfo = false,
   showFormation = true,
   onClick,
@@ -224,7 +243,7 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
   const headline = buildHeadline(row)
   const meta = buildMeta(row, detailedInfo, historicalMode)
   const formation = buildFormation(row, historicalMode)
-  const status = buildStatus(row, historicalMode, detailedInfo)
+  const status = buildStatus(row, detailedInfo, pastTimes ?? historicalMode)
   const coachCount = carriageCount(row)
   const visibleCoaches = coachCount != null ? Math.min(coachCount, MAX_COACH_PILLS) : 0
   const loadValues = visibleCoaches > 0 ? coachLoadValues(row, visibleCoaches) : []
@@ -262,7 +281,15 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
             `rs-service-card__status--${status.tone}`,
           ].join(' ')}
         >
-          <span className="rs-service-card__status-label">{status.label}</span>
+          <span className="rs-service-card__status-label">
+            {status.label}
+            {status.lateMins != null ? (
+              <>
+                <span className="rs-service-card__late-full">{delayedLateSuffix(status.lateMins, false)}</span>
+                <span className="rs-service-card__late-short">{delayedLateSuffix(status.lateMins, true)}</span>
+              </>
+            ) : null}
+          </span>
           {status.mode ? <span className="rs-service-card__status-mode">{status.mode}</span> : null}
           <div className="rs-button__inner-shadow" />
         </div>

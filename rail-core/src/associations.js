@@ -1,5 +1,6 @@
 import { unitIdsFromConsistRow } from "./ptac-apply.js";
 import { addCalendarDays, ssdFromRid } from "./calendar-day.js";
+import { isPassengerHeadcode } from "./headcode.js";
 
 export function ensureAssociationsTable(db) {
   db.exec(`
@@ -273,7 +274,7 @@ function listCsWorkings(databases) {
       if (seen.has(svc.rid)) continue;
       seen.add(svc.rid);
       const head = String(svc.headcode || svc.train_id || "");
-      if (head && !/^[12]/.test(head)) continue;
+      if (head && !isPassengerHeadcode(head)) continue;
       const calls = passengerCalls(db, svc.rid);
       if (calls.length < 2) continue;
       out.push({ db, ymd, svc, calls, ssd: serviceSsd(svc, ymd) });
@@ -440,10 +441,37 @@ export function inferScheduleDivides({ db, svc, stationName, ymd = null, databas
   return out;
 }
 
+function unitContinuesPast(mine, unitId, tpl) {
+  const last = mine.last.get(unitId);
+  return Boolean(last?.tpl && last.tpl !== tpl);
+}
+
+/** Another unit started with this one and still runs past the leave/join TIPLOC. */
+function coupledThrough(mine, unitId, atTpl) {
+  const selfOrig = mine.first.get(unitId)?.tpl;
+  if (!selfOrig) return false;
+  for (const [id, first] of mine.first) {
+    if (id === unitId) continue;
+    if (first.tpl !== selfOrig) continue;
+    if (unitContinuesPast(mine, id, atTpl)) return true;
+  }
+  return false;
+}
+
+function originUnitContinuesPast(mine, atTpl) {
+  if (!mine.trainOrig) return false;
+  for (const [id, first] of mine.first) {
+    if (first.tpl !== mine.trainOrig) continue;
+    if (unitContinuesPast(mine, id, atTpl)) return true;
+  }
+  return false;
+}
+
 /**
  * When CIF/Darwin associations are missing, recover a divide from PTAC:
  * a unit leaves this RID before the advertised train destination and starts
  * another UID from that TIPLOC within 45 minutes.
+ * A 1-for-1 en-route unit swap (nothing from origin continues) is not a divide.
  */
 export function inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, stationName }) {
   if (!db || !catalog || !consist || !svc?.uid) return [];
@@ -478,6 +506,8 @@ export function inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, s
       seen.add(key);
       const destCall = destOfService(db, otherSvc, stationName);
       const origCall = originOfService(db, otherSvc, stationName);
+      const otherTrainId = otherSvc.headcode || row.headcode || null;
+      if (!isPassengerHeadcode(otherTrainId)) continue;
       out.push({
         category,
         tiploc: tpl,
@@ -488,7 +518,7 @@ export function inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, s
         role,
         otherRid: otherSvc.rid,
         otherUid: otherSvc.uid || row.uid || null,
-        otherTrainId: otherSvc.headcode || row.headcode || null,
+        otherTrainId,
         otherToc: otherSvc.toc || null,
         otherOriginName: origCall,
         otherDestinationName: destCall,
@@ -501,12 +531,12 @@ export function inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, s
   };
 
   for (const [unitId, last] of mine.last) {
-    if (last.tpl && mine.trainDest && last.tpl !== mine.trainDest) {
+    if (last.tpl && mine.trainDest && last.tpl !== mine.trainDest && coupledThrough(mine, unitId, last.tpl)) {
       considerPartner(unitId, last.tpl, last.minutes, "VV", "main");
     }
   }
   for (const [unitId, first] of mine.first) {
-    if (first.tpl && mine.trainOrig && first.tpl !== mine.trainOrig) {
+    if (first.tpl && mine.trainOrig && first.tpl !== mine.trainOrig && originUnitContinuesPast(mine, first.tpl)) {
       considerPartner(unitId, first.tpl, first.minutes, "VV", "associated");
     }
   }
@@ -549,6 +579,8 @@ export function associationsForRid(db, rid, stationName) {
     const role = row.main_rid === rid ? "main" : "associated";
     const otherRid = role === "main" ? row.assoc_rid : row.main_rid;
     const other = db.prepare(`SELECT * FROM services WHERE rid = ?`).get(otherRid);
+    const otherTrainId = other?.headcode || other?.train_id || null;
+    if (!isPassengerHeadcode(otherTrainId)) continue;
     out.push({
       category: row.category,
       tiploc: row.tiploc,
@@ -559,7 +591,7 @@ export function associationsForRid(db, rid, stationName) {
       role,
       otherRid,
       otherUid: other?.uid || (role === "main" ? row.assoc_uid : row.main_uid) || null,
-      otherTrainId: other?.headcode || other?.train_id || null,
+      otherTrainId,
       otherToc: other?.toc || null,
       otherOriginName: other ? originOfService(db, other, stationName) : null,
       otherDestinationName: other ? destOfService(db, other, stationName) : null,
@@ -607,9 +639,15 @@ export function publicDivideAssociations(associations, toc = null, journeyTpls =
   return [];
 }
 
-export function filterDisplayAssociations(associations, toc = null, journeyTpls = []) {
+export function filterDisplayAssociations(associations, toc = null, journeyTpls = [], consist = null) {
+  const mine = consist ? unitEnds(consist) : null;
   const keepMain = new Set(publicDivideAssociations(associations, toc, journeyTpls).map((a) => `${a.otherRid}|${a.tiploc}`));
   return (associations || []).filter((a) => {
+    if (!isPassengerHeadcode(a.otherTrainId)) return false;
+    if (a.category === "VV" && mine) {
+      const tpl = String(a.tiploc || "").toUpperCase();
+      if (tpl && !originUnitContinuesPast(mine, tpl)) return false;
+    }
     if (a.category !== "VV" || a.role !== "main") return true;
     return keepMain.has(`${a.otherRid}|${a.tiploc}`);
   });

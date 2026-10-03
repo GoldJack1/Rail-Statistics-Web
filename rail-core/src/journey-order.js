@@ -18,9 +18,47 @@ export function railwayDayMinutes(clockMins, overnightLong = false) {
   return clockMins < RAILWAY_DAY_START_MINUTES ? clockMins + 1440 : clockMins;
 }
 
+/** CIF/Darwin often store 00:00 public times on working locations that are not midnight stops. */
+export function publicCallTime(value, row) {
+  if (value == null || value === "") return null;
+  const hm = String(value).trim().slice(0, 5);
+  if (hm !== "00:00") return String(value).trim();
+  const work = parseHmMinutes(row?.wtp || row?.wtd || row?.wta);
+  if (work == null) return hm;
+  if (work >= 22 * 60 || work < 3 * 60) return hm;
+  return null;
+}
+
+export function isAdvertisedCall(c) {
+  return Boolean(publicCallTime(c?.sta, c) || publicCallTime(c?.std, c));
+}
+
+export function isWorkingPass(c) {
+  if (isAdvertisedCall(c)) return false;
+  if (Number(c?.is_passing)) return true;
+  const sta = publicCallTime(c?.sta, c);
+  const std = publicCallTime(c?.std, c);
+  return Boolean(c?.wtp && !sta && !std);
+}
+
+/** Public GBTT stop, including advertised TIPLOCs that never received a CRS. */
+export function isPublicPassengerCall(c) {
+  if (isWorkingPass(c)) return false;
+  return isAdvertisedCall(c);
+}
+
 export function callScheduledMinutes(c) {
   return parseHmMinutes(
-    c.std || c.sta || c.wtd || c.wta || c.wtp || c.ptd || c.pta || c.etd || c.eta || c.etp,
+    publicCallTime(c.std, c) ||
+      publicCallTime(c.sta, c) ||
+      c.wtd ||
+      c.wta ||
+      c.wtp ||
+      c.ptd ||
+      c.pta ||
+      c.etd ||
+      c.eta ||
+      c.etp,
   );
 }
 
@@ -74,10 +112,60 @@ export function sortCallsByJourneyTime(rows) {
   });
 }
 
+/** CIF often appends another working after Darwin's public terminus (seq jumps backward in time). */
+function clockGapMinutes(a, b) {
+  const am = parseHmMinutes(a);
+  const bm = parseHmMinutes(b);
+  if (am == null || bm == null) return null;
+  let d = Math.abs(am - bm);
+  if (d > 720) d = 1440 - d;
+  return d;
+}
+
+/** Darwin schedule overlays sometimes copy an actual onto std/sta. Prefer WTT when they disagree. */
+export function recoverBookedPublic(c) {
+  if (!c) return c;
+  const out = { ...c };
+  const std = publicCallTime(c.std, c);
+  const sta = publicCallTime(c.sta, c);
+  if (c.wtd && std && clockGapMinutes(std, c.wtd) >= 8) {
+    if (!c.atd || clockGapMinutes(std, c.atd) <= 2 || clockGapMinutes(std, c.wtd) >= 12) {
+      out.std = String(c.wtd).slice(0, 5);
+    }
+  }
+  if (c.wta && sta && clockGapMinutes(sta, c.wta) >= 8) {
+    if (!c.ata || clockGapMinutes(sta, c.ata) <= 2 || clockGapMinutes(sta, c.wta) >= 12) {
+      out.sta = String(c.wta).slice(0, 5);
+    }
+  }
+  return out;
+}
+
+export function dropCifTailAfterPublicTerminus(rows) {
+  const ordered = [...(rows || [])].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
+  let lastAdvMins = null;
+  let lastAdvIdx = -1;
+  for (let i = 0; i < ordered.length; i++) {
+    const c = ordered[i];
+    if (!isAdvertisedCall(c)) continue;
+    const m = callScheduledMinutes(c);
+    if (lastAdvMins != null && m != null) {
+      let delta = m - lastAdvMins;
+      if (delta < -12 * 60) delta += 1440;
+      if (delta < -40) return ordered.slice(0, lastAdvIdx + 1);
+    }
+    if (m != null) lastAdvMins = m;
+    lastAdvIdx = i;
+  }
+  return ordered;
+}
+
 export function publicJourneyEnds(calls) {
-  const ordered = sortCallsByJourneyTime(calls || []).filter((c) => !Number(c.is_passing));
+  const ordered = sortCallsByJourneyTime(calls || []).filter((c) => !isWorkingPass(c));
   if (!ordered.length) return { origin: null, dest: null };
-  const origin = ordered.find((c) => c.crs) || ordered[0];
-  const dest = ordered[ordered.length - 1];
+  const advertised = ordered.filter(isPublicPassengerCall);
+  const legs = advertised.length ? advertised : ordered.filter((c) => c.crs).length ? ordered.filter((c) => c.crs) : ordered;
+  const origin = legs.find((c) => c.crs) || legs[0];
+  const dest = legs[legs.length - 1];
   return { origin, dest };
 }
