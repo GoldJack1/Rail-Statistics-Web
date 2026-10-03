@@ -7,7 +7,7 @@ import { longRangeAheadDays } from "./cif-schedule.js";
 import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
-import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
 import { isPassengerHeadcode } from "./headcode.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
@@ -368,10 +368,7 @@ function trimCallsToDestination(rows, svc) {
   }
   if (!destHits.length) return out.length ? out : ordered;
   const cut = destHits[destHits.length - 1];
-  const laterAdvertised = out.slice(cut + 1).some((c) => {
-    if (isWorkingPass(c)) return false;
-    return Boolean(String(c.crs || "").trim()) && Boolean(c.sta || c.std || c.wta || c.wtd);
-  });
+  const laterAdvertised = out.slice(cut + 1).some((c) => isPublicPassengerCall(c));
   if (laterAdvertised) return out;
   return out.slice(0, cut + 1);
 }
@@ -737,9 +734,9 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     tocName: tocDisplayName(svc.toc) || svc.operator_name,
     trainCat: svc.category,
     isPassenger: svc.service_type !== "freight",
-    origin: originStop?.crs || svc.origin_crs || "",
+    origin: originStop?.crs || (originStop ? "" : svc.origin_crs) || "",
     originName: originStop?.name || stationName(originStop?.crs, originStop?.tpl) || svc.origin_name,
-    destination: destStop?.crs || svc.destination_crs || "",
+    destination: destStop?.crs || (destStop ? "" : svc.destination_crs) || "",
     destinationName: ownDest,
     cancelled: Boolean(svc.cancelled),
     cancellation: null,

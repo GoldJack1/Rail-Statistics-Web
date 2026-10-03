@@ -4,7 +4,7 @@
  */
 import { platformText } from "./db.js";
 import { tocDisplayName } from "./toc-names.js";
-import { callScheduledMinutes, dropCifTailAfterPublicTerminus, isAdvertisedCall, isWorkingPass, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
+import { callScheduledMinutes, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
 import { isPassengerHeadcode } from "./headcode.js";
 import { maskCallAsOf, maskCallsAsOf, maskTrustOverlay, maskTrustOverlayCalls } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
@@ -219,9 +219,7 @@ export function liveClockFromCall(call, movement) {
 }
 
 function isPassengerCall(c) {
-  if (isWorkingPass(c)) return false;
-  if (!c.crs) return false;
-  return isAdvertisedCall(c);
+  return isPublicPassengerCall(c);
 }
 
 function slotOf(call, journey) {
@@ -366,8 +364,8 @@ export function buildStationBoard({
     const pax = journey.filter(isPassengerCall);
     const originCall = pax[0];
     const destCall = pax[pax.length - 1];
-    const originCrs = originCall?.crs || r.origin_crs || null;
-    const destCrs = destCall?.crs || r.destination_crs || null;
+    const originCrs = originCall?.crs || (originCall ? null : r.origin_crs) || null;
+    const destCrs = destCall?.crs || (destCall ? null : r.destination_crs) || null;
     const originTpl = originCall?.tiploc || r.origin_name || originCrs || "";
     const destTpl = destCall?.tiploc || r.destination_name || destCrs || "";
     const originName = stationName(originCrs, originTpl) || r.origin_name || originCrs || originTpl;

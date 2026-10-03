@@ -34,11 +34,17 @@ export function isAdvertisedCall(c) {
 }
 
 export function isWorkingPass(c) {
-  if (isAdvertisedCall(c) && c.crs) return false;
+  if (isAdvertisedCall(c)) return false;
   if (Number(c?.is_passing)) return true;
   const sta = publicCallTime(c?.sta, c);
   const std = publicCallTime(c?.std, c);
   return Boolean(c?.wtp && !sta && !std);
+}
+
+/** Public GBTT stop, including advertised TIPLOCs that never received a CRS. */
+export function isPublicPassengerCall(c) {
+  if (isWorkingPass(c)) return false;
+  return isAdvertisedCall(c);
 }
 
 export function callScheduledMinutes(c) {
@@ -141,7 +147,7 @@ export function dropCifTailAfterPublicTerminus(rows) {
   let lastAdvIdx = -1;
   for (let i = 0; i < ordered.length; i++) {
     const c = ordered[i];
-    if (!c.crs || !isAdvertisedCall(c)) continue;
+    if (!isAdvertisedCall(c)) continue;
     const m = callScheduledMinutes(c);
     if (lastAdvMins != null && m != null) {
       let delta = m - lastAdvMins;
@@ -157,7 +163,7 @@ export function dropCifTailAfterPublicTerminus(rows) {
 export function publicJourneyEnds(calls) {
   const ordered = sortCallsByJourneyTime(calls || []).filter((c) => !isWorkingPass(c));
   if (!ordered.length) return { origin: null, dest: null };
-  const advertised = ordered.filter((c) => isAdvertisedCall(c) && c.crs);
+  const advertised = ordered.filter(isPublicPassengerCall);
   const legs = advertised.length ? advertised : ordered.filter((c) => c.crs).length ? ordered.filter((c) => c.crs) : ordered;
   const origin = legs.find((c) => c.crs) || legs[0];
   const dest = legs[legs.length - 1];

@@ -121,6 +121,22 @@ test("drops a CIF working glued on after the public terminus", () => {
   );
 });
 
+test("keeps advertised westbound calls after Leeds even without CRS", () => {
+  const rows = [
+    { tiploc: "SCARBRO", crs: "SCA", seq: 0, std: "17:00", is_passing: 0 },
+    { tiploc: "LEEDS", crs: "LDS", seq: 1, sta: "19:40", std: "19:45", is_passing: 0 },
+    { tiploc: "BRHOUSE", crs: null, seq: 2, sta: "20:10", std: "20:11", is_passing: 0 },
+    { tiploc: "MNCRVIC", crs: null, seq: 3, sta: "21:18", is_passing: 0 },
+  ];
+  assert.deepEqual(
+    dropCifTailAfterPublicTerminus(rows).map((r) => r.tiploc),
+    ["SCARBRO", "LEEDS", "BRHOUSE", "MNCRVIC"],
+  );
+  const { origin, dest } = publicJourneyEnds(rows);
+  assert.equal(origin.crs, "SCA");
+  assert.equal(dest.tiploc, "MNCRVIC");
+});
+
 test("recovers public dep when Darwin copied the actual onto std", () => {
   const recovered = recoverBookedPublic({
     tiploc: "MNCRVIC",
