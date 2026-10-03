@@ -1,5 +1,6 @@
 import { unitIdsFromConsistRow } from "./ptac-apply.js";
 import { addCalendarDays, ssdFromRid } from "./calendar-day.js";
+import { isPassengerHeadcode } from "./headcode.js";
 
 export function ensureAssociationsTable(db) {
   db.exec(`
@@ -273,7 +274,7 @@ function listCsWorkings(databases) {
       if (seen.has(svc.rid)) continue;
       seen.add(svc.rid);
       const head = String(svc.headcode || svc.train_id || "");
-      if (head && !/^[12]/.test(head)) continue;
+      if (head && !isPassengerHeadcode(head)) continue;
       const calls = passengerCalls(db, svc.rid);
       if (calls.length < 2) continue;
       out.push({ db, ymd, svc, calls, ssd: serviceSsd(svc, ymd) });
@@ -478,6 +479,8 @@ export function inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, s
       seen.add(key);
       const destCall = destOfService(db, otherSvc, stationName);
       const origCall = originOfService(db, otherSvc, stationName);
+      const otherTrainId = otherSvc.headcode || row.headcode || null;
+      if (!isPassengerHeadcode(otherTrainId)) continue;
       out.push({
         category,
         tiploc: tpl,
@@ -488,7 +491,7 @@ export function inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, s
         role,
         otherRid: otherSvc.rid,
         otherUid: otherSvc.uid || row.uid || null,
-        otherTrainId: otherSvc.headcode || row.headcode || null,
+        otherTrainId,
         otherToc: otherSvc.toc || null,
         otherOriginName: origCall,
         otherDestinationName: destCall,
@@ -549,6 +552,8 @@ export function associationsForRid(db, rid, stationName) {
     const role = row.main_rid === rid ? "main" : "associated";
     const otherRid = role === "main" ? row.assoc_rid : row.main_rid;
     const other = db.prepare(`SELECT * FROM services WHERE rid = ?`).get(otherRid);
+    const otherTrainId = other?.headcode || other?.train_id || null;
+    if (!isPassengerHeadcode(otherTrainId)) continue;
     out.push({
       category: row.category,
       tiploc: row.tiploc,
@@ -559,7 +564,7 @@ export function associationsForRid(db, rid, stationName) {
       role,
       otherRid,
       otherUid: other?.uid || (role === "main" ? row.assoc_uid : row.main_uid) || null,
-      otherTrainId: other?.headcode || other?.train_id || null,
+      otherTrainId,
       otherToc: other?.toc || null,
       otherOriginName: other ? originOfService(db, other, stationName) : null,
       otherDestinationName: other ? destOfService(db, other, stationName) : null,
@@ -610,6 +615,7 @@ export function publicDivideAssociations(associations, toc = null, journeyTpls =
 export function filterDisplayAssociations(associations, toc = null, journeyTpls = []) {
   const keepMain = new Set(publicDivideAssociations(associations, toc, journeyTpls).map((a) => `${a.otherRid}|${a.tiploc}`));
   return (associations || []).filter((a) => {
+    if (!isPassengerHeadcode(a.otherTrainId)) return false;
     if (a.category !== "VV" || a.role !== "main") return true;
     return keepMain.has(`${a.otherRid}|${a.tiploc}`);
   });

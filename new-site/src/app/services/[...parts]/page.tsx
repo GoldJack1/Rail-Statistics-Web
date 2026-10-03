@@ -35,7 +35,7 @@ import {
   serviceHref,
   type ServiceSection,
 } from '@/utils/serviceUrl'
-import { buildSplitWorking, joinStationNames, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from '@/utils/splitWorking'
+import { buildSplitWorking, isPassengerHeadcode, joinStationNames, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from '@/utils/splitWorking'
 import '../ServiceDetailPage.css'
 
 const BASE_SERVICE_SECTIONS: AccountSection[] = [
@@ -302,7 +302,8 @@ const ServiceDetailPage: React.FC = () => {
     const ids = new Set<string>()
     for (const a of data?.associations || []) {
       if (a.isDeleted) continue
-      if (a.category !== 'VV' && a.category !== 'JJ' && a.category !== 'NP') continue
+      if (a.category !== 'VV' && a.category !== 'JJ') continue
+      if (!isPassengerHeadcode(a.otherTrainId)) continue
       if (a.otherRid) ids.add(a.otherRid)
       else if (a.otherUid) ids.add(a.otherUid)
     }
@@ -520,7 +521,9 @@ const ServiceDetailPage: React.FC = () => {
                 />
               ))}
 
-              {(splitWorking?.associations || data.associations || []).map((a) => {
+              {(splitWorking?.associations || data.associations || [])
+                .filter((a) => isPassengerHeadcode(a.otherTrainId))
+                .map((a) => {
                 const href = serviceHref({
                   id: a.otherUid || a.otherRid,
                   date: data.ssd || date,

@@ -8,6 +8,7 @@ import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
 import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isWorkingPass, publicJourneyEnds, sortCallsByJourneyTime } from "./journey-order.js";
+import { isPassengerHeadcode } from "./headcode.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
@@ -629,11 +630,13 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
       const n = hit ? gatherServiceCalls(hit.day, hit.svc).length : 0;
       let score = n;
       if (selfTail && hc.slice(1) === selfTail) score += 1000;
-      if (/^[12]/.test(hc)) score += 100;
+      if (!isPassengerHeadcode(hc)) score -= 10_000;
+      if (/^[129]/.test(hc)) score += 100;
       return { id, score, n };
     });
     scored.sort((a, b) => b.score - a.score);
-    if (scored[0]?.n) return serviceDetail(ymd, scored[0].id, atRaw, hop + 1);
+    const hopTo = scored.find((row) => row.n && row.score > 0);
+    if (hopTo) return serviceDetail(ymd, hopTo.id, atRaw, hop + 1);
   }
   let storedAssoc = hydrateAssociations(ymd, associationsForRid(db, resolvedRid, stationName));
   const consist = consistForService(ymd, svc);
@@ -687,32 +690,37 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     .filter((i) => i >= 0);
   const firstPax = passengerIdx[0] ?? 0;
   const lastPax = passengerIdx[passengerIdx.length - 1] ?? callingPoints.length - 1;
-  const stops = callingPoints.map((c, i) => ({
-    tpl: c.tiploc,
-    name: stationName(c.crs, c.tiploc),
-    crs: c.crs,
-    slot: c.isPassing ? "PP" : i === firstPax ? "OR" : i === lastPax ? "DT" : "IP",
-    pta: c.sta,
-    ptd: c.std,
-    wta: c.wta,
-    wtd: c.wtd,
-    wtp: c.wtp,
-    ata: c.ata,
-    atd: c.atd,
-    atp: c.atp,
-    platform: c.platform,
-    livePlatform: c.platform,
-    activity: null,
-    liveTime: c.isPassing
-      ? c.atp || c.etp || c.wtp
-      : c.atd || c.ata || c.atp || c.etd || c.eta || c.etp || c.std || c.sta || c.wtp,
-    liveKind: liveClockFromCall(c, c.isPassing ? "departure" : i === lastPax ? "arrival" : "departure").kind || c.liveKind,
-    cancelledAtStop: false,
-    cancelReasonAtStop: null,
-    loadingPercentage: c.loading_percentage ?? null,
-    coachLoading: parseCoachLoading(c.coach_loading),
-    actualSource: c.actualSource,
-  }));
+  const stops = callingPoints.map((c, i) => {
+    const movement = c.isPassing ? "departure" : i === lastPax ? "arrival" : "departure";
+    const clock = liveClockFromCall(c, movement);
+    return {
+      tpl: c.tiploc,
+      name: stationName(c.crs, c.tiploc),
+      crs: c.crs,
+      slot: c.isPassing ? "PP" : i === firstPax ? "OR" : i === lastPax ? "DT" : "IP",
+      pta: c.sta,
+      ptd: c.std,
+      wta: c.wta,
+      wtd: c.wtd,
+      wtp: c.wtp,
+      ata: c.ata,
+      atd: c.atd,
+      atp: c.atp,
+      eta: c.eta,
+      etd: c.etd,
+      etp: c.etp,
+      platform: c.platform,
+      livePlatform: c.platform,
+      activity: null,
+      liveTime: clock.time,
+      liveKind: clock.kind || "scheduled",
+      cancelledAtStop: false,
+      cancelReasonAtStop: null,
+      loadingPercentage: c.loading_percentage ?? null,
+      coachLoading: parseCoachLoading(c.coach_loading),
+      actualSource: c.actualSource,
+    };
+  });
   const hspPending = serviceHspPending(db, ymd, resolvedRid);
   if (hspPending) startBoardHspFill(ymd, [resolvedRid]);
   const originStop = stops.find((s) => s.slot === "OR") || stops.find((s) => s.crs && s.slot !== "PP");

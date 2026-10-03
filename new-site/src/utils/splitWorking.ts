@@ -1,5 +1,11 @@
 import type { ConsistData, ServiceAssociation, ServiceDetail, ServiceStop } from '../types/darwin'
 
+export function isPassengerHeadcode(trainId: string | null | undefined): boolean {
+  const ch = String(trainId || '').trim().charAt(0)
+  if (!ch) return true
+  return ch === '1' || ch === '2' || ch === '9'
+}
+
 export function joinStationNames(names: Array<string | null | undefined>): string {
   const unique = [...new Set(names.map((n) => String(n || '').trim()).filter(Boolean))]
   if (unique.length === 0) return ''
@@ -10,7 +16,7 @@ export function joinStationNames(names: Array<string | null | undefined>): strin
 
 export function serviceDestinationLabel(data: Pick<ServiceDetail, 'destinationName' | 'destination' | 'stops' | 'associations'>): string {
   const extras = (data.associations || [])
-    .filter((a) => a.category === 'VV' && a.role === 'main' && !a.isCancelled)
+    .filter((a) => a.category === 'VV' && a.role === 'main' && !a.isCancelled && isPassengerHeadcode(a.otherTrainId))
     .map((a) => a.otherDestinationName)
   const published = String(data.destinationName || '').trim()
   if (published.includes(' & ') && extras.length === 0) return published
@@ -116,12 +122,13 @@ export function splitPortionLabel(portion: SplitPortion, splitName: string): str
 
 export function buildSplitWorking(self: ServiceDetail, partners: ServiceDetail[]): SplitWorking | null {
   const links = (self.associations || []).filter(
-    (a) => (a.category === 'VV' || a.category === 'JJ') && !a.isDeleted,
+    (a) => (a.category === 'VV' || a.category === 'JJ') && !a.isDeleted && isPassengerHeadcode(a.otherTrainId),
   )
   if (!links.length) return null
   const splitTpl = links[0].tiploc
   if (!splitTpl) return null
   const atSplit = links.filter((a) => a.tiploc === splitTpl)
+  if (!atSplit.some((a) => a.role === 'main')) return null
   const isJoin = atSplit.every((a) => a.category === 'JJ') || atSplit.some((a) => a.category === 'JJ')
 
   const byKey = new Map<string, ServiceDetail>()

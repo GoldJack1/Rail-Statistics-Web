@@ -34,6 +34,32 @@ function liveFromCall(c: RailCoreCall): { liveTime: string | null; liveKind: Ser
   return { liveTime: null, liveKind: 'scheduled' }
 }
 
+function hydrateStopLive(stop: ServiceStop): ServiceStop {
+  const live = liveFromCall({
+    ata: stop.ata,
+    atd: stop.atd,
+    atp: stop.atp,
+    eta: stop.eta,
+    etd: stop.etd,
+    etp: stop.etp,
+    liveKind: stop.liveKind,
+    wta: stop.wta,
+    wtd: stop.wtd,
+    wtp: stop.wtp,
+  })
+  const booked = stop.ptd || stop.pta || stop.wtd || stop.wta || stop.wtp
+  const liveLooksBooked =
+    live.liveKind === 'scheduled' &&
+    stop.liveTime &&
+    booked &&
+    String(stop.liveTime).slice(0, 5) === String(booked).slice(0, 5)
+  return {
+    ...stop,
+    liveTime: live.liveTime ?? (liveLooksBooked ? null : stop.liveTime),
+    liveKind: live.liveKind || stop.liveKind || 'scheduled',
+  }
+}
+
 export function parseHistoryDatesList(body: unknown): string[] {
   if (!body || typeof body !== 'object') return []
   const dates = (body as { dates?: unknown }).dates
@@ -164,64 +190,71 @@ export function isRailCoreService(body: unknown): body is { callingPoints: RailC
 }
 
 export function normalizeServiceDetail(body: unknown): ServiceDetail {
-  if (!isRailCoreService(body)) return body as ServiceDetail
-  const b = body as Record<string, unknown> & { callingPoints: RailCoreCall[] }
-  const stops: ServiceStop[] = b.callingPoints.map((c, i) => {
-    const live = liveFromCall(c)
-    const last = i === b.callingPoints.length - 1
-    const first = i === 0
-    const slot = c.isPassing ? 'PP' : first ? 'OR' : last ? 'DT' : 'IP'
+  if (isRailCoreService(body)) {
+    const b = body as Record<string, unknown> & { callingPoints: RailCoreCall[] }
+    const stops: ServiceStop[] = b.callingPoints.map((c, i) => {
+      const live = liveFromCall(c)
+      const last = i === b.callingPoints.length - 1
+      const first = i === 0
+      const slot = c.isPassing ? 'PP' : first ? 'OR' : last ? 'DT' : 'IP'
+      return {
+        tpl: c.tiploc || '',
+        name: null,
+        crs: c.crs ?? null,
+        slot,
+        pta: c.sta ?? null,
+        ptd: c.std ?? null,
+        wta: c.wta ?? null,
+        wtd: c.wtd ?? null,
+        wtp: c.wtp ?? null,
+        ata: c.ata ?? null,
+        atd: c.atd ?? null,
+        atp: c.atp ?? null,
+        eta: c.eta ?? null,
+        etd: c.etd ?? null,
+        etp: c.etp ?? null,
+        platform: c.platform ?? null,
+        livePlatform: c.platform ?? null,
+        activity: null,
+        liveTime: live.liveTime,
+        liveKind: live.liveKind,
+        cancelledAtStop: false,
+        cancelReasonAtStop: null,
+        loadingPercentage: typeof c.loadingPercentage === 'number' ? c.loadingPercentage : null,
+        coachLoading: Array.isArray(c.coachLoading) ? c.coachLoading : null,
+        actualSource: c.actualSource ?? null,
+      }
+    })
     return {
-      tpl: c.tiploc || '',
-      name: null,
-      crs: c.crs ?? null,
-      slot,
-      pta: c.sta ?? null,
-      ptd: c.std ?? null,
-      wta: c.wta ?? null,
-      wtd: c.wtd ?? null,
-      wtp: c.wtp ?? null,
-      ata: c.ata ?? null,
-      atd: c.atd ?? null,
-      atp: c.atp ?? null,
-      platform: c.platform ?? null,
-      livePlatform: c.platform ?? null,
-      activity: null,
-      liveTime: live.liveTime,
-      liveKind: live.liveKind,
-      cancelledAtStop: false,
-      cancelReasonAtStop: null,
-      loadingPercentage: typeof c.loadingPercentage === 'number' ? c.loadingPercentage : null,
-      coachLoading: Array.isArray(c.coachLoading) ? c.coachLoading : null,
-      actualSource: c.actualSource ?? null,
+      rid: String(b.rid),
+      uid: String(b.uid || ''),
+      trainId: String(b.headcode || ''),
+      ssd: '',
+      toc: String(b.toc || ''),
+      tocName: b.tocName ? String(b.tocName) : b.operatorName ? String(b.operatorName) : null,
+      trainCat: null,
+      isPassenger: String(b.serviceType || 'passenger') === 'passenger',
+      origin: String(b.originCrs || ''),
+      originName: b.originName ? String(b.originName) : null,
+      destination: String(b.destinationCrs || ''),
+      destinationName: b.destinationName ? String(b.destinationName) : null,
+      cancelled: Boolean(b.cancelled),
+      cancellation: null,
+      partiallyCancelled: false,
+      delayReason: null,
+      reverseFormation: false,
+      formation: (b.formation as ServiceDetail['formation']) || null,
+      consist: (b.consist as ServiceDetail['consist']) || null,
+      associations: Array.isArray(b.associations) ? (b.associations as ServiceDetail['associations']) : [],
+      alerts: [],
+      stops,
+      historicalDate: (b.historicalDate as string) || null,
+      location: (b.location as ServiceDetail['location']) || null,
+      hspPending: Boolean(b.hspPending),
+      updatedAt: new Date().toISOString(),
     }
-  })
-  return {
-    rid: String(b.rid),
-    uid: String(b.uid || ''),
-    trainId: String(b.headcode || ''),
-    ssd: '',
-    toc: String(b.toc || ''),
-    tocName: b.operatorName ? String(b.operatorName) : null,
-    trainCat: null,
-    isPassenger: String(b.serviceType || 'passenger') === 'passenger',
-    origin: String(b.originCrs || ''),
-    originName: b.originName ? String(b.originName) : null,
-    destination: String(b.destinationCrs || ''),
-    destinationName: b.destinationName ? String(b.destinationName) : null,
-    cancelled: Boolean(b.cancelled),
-    cancellation: null,
-    partiallyCancelled: false,
-    delayReason: null,
-    reverseFormation: false,
-    formation: (b.formation as ServiceDetail['formation']) || null,
-    consist: (b.consist as ServiceDetail['consist']) || null,
-    associations: [],
-    alerts: [],
-    stops,
-    historicalDate: (b.historicalDate as string) || null,
-    location: (b.location as ServiceDetail['location']) || null,
-    hspPending: Boolean(b.hspPending),
-    updatedAt: new Date().toISOString(),
   }
+  const detail = body as ServiceDetail
+  if (!detail?.stops?.length) return detail
+  return { ...detail, stops: detail.stops.map(hydrateStopLive) }
 }
