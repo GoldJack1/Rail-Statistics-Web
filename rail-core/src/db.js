@@ -444,11 +444,7 @@ export function refreshServiceJourney(db, rid, lookupName) {
   ).run(origin.crs, originName, dest.crs, destName, dest.tiploc, rid);
 }
 
-/** Drop CIF/DTD rows whose RID date is after this day file (next-day ghosts). */
-export function pruneFutureDayRids(db, ymd) {
-  const compact = String(ymd || "").replace(/-/g, "");
-  if (!/^\d{8}$/.test(compact)) return { services: 0, calls: 0 };
-  const extra = db.prepare(`SELECT rid FROM services WHERE substr(rid, 1, 8) > ?`).all(compact);
+function deleteRids(db, extra) {
   if (!extra.length) return { services: 0, calls: 0 };
   const delCalls = db.prepare(`DELETE FROM calls WHERE rid = ?`);
   const delSvc = db.prepare(`DELETE FROM services WHERE rid = ?`);
@@ -460,6 +456,30 @@ export function pruneFutureDayRids(db, ymd) {
   }
   db.exec("COMMIT");
   return { services: extra.length, calls };
+}
+
+/** Drop CIF/DTD rows whose RID date is after this day file (next-day ghosts). */
+export function pruneFutureDayRids(db, ymd) {
+  const compact = String(ymd || "").replace(/-/g, "");
+  if (!/^\d{8}$/.test(compact)) return { services: 0, calls: 0 };
+  const extra = db.prepare(`SELECT rid FROM services WHERE substr(rid, 1, 8) > ?`).all(compact);
+  return deleteRids(db, extra);
+}
+
+/** YYYYMMDD+UID stubs left on a Darwin operating day (no 15-digit RID). */
+export function pruneCifUidStubRids(db) {
+  const hasDarwin = db
+    .prepare(
+      `SELECT 1 AS ok FROM services WHERE rid GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]' LIMIT 1`,
+    )
+    .get();
+  if (!hasDarwin) return { services: 0, calls: 0 };
+  const extra = db
+    .prepare(
+      `SELECT rid FROM services WHERE rid NOT GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'`,
+    )
+    .all();
+  return deleteRids(db, extra);
 }
 
 export function snapshotCallLive(db, rid) {

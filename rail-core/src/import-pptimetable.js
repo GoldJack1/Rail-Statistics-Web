@@ -10,6 +10,7 @@ import {
   openCatalog,
   openDayDb,
   operatingDayYmd,
+  pruneCifUidStubRids,
   pruneFutureDayRids,
   refreshServiceJourney,
   restoreCallLive,
@@ -77,9 +78,10 @@ for (const j of journeys) {
   }
 }
 db.exec("COMMIT");
-if (replace) {
-  const pruned = pruneFutureDayRids(db, ymd);
-  console.log("pruned future-day rids", pruned);
+const prunedFuture = pruneFutureDayRids(db, ymd);
+const prunedStubs = pruneCifUidStubRids(db);
+if (prunedFuture.services || prunedStubs.services) {
+  console.log("pruned future-day rids", prunedFuture, "cif uid stubs", prunedStubs);
 }
 db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('timetable_imported', ?)`).run(ymd);
 console.log("imported", n, "timetable journeys");
