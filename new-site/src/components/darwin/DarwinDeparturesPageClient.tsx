@@ -604,10 +604,6 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       const timeMatch = sliceInUi
         ? scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
         : true
-      const sliceInUi = historicalMode || futureTimetableMode || (datedBoard && !historyTime)
-      const timeMatch = sliceInUi
-        ? scheduledTimeInRailwayWindow(row.scheduledTime, historyWindowStart, hours)
-        : true
       return tocMatch && serviceTypeMatch && stopModeMatch && timeMatch
     })
   }, [data, selectedTocs, selectedServiceTypes, selectedStopModes, showDetailedInfo, datedBoard, historyTime, historyWindowStart, hours, historicalMode, futureTimetableMode])
