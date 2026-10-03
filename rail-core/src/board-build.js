@@ -4,7 +4,7 @@
  */
 import { platformText } from "./db.js";
 import { tocDisplayName } from "./toc-names.js";
-import { callScheduledMinutes, isAdvertisedCall, isWorkingPass, sortCallsByJourneyTime } from "./journey-order.js";
+import { callScheduledMinutes, dropCifTailAfterPublicTerminus, isAdvertisedCall, isWorkingPass, sortCallsByJourneyTime } from "./journey-order.js";
 import { maskCallAsOf, maskCallsAsOf, maskTrustOverlay, maskTrustOverlayCalls } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
 import { lookupConsistsForUids, unitIdsAtBoardCall } from "./ptac-apply.js";
@@ -343,7 +343,7 @@ export function buildStationBoard({
       }
     }
     for (const [rid, list] of callsByRid) {
-      callsByRid.set(rid, sortCallsByJourneyTime(list));
+      callsByRid.set(rid, sortCallsByJourneyTime(dropCifTailAfterPublicTerminus(list)));
     }
   }
   const departures = [];

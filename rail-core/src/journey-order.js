@@ -34,6 +34,7 @@ export function isAdvertisedCall(c) {
 }
 
 export function isWorkingPass(c) {
+  if (isAdvertisedCall(c) && c.crs) return false;
   if (Number(c?.is_passing)) return true;
   const sta = publicCallTime(c?.sta, c);
   const std = publicCallTime(c?.std, c);
@@ -103,6 +104,26 @@ export function sortCallsByJourneyTime(rows) {
     if (d) return d;
     return (Number(a.seq) || 0) - (Number(b.seq) || 0) || String(a.tiploc || "").localeCompare(String(b.tiploc || ""));
   });
+}
+
+/** CIF often appends another working after Darwin's public terminus (seq jumps backward in time). */
+export function dropCifTailAfterPublicTerminus(rows) {
+  const ordered = [...(rows || [])].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
+  let lastAdvMins = null;
+  let lastAdvIdx = -1;
+  for (let i = 0; i < ordered.length; i++) {
+    const c = ordered[i];
+    if (!c.crs || !isAdvertisedCall(c)) continue;
+    const m = callScheduledMinutes(c);
+    if (lastAdvMins != null && m != null) {
+      let delta = m - lastAdvMins;
+      if (delta < -12 * 60) delta += 1440;
+      if (delta < -40) return ordered.slice(0, lastAdvIdx + 1);
+    }
+    if (m != null) lastAdvMins = m;
+    lastAdvIdx = i;
+  }
+  return ordered;
 }
 
 export function publicJourneyEnds(calls) {

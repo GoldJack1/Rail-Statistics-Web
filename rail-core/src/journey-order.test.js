@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collapseCallsByTiploc, publicJourneyEnds, sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, publicJourneyEnds, sortCallsByJourneyTime } from "./journey-order.js";
 
 test("orders a same-evening run from first time to last", () => {
   const rows = [
@@ -104,4 +104,19 @@ test("dummy 00:00 public times do not become the destination or reorder the run"
   const { origin, dest } = publicJourneyEnds(rows);
   assert.equal(origin.crs, "WGW");
   assert.equal(dest.crs, "LDS");
+});
+
+test("drops a CIF working glued on after the public terminus", () => {
+  const rows = [
+    { tiploc: "MNCRIAP", crs: "MIA", seq: 0, std: "16:44", is_passing: 0 },
+    { tiploc: "LEEDS", crs: "LDS", seq: 1, sta: "18:13", std: "18:15", is_passing: 0 },
+    { tiploc: "SBRN", crs: "SLB", seq: 2, sta: "19:58", is_passing: 0 },
+    { tiploc: "THRPSBJ", crs: null, seq: 3, wtp: "17:03", is_passing: 1 },
+    { tiploc: "TODMRDN", crs: "TOD", seq: 4, sta: "17:25", std: "17:25", is_passing: 0 },
+    { tiploc: "BRHOUSE", crs: "BGH", seq: 5, sta: "17:49", std: "17:49", is_passing: 0 },
+  ];
+  assert.deepEqual(
+    dropCifTailAfterPublicTerminus(rows).map((r) => r.tiploc),
+    ["MNCRIAP", "LEEDS", "SBRN"],
+  );
 });
