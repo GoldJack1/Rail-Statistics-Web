@@ -146,7 +146,10 @@ export function delayedBoardStatusLabel(row: DepartureRow, pastTimes: boolean): 
     const isArrivalEvent = row.movement === 'arrival' || row.liveKind === 'actual-arr' || row.liveKind === 'est-arr'
     const verb = row.isPassing ? 'Passed' : isArrivalEvent ? 'Arrived' : 'Departed'
     const event = time ? `${verb} at ${time}` : verb
-    return reason ? `Was Delayed\u00a0|\u00a0${event} · ${reason}` : `Was Delayed\u00a0|\u00a0${event}`
+    const mins = typeof row.delayMinutes === 'number' && row.delayMinutes >= 1 ? row.delayMinutes : null
+    const late = mins != null ? ` (${mins} min${mins === 1 ? '' : 's'} Late)` : ''
+    const main = `${event}${late}`
+    return reason ? `Was Delayed\u00a0|\u00a0${main} · ${reason}` : `Was Delayed\u00a0|\u00a0${main}`
   }
   const detail = [reason, time ? `Expected at ${time}` : ''].filter(Boolean).join(' · ')
   return detail ? `Delayed\u00a0|\u00a0${detail}` : 'Delayed'

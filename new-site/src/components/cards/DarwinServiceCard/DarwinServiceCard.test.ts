@@ -34,12 +34,12 @@ describe('delayedBoardStatusLabel', () => {
   })
 
   it('uses Was Delayed | Departed at on past boards', () => {
-    expect(delayedBoardStatusLabel(row({}), true)).toBe('Was Delayed\u00a0|\u00a0Departed at 19:18')
+    expect(delayedBoardStatusLabel(row({}), true)).toBe('Was Delayed\u00a0|\u00a0Departed at 19:18 (18 mins Late)')
   })
 
   it('uses Was Delayed | Arrived at for terminating / arrival rows', () => {
     expect(delayedBoardStatusLabel(row({ movement: 'arrival', liveKind: 'est-arr' }), true)).toBe(
-      'Was Delayed\u00a0|\u00a0Arrived at 19:18',
+      'Was Delayed\u00a0|\u00a0Arrived at 19:18 (18 mins Late)',
     )
   })
 })
