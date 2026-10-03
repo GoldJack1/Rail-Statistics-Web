@@ -22,6 +22,8 @@ import './DarwinServiceCard.css'
 type DarwinServiceCardProps = {
   row: DepartureRow
   historicalMode: boolean
+  /** Same-day `at=` snapshots and previous days: Was Delayed | Departed/Arrived at. */
+  pastTimes?: boolean
   detailedInfo?: boolean
   showFormation?: boolean
   onClick: () => void
@@ -137,10 +139,10 @@ function earlyLabel(row: DepartureRow, minutes: number, ongoing: boolean): strin
   return time ? `${word} ${mins} early at ${time}` : `${word} ${mins} early`
 }
 
-export function delayedBoardStatusLabel(row: DepartureRow, historicalMode: boolean): string {
+export function delayedBoardStatusLabel(row: DepartureRow, pastTimes: boolean): string {
   const reason = (row.delayReason?.reason || '').replace(/\s+/g, ' ').trim()
   const time = liveClock(row)
-  if (historicalMode) {
+  if (pastTimes) {
     const isArrivalEvent = row.movement === 'arrival' || row.liveKind === 'actual-arr' || row.liveKind === 'est-arr'
     const verb = row.isPassing ? 'Passed' : isArrivalEvent ? 'Arrived' : 'Departed'
     const event = time ? `${verb} at ${time}` : verb
@@ -155,7 +157,7 @@ function punctualityTone(delayMinutes: number | null, fallback: CallingPatternTo
   return fallback
 }
 
-function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: boolean): {
+function buildStatus(row: DepartureRow, detailedInfo: boolean, pastTimes: boolean): {
   tone: StatusTone
   label: string
   mode: string | null
@@ -175,16 +177,19 @@ function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: b
       return { tone: 'early', label: earlyLabel(row, delayMinutes, false), mode }
     }
     if (delayMinutes != null && delayMinutes > 0) {
+      if (pastTimes) {
+        return { tone: punctualityTone(delayMinutes), label: delayedBoardStatusLabel(row, true), mode }
+      }
       return { tone: punctualityTone(delayMinutes), label: `${verb} ${formatDelayAbs(delayMinutes)} late`, mode }
     }
     return { tone: 'ontime', label: 'On Time', mode }
   }
 
   if (row.unknownDelay || row.manualUnknownDelay) {
-    return { tone: punctualityTone(delayMinutes, 'delay-16'), label: delayedBoardStatusLabel(row, historicalMode), mode }
+    return { tone: punctualityTone(delayMinutes, 'delay-16'), label: delayedBoardStatusLabel(row, pastTimes), mode }
   }
 
-  if (historicalMode && (row.liveKind === 'scheduled' || row.liveKind === 'working')) {
+  if (pastTimes && (row.liveKind === 'scheduled' || row.liveKind === 'working')) {
     const scheduledAt = Date.parse(row.scheduledAt)
     const alreadyRun = Number.isFinite(scheduledAt) && scheduledAt < Date.now() - 60_000
     if (alreadyRun) {
@@ -200,9 +205,9 @@ function buildStatus(row: DepartureRow, historicalMode: boolean, detailedInfo: b
 
   if (expectedOffSchedule) {
     if (delayMinutes != null && delayMinutes < 0) {
-      return { tone: 'early', label: earlyLabel(row, delayMinutes, true), mode }
+      return { tone: 'early', label: earlyLabel(row, delayMinutes, !pastTimes), mode }
     }
-    return { tone: punctualityTone(delayMinutes), label: delayedBoardStatusLabel(row, historicalMode), mode }
+    return { tone: punctualityTone(delayMinutes), label: delayedBoardStatusLabel(row, pastTimes), mode }
   }
 
   return { tone: 'ontime', label: 'On Time', mode }
@@ -221,6 +226,7 @@ function coachClassName(index: number, count: number): string {
 const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
   row,
   historicalMode,
+  pastTimes,
   detailedInfo = false,
   showFormation = true,
   onClick,
@@ -230,7 +236,7 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
   const headline = buildHeadline(row)
   const meta = buildMeta(row, detailedInfo, historicalMode)
   const formation = buildFormation(row, historicalMode)
-  const status = buildStatus(row, historicalMode, detailedInfo)
+  const status = buildStatus(row, detailedInfo, pastTimes ?? historicalMode)
   const coachCount = carriageCount(row)
   const visibleCoaches = coachCount != null ? Math.min(coachCount, MAX_COACH_PILLS) : 0
   const loadValues = visibleCoaches > 0 ? coachLoadValues(row, visibleCoaches) : []

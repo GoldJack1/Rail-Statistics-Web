@@ -176,6 +176,7 @@ function writeFormationPreference(enabled: boolean): void {
 type DarwinDepartureRowCardProps = {
   row: DepartureRow
   historicalMode: boolean
+  pastTimes: boolean
   detailedInfo: boolean
   showFormation: boolean
   code: string
@@ -191,6 +192,7 @@ type DarwinDepartureRowCardProps = {
 const DarwinDepartureRowCard = React.memo(function DarwinDepartureRowCard({
   row,
   historicalMode,
+  pastTimes,
   detailedInfo,
   showFormation,
   code,
@@ -236,6 +238,7 @@ const DarwinDepartureRowCard = React.memo(function DarwinDepartureRowCard({
       <DarwinServiceCard
         row={row}
         historicalMode={historicalMode}
+        pastTimes={pastTimes}
         detailedInfo={detailedInfo}
         showFormation={showFormation}
         onClick={onClick}
@@ -1168,6 +1171,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                         key={`${row.rid}-${row.movement ?? 'departure'}`}
                         row={row}
                         historicalMode={historicalMode}
+                        pastTimes={historicalMode || timedCurrentDayMode}
                         code={code}
                         hours={hours}
                         historyDate={historyDate}
