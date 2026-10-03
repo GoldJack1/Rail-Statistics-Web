@@ -654,6 +654,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     ),
     svc.toc,
     journeyTpls,
+    consist,
   );
   persistInferred(db, resolvedRid, []);
   const calls = maskCallsAsOf(

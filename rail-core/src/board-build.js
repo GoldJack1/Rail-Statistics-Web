@@ -420,6 +420,7 @@ export function buildStationBoard({
         ),
         toc,
         pax.map((c) => c.tiploc),
+        consistDoc,
       );
       assocByRid.set(r.s_rid, associations);
     }

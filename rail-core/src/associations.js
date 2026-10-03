@@ -441,10 +441,37 @@ export function inferScheduleDivides({ db, svc, stationName, ymd = null, databas
   return out;
 }
 
+function unitContinuesPast(mine, unitId, tpl) {
+  const last = mine.last.get(unitId);
+  return Boolean(last?.tpl && last.tpl !== tpl);
+}
+
+/** Another unit started with this one and still runs past the leave/join TIPLOC. */
+function coupledThrough(mine, unitId, atTpl) {
+  const selfOrig = mine.first.get(unitId)?.tpl;
+  if (!selfOrig) return false;
+  for (const [id, first] of mine.first) {
+    if (id === unitId) continue;
+    if (first.tpl !== selfOrig) continue;
+    if (unitContinuesPast(mine, id, atTpl)) return true;
+  }
+  return false;
+}
+
+function originUnitContinuesPast(mine, atTpl) {
+  if (!mine.trainOrig) return false;
+  for (const [id, first] of mine.first) {
+    if (first.tpl !== mine.trainOrig) continue;
+    if (unitContinuesPast(mine, id, atTpl)) return true;
+  }
+  return false;
+}
+
 /**
  * When CIF/Darwin associations are missing, recover a divide from PTAC:
  * a unit leaves this RID before the advertised train destination and starts
  * another UID from that TIPLOC within 45 minutes.
+ * A 1-for-1 en-route unit swap (nothing from origin continues) is not a divide.
  */
 export function inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, stationName }) {
   if (!db || !catalog || !consist || !svc?.uid) return [];
@@ -504,12 +531,12 @@ export function inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, s
   };
 
   for (const [unitId, last] of mine.last) {
-    if (last.tpl && mine.trainDest && last.tpl !== mine.trainDest) {
+    if (last.tpl && mine.trainDest && last.tpl !== mine.trainDest && coupledThrough(mine, unitId, last.tpl)) {
       considerPartner(unitId, last.tpl, last.minutes, "VV", "main");
     }
   }
   for (const [unitId, first] of mine.first) {
-    if (first.tpl && mine.trainOrig && first.tpl !== mine.trainOrig) {
+    if (first.tpl && mine.trainOrig && first.tpl !== mine.trainOrig && originUnitContinuesPast(mine, first.tpl)) {
       considerPartner(unitId, first.tpl, first.minutes, "VV", "associated");
     }
   }
@@ -612,10 +639,15 @@ export function publicDivideAssociations(associations, toc = null, journeyTpls =
   return [];
 }
 
-export function filterDisplayAssociations(associations, toc = null, journeyTpls = []) {
+export function filterDisplayAssociations(associations, toc = null, journeyTpls = [], consist = null) {
+  const mine = consist ? unitEnds(consist) : null;
   const keepMain = new Set(publicDivideAssociations(associations, toc, journeyTpls).map((a) => `${a.otherRid}|${a.tiploc}`));
   return (associations || []).filter((a) => {
     if (!isPassengerHeadcode(a.otherTrainId)) return false;
+    if (a.category === "VV" && mine) {
+      const tpl = String(a.tiploc || "").toUpperCase();
+      if (tpl && !originUnitContinuesPast(mine, tpl)) return false;
+    }
     if (a.category !== "VV" || a.role !== "main") return true;
     return keepMain.has(`${a.otherRid}|${a.tiploc}`);
   });
