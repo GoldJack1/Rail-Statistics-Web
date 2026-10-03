@@ -94,7 +94,8 @@ function workingServiceHref(
   a: { otherUid: string | null; otherRid: string },
   date: string | null | undefined,
   viewMode: ReturnType<typeof useServiceViewMode>[0],
-) {
+): string | undefined {
+  if (!date) return undefined
   return serviceHref({
     id: a.otherUid || a.otherRid,
     date,
