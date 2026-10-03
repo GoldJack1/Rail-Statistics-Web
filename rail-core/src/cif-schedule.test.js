@@ -1,10 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cifBsRunsOn, cifWeekdayIndex, parseCifBxAtoc, parseCifLocation } from "./cif-schedule.js";
+import { cifBsRunsOn, cifImportDayYmds, cifWeekdayIndex, parseCifBxAtoc, parseCifLocation } from "./cif-schedule.js";
 
 function bs({ days = "0000100", stp = "P", txn = "N" } = {}) {
   return (`BS${txn}UID001260518261207${days} PXX1S25`).padEnd(79, " ") + stp;
 }
+
+test("CIF import skips Darwin’s operating day", () => {
+  assert.deepEqual(cifImportDayYmds("2026-10-03", 2, "2026-10-03"), ["2026-10-04", "2026-10-05"]);
+  assert.deepEqual(cifImportDayYmds("2026-10-04", 1, "2026-10-03"), ["2026-10-04", "2026-10-05"]);
+});
 
 test("CIF weekday index is Mon=0", () => {
   assert.equal(cifWeekdayIndex("2026-10-02"), 4);

@@ -3,7 +3,8 @@
  * Import a Darwin/CIF MCA into day-*.sqlite.
  * Usage: node src/import-tt.js <cif-file> [YYYY-MM-DD] [ahead-days]
  * Only workings that run on each calendar day are written. ahead-days (default
- * TT_CIF_AHEAD_DAYS, else ~182) also fills the following dates from the same file.
+ * TT_CIF_AHEAD_DAYS, else 14) also fills the following dates from the same file.
+ * Darwin’s current operating day is never written (v8 already owns that file).
  */
 import { createReadStream, openSync, readSync, closeSync } from "node:fs";
 import { basename } from "node:path";
@@ -11,14 +12,15 @@ import { createInterface } from "node:readline";
 import { createGunzip } from "node:zlib";
 import { adoptUidOntoRid, openCatalog, openDayDb, refreshServiceJourney, upsertCall, upsertService } from "./db.js";
 import { parseCifAa, upsertAssociation } from "./associations.js";
-import { addCalendarDays } from "./calendar-day.js";
 import {
   cifBsRunsOn,
+  cifImportDayYmds,
   longRangeAheadDays,
   parseCifBxAtoc,
   parseCifLocation,
   TT_IMPORT_BATCH_DAYS,
 } from "./cif-schedule.js";
+import { operatingDayYmd } from "./db.js";
 
 const file = process.argv[2];
 if (!file) {
@@ -224,21 +226,21 @@ async function importBatch(days) {
   }
 }
 
-console.log(`CIF/DTD import ${file} from ${startYmd} for ${ahead + 1} calendar days`);
-for (let offset = 0; offset <= ahead; offset += TT_IMPORT_BATCH_DAYS) {
-  const span = Math.min(TT_IMPORT_BATCH_DAYS - 1, ahead - offset);
-  const days = [];
-  for (let i = 0; i <= span; i++) {
-    const ymd = addCalendarDays(startYmd, offset + i);
-    days.push({
-      ymd,
-      compact: ymd.replace(/-/g, ""),
-      db: openDayDb(DATA_DIR, ymd),
-      nSvc: 0,
-      nCall: 0,
-      uidStmt: null,
-    });
-  }
+const skipToday = operatingDayYmd();
+const ymds = cifImportDayYmds(startYmd, ahead, skipToday);
+console.log(
+  `CIF/DTD import ${file} from ${startYmd} for ${ahead + 1} calendar days (skip Darwin day ${skipToday}, ${ymds.length} files)`,
+);
+for (let offset = 0; offset < ymds.length; offset += TT_IMPORT_BATCH_DAYS) {
+  const batchYmds = ymds.slice(offset, offset + TT_IMPORT_BATCH_DAYS);
+  const days = batchYmds.map((ymd) => ({
+    ymd,
+    compact: ymd.replace(/-/g, ""),
+    db: openDayDb(DATA_DIR, ymd),
+    nSvc: 0,
+    nCall: 0,
+    uidStmt: null,
+  }));
   await importBatch(days);
 }
 catalog.close();

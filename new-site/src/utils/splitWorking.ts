@@ -205,3 +205,68 @@ export function buildSplitWorking(self: ServiceDetail, partners: ServiceDetail[]
     associations: atSplit,
   }
 }
+
+export type PortionWorking = {
+  kind: 'previous' | 'next'
+  association: ServiceAssociation
+  trainId: string
+  originName: string
+  destinationName: string
+}
+
+function partnerById(partners?: Map<string, ServiceDetail> | ServiceDetail[]): Map<string, ServiceDetail> {
+  const map = new Map<string, ServiceDetail>()
+  const add = (svc: ServiceDetail) => {
+    if (!svc?.rid) return
+    map.set(svc.rid, svc)
+    if (svc.uid) map.set(svc.uid.toUpperCase(), svc)
+  }
+  if (!partners) return map
+  if (partners instanceof Map) {
+    for (const svc of partners.values()) add(svc)
+  } else {
+    for (const svc of partners) add(svc)
+  }
+  return map
+}
+
+function partnerEnds(svc: ServiceDetail | undefined): { origin: string; dest: string } {
+  const stops = svc?.stops || []
+  const first = stops.find((s) => s.slot !== 'PP')
+  const last = [...stops].reverse().find((s) => s.slot !== 'PP')
+  return {
+    origin: first?.name || svc?.originName || svc?.origin || '',
+    dest: last?.name || svc?.destinationName || svc?.destination || '',
+  }
+}
+
+export function previousNextWorkings(
+  associations: ServiceAssociation[] | undefined,
+  partners?: Map<string, ServiceDetail> | ServiceDetail[],
+): { previous: PortionWorking[]; next: PortionWorking[] } {
+  const byId = partnerById(partners)
+  const previous: PortionWorking[] = []
+  const next: PortionWorking[] = []
+  for (const a of associations || []) {
+    if (a.category !== 'NP' || a.isDeleted || !isPassengerHeadcode(a.otherTrainId)) continue
+    const partner = byId.get(a.otherRid) || byId.get(String(a.otherUid || '').toUpperCase())
+    const ends = partnerEnds(partner)
+    const trainId = a.otherTrainId || partner?.trainId || ''
+    if (!trainId) continue
+    const originName = a.otherOriginName || ends.origin
+    const destinationName = a.otherDestinationName || ends.dest
+    if (!originName || !destinationName) continue
+    const row: PortionWorking = { kind: 'next', association: a, trainId, originName, destinationName }
+    if (a.role === 'main') next.push({ ...row, kind: 'next' })
+    else previous.push({ ...row, kind: 'previous' })
+  }
+  return { previous, next }
+}
+
+export function previousWorkingSentence(w: PortionWorking): string {
+  return `This train previously ran as ${w.trainId} from ${w.originName} to ${w.destinationName}`
+}
+
+export function nextWorkingSentence(w: PortionWorking): string {
+  return `This train then runs as ${w.trainId} from ${w.originName} to ${w.destinationName}`
+}

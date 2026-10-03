@@ -635,7 +635,7 @@ export function ServiceStopList({
               />
               {showAssociations
                 ? associations
-                .filter((a) => a.tiploc && a.tiploc === stop.tpl)
+                .filter((a) => a.tiploc && a.tiploc === stop.tpl && a.category !== 'NP')
                 .map((a) => {
                   const href = associationHref?.(a) || `/services/${encodeURIComponent(a.otherUid || a.otherRid)}`
                   const dest = a.otherDestinationName || 'another destination'

@@ -1,14 +1,28 @@
+import { addCalendarDays } from "./calendar-day.js";
+
 /** CIF BS date-run fields (1-based 10–28). */
 
-/** Industry timetable season is ~26 weeks; cap so a nightly import cannot unbounded-grow. */
-export const MAX_TT_AHEAD_DAYS = 200;
-export const DEFAULT_TT_AHEAD_DAYS = 182;
+/** Cap so a nightly CIF import cannot unbounded-grow. Darwin’s own day is never filled from CIF. */
+export const MAX_TT_AHEAD_DAYS = 28;
+export const DEFAULT_TT_AHEAD_DAYS = 14;
 export const TT_IMPORT_BATCH_DAYS = 14;
 
 export function longRangeAheadDays(raw = process.env.TT_CIF_AHEAD_DAYS) {
   const n = Number(raw ?? DEFAULT_TT_AHEAD_DAYS);
   if (!Number.isFinite(n)) return DEFAULT_TT_AHEAD_DAYS;
   return Math.min(MAX_TT_AHEAD_DAYS, Math.max(0, Math.trunc(n)));
+}
+
+/** Calendar days to fill from CIF/DTD, excluding Darwin’s current operating day. */
+export function cifImportDayYmds(startYmd, ahead, skipYmd) {
+  const days = [];
+  const n = Math.max(0, Math.trunc(Number(ahead) || 0));
+  for (let i = 0; i <= n; i++) {
+    const ymd = addCalendarDays(startYmd, i);
+    if (skipYmd && ymd === skipYmd) continue;
+    days.push(ymd);
+  }
+  return days;
 }
 
 export function parseCifTime(raw) {

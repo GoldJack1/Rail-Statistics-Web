@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boardDestinationLabel, buildSplitWorking, isPassengerHeadcode, joinStationNames, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from './splitWorking'
+import { boardDestinationLabel, buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from './splitWorking'
 import type { ServiceDetail, ServiceStop } from '../types/darwin'
 
 function stop(tpl: string, name: string, slot: string): ServiceStop {
@@ -346,5 +346,39 @@ describe('buildSplitWorking', () => {
       stops: [stop('MNCROXR', 'Manchester Oxford Road', 'OR')],
     })
     expect(buildSplitWorking(main, [ecs])).toBeNull()
+  })
+})
+
+describe('previousNextWorkings', () => {
+  const np = (role: 'main' | 'associated', trainId: string): ServiceDetail['associations'][number] => ({
+    category: 'NP',
+    tiploc: 'SBRN',
+    tiplocName: 'Saltburn',
+    tiplocCrs: 'SLB',
+    mainRid: 'MAIN',
+    assocRid: 'ASSOC',
+    role,
+    otherRid: role === 'main' ? 'NEXT' : 'PREV',
+    otherUid: role === 'main' ? 'G11111' : 'G00000',
+    otherTrainId: trainId,
+    otherToc: 'NT',
+    otherOriginName: role === 'main' ? 'Saltburn' : 'Newcastle',
+    otherDestinationName: role === 'main' ? 'Middlesbrough' : 'Saltburn',
+    mainTime: null,
+    assocTime: null,
+    isCancelled: false,
+    isDeleted: false,
+  })
+
+  it('phrases previous and next passenger workings', () => {
+    const { previous, next } = previousNextWorkings([np('associated', '1P83'), np('main', '1P85')])
+    expect(previousWorkingSentence(previous[0])).toBe('This train previously ran as 1P83 from Newcastle to Saltburn')
+    expect(nextWorkingSentence(next[0])).toBe('This train then runs as 1P85 from Saltburn to Middlesbrough')
+  })
+
+  it('drops ECS next portions', () => {
+    const { previous, next } = previousNextWorkings([np('main', '5P85')])
+    expect(previous).toEqual([])
+    expect(next).toEqual([])
   })
 })

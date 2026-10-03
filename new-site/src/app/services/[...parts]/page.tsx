@@ -35,7 +35,7 @@ import {
   serviceHref,
   type ServiceSection,
 } from '@/utils/serviceUrl'
-import { buildSplitWorking, isPassengerHeadcode, joinStationNames, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from '@/utils/splitWorking'
+import { buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from '@/utils/splitWorking'
 import '../ServiceDetailPage.css'
 
 const BASE_SERVICE_SECTIONS: AccountSection[] = [
@@ -88,6 +88,43 @@ function stopTplFromBackLink(from: string, stops: ServiceDetail['stops'], origin
     if (byTpl) return byTpl.tpl
   }
   return origin || null
+}
+
+function workingServiceHref(
+  a: { otherUid: string | null; otherRid: string },
+  date: string | null | undefined,
+  viewMode: ReturnType<typeof useServiceViewMode>[0],
+) {
+  return serviceHref({
+    id: a.otherUid || a.otherRid,
+    date,
+    section: 'calling',
+    mode: viewMode,
+  })
+}
+
+function WorkingLinkCards({
+  workings,
+  date,
+  viewMode,
+}: {
+  workings: ReturnType<typeof previousNextWorkings>['previous']
+  date: string | null | undefined
+  viewMode: ReturnType<typeof useServiceViewMode>[0]
+}) {
+  if (!workings.length) return null
+  return (
+    <div className="svc-working-cards">
+      {workings.map((w) => (
+        <TextCard
+          key={`${w.kind}-${w.association.otherRid}-${w.association.tiploc}`}
+          title={w.kind === 'previous' ? previousWorkingSentence(w) : nextWorkingSentence(w)}
+          to={workingServiceHref(w.association, date, viewMode)}
+          ariaLabel={w.kind === 'previous' ? previousWorkingSentence(w) : nextWorkingSentence(w)}
+        />
+      ))}
+    </div>
+  )
 }
 
 function formatAge(ms: number | null): string {
@@ -302,7 +339,7 @@ const ServiceDetailPage: React.FC = () => {
     const ids = new Set<string>()
     for (const a of data?.associations || []) {
       if (a.isDeleted) continue
-      if (a.category !== 'VV' && a.category !== 'JJ') continue
+      if (a.category !== 'VV' && a.category !== 'JJ' && a.category !== 'NP') continue
       if (!isPassengerHeadcode(a.otherTrainId)) continue
       if (a.otherRid) ids.add(a.otherRid)
       else if (a.otherUid) ids.add(a.otherUid)
@@ -323,6 +360,10 @@ const ServiceDetailPage: React.FC = () => {
   const splitWorking = useMemo(
     () => (data ? buildSplitWorking(data, partners) : null),
     [data, partners],
+  )
+  const portionWorkings = useMemo(
+    () => previousNextWorkings(data?.associations, partnerMap),
+    [data?.associations, partnerMap],
   )
   const destinationLabel = splitWorking
     ? joinStationNames(splitWorking.portions.map((p) => p.destinationName))
@@ -522,7 +563,7 @@ const ServiceDetailPage: React.FC = () => {
               ))}
 
               {(splitWorking?.associations || data.associations || [])
-                .filter((a) => isPassengerHeadcode(a.otherTrainId))
+                .filter((a) => a.category !== 'NP' && isPassengerHeadcode(a.otherTrainId))
                 .map((a) => {
                 const href = serviceHref({
                   id: a.otherUid || a.otherRid,
@@ -671,6 +712,8 @@ const ServiceDetailPage: React.FC = () => {
 
         {data && section === 'calling' && (
             <section className="modal-section svc-pattern-card" aria-label="Calling pattern">
+              <div className="svc-calling-stack">
+              <WorkingLinkCards workings={portionWorkings.previous} date={data.ssd || date} viewMode={viewMode} />
               {splitWorking ? (
                 <div className="svc-split-portions">
                   <ServiceStopList
@@ -713,7 +756,7 @@ const ServiceDetailPage: React.FC = () => {
                 delayReason={data.delayReason?.reason}
                 alertText={data.alerts?.[0]?.text}
                 location={data.location}
-                associations={data.associations}
+                associations={(data.associations || []).filter((a) => a.category !== 'NP')}
                 associationHref={(a) =>
                   serviceHref({
                     id: a.otherUid || a.otherRid,
@@ -724,6 +767,8 @@ const ServiceDetailPage: React.FC = () => {
                 }
               />
               )}
+              <WorkingLinkCards workings={portionWorkings.next} date={data.ssd || date} viewMode={viewMode} />
+              </div>
             </section>
         )}
 
