@@ -30,7 +30,6 @@ import { prefetchDarwinService } from '@/hooks/useServiceDetail'
 import { goToServicePath } from '@/utils/serviceUrl'
 import { boardDestinationLabel } from '@/utils/splitWorking'
 import { formatLmTocName } from '@/utils/formatLmTocName'
-import { isoDateToDdMmYyyy } from '@/utils/dateDdMmYyyy'
 import '@/styles/browsePageLayout.css'
 import '@/app/departures/DarwinDeparturesPage.css'
 
@@ -834,9 +833,8 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
               </div>
 
               <SidebarDropdownSection
-                key={hasStationSelected ? 'search-station' : 'search-home'}
                 title="Search"
-                defaultExpanded={!hasStationSelected}
+                defaultExpanded
               >
                 <div className="search-container tickets-od-stack">
                   <TXTINPBUTIconWideButtonSearch
@@ -939,10 +937,9 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
               </SidebarDropdownSection>
 
               <SidebarDropdownSection
-                key={hasStationSelected ? 'datetime-station' : 'datetime-home'}
                 title="Date and time"
                 className="dep-datetime-section"
-                defaultExpanded={!hasStationSelected}
+                defaultExpanded
               >
                 <div className="dep-history-controls">
                   <button
@@ -955,32 +952,21 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   </button>
                   <div className="dep-history-field">
                     <span className="dep-filter-label">Date</span>
-                    <div className="dep-picker-shell">
-                      <TXTINPBUTWideButton
-                        id="dep-history-date-display"
-                        value={isoDateToDdMmYyyy(historyDateDraft)}
-                        placeholder="DD/MM/YYYY"
-                        readOnly
-                        tabIndex={-1}
-                        showClear={false}
-                        ariaLabel="Date"
-                        colorVariant="primary"
-                      />
-                      <input
-                        id="dep-history-date"
-                        className="dep-native-picker-input"
-                        type="date"
-                        lang="en-GB"
-                        value={historyDateDraft}
-                        min={minPickerDateIso}
-                        max={maxFutureDateIso}
-                        aria-label="Choose date"
-                        onChange={(event) => {
-                          setHistoryDateDraft(event.target.value)
-                          if (historyDateError) setHistoryDateError(null)
-                        }}
-                      />
-                    </div>
+                    <TXTINPBUTWideButton
+                      id="dep-history-date"
+                      type="date"
+                      lang="en-GB"
+                      value={historyDateDraft}
+                      min={minPickerDateIso}
+                      max={maxFutureDateIso}
+                      onChange={(value) => {
+                        setHistoryDateDraft(value)
+                        if (historyDateError) setHistoryDateError(null)
+                      }}
+                      showClear={false}
+                      ariaLabel="Date"
+                      colorVariant="primary"
+                    />
                   </div>
                   <div className="dep-history-field">
                     <span className="dep-filter-label">Time</span>
