@@ -125,11 +125,12 @@ function buildStopStatus(
   if (stop.cancelledAtStop) return { verb: 'Cancelled', time: '', delay: '', tone: 'cancelled' }
 
   const live = trimSeconds(stop.liveTime)
-  const hasActual = stop.liveKind === 'actual' || stop.liveKind === 'actual-arr'
+  const hasActual = stop.liveKind === 'actual' || stop.liveKind === 'actual-arr' || Boolean(trimSeconds(stop.atd || stop.ata || stop.atp))
   const hasEst =
     stop.liveKind === 'est' ||
     stop.liveKind === 'est-arr' ||
-    stop.liveKind === 'working'
+    stop.liveKind === 'working' ||
+    Boolean(trimSeconds(stop.etd || stop.eta || stop.etp))
   const reason = delayReasonText(delayReason, alertText)
   const delayedOngoing =
     !hasActual &&
@@ -634,7 +635,7 @@ export function ServiceStopList({
               />
               {showAssociations
                 ? associations
-                .filter((a) => a.tiploc && a.tiploc === stop.tpl)
+                .filter((a) => a.tiploc && a.tiploc === stop.tpl && a.category !== 'NP')
                 .map((a) => {
                   const href = associationHref?.(a) || `/services/${encodeURIComponent(a.otherUid || a.otherRid)}`
                   const dest = a.otherDestinationName || 'another destination'

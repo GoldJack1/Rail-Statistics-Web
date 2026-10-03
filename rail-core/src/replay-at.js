@@ -12,12 +12,21 @@ export function clockAfter(at, clock) {
 export function maskCallAsOf(call, at) {
   if (!at || !call) return call;
   const next = { ...call };
-  if (next.ata && clockAfter(at, next.ata)) next.ata = null;
-  if (next.atd && clockAfter(at, next.atd)) next.atd = null;
-  if (next.atp && clockAfter(at, next.atp)) next.atp = null;
-  if (next.eta && clockAfter(at, next.eta)) next.eta = null;
-  if (next.etd && clockAfter(at, next.etd)) next.etd = null;
-  if (next.etp && clockAfter(at, next.etp)) next.etp = null;
+  // Actuals after `at` had not happened yet. If Darwin already replaced the
+  // forecast with that actual, keep the clock as an estimate so timed boards
+  // do not snap back to the public timetable.
+  if (next.ata && clockAfter(at, next.ata)) {
+    if (!next.eta) next.eta = next.ata;
+    next.ata = null;
+  }
+  if (next.atd && clockAfter(at, next.atd)) {
+    if (!next.etd) next.etd = next.atd;
+    next.atd = null;
+  }
+  if (next.atp && clockAfter(at, next.atp)) {
+    if (!next.etp) next.etp = next.atp;
+    next.atp = null;
+  }
   next.live_kind = liveKind(next);
   return next;
 }

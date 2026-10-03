@@ -81,6 +81,36 @@ test("collapses next-day Darwin twin next to today's live row", () => {
   assert.equal(rows[0].scheduledTime, "14:40");
 });
 
+test("collapses CIF and Darwin rows that share a UID", () => {
+  const rows = collapseDuplicateBoardRows([
+    {
+      rid: "20261003G15982",
+      uid: "G15982",
+      trainId: "1P83",
+      destinationCrs: "SLB",
+      isPassing: false,
+      movement: "departure",
+      scheduledTime: "18:01",
+      scheduledAt: "2026-10-03T18:01:00.000Z",
+      liveKind: "scheduled",
+    },
+    {
+      rid: "202610037115982",
+      uid: "G15982",
+      trainId: "1P83",
+      destinationCrs: "SLB",
+      toc: "TP",
+      isPassing: false,
+      movement: "departure",
+      scheduledTime: "18:01",
+      scheduledAt: "2026-10-03T18:01:00.000Z",
+      liveKind: "est",
+    },
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].rid, "202610037115982");
+});
+
 test("departure movement keeps actual-arr while at platform", async () => {
   const { liveClockFromCall } = await import("./board-build.js");
   assert.deepEqual(

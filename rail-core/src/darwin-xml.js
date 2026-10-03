@@ -145,8 +145,10 @@ export function parseDarwinPportXml(xml) {
     const eta = hhmm(pick("eta"));
     const etd = hhmm(pick("etd"));
     const etp = hhmm(pick("etp"));
-    const sta = hhmm(pick("pta") || pick("sta"));
-    const std = hhmm(pick("ptd") || pick("std"));
+    let sta = hhmm(pick("pta") || pick("sta"));
+    let std = hhmm(pick("ptd") || pick("std"));
+    if (isPassing && sta === "00:00") sta = null;
+    if (isPassing && std === "00:00") std = null;
     const wta = hhmm(pick("wta"));
     const wtd = hhmm(pick("wtd"));
     const wtp = hhmm(pick("wtp"));
@@ -397,7 +399,7 @@ export function parseDarwinPportJson(obj) {
     for (const [k, v] of Object.entries(ts)) {
       const u = k.toUpperCase();
       if (!["OR", "OPOR", "IP", "OPIP", "PP", "DT", "OPDT"].includes(u)) continue;
-      pushLoc(v, u === "PP");
+      pushLoc(v, u === "PP" || u === "OPIP");
     }
   }
   const locations = [];
@@ -648,7 +650,7 @@ export function applyParsed(db, parsed) {
   if (!parsed.service) return Boolean(parsed.associations?.length);
   const overlay = parsed.fullJourney === false;
   upsertService(db, parsed.service, { overlay });
-  if (!overlay && parsed.service?.uid && parsed.service?.rid) {
+  if (parsed.service?.uid && parsed.service?.rid) {
     adoptUidOntoRid(db, parsed.service.uid, parsed.service.rid);
   }
   for (const call of parsed.calls || []) upsertCall(db, call, { overlay });

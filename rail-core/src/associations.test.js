@@ -11,6 +11,7 @@ import {
   inferAssociationsFromConsist,
   inferScheduleDivides,
   parseCifAa,
+  filterDisplayAssociations,
 } from "./associations.js";
 import { unitIdsAtBoardCall } from "./ptac-apply.js";
 
@@ -318,4 +319,30 @@ test("schedule inference does not attach ordinary CrossCountry connections", () 
     ('R2','NOTNGHM','NOT',5,0,0,1,'scheduled','17:20',null)`).run();
   const svc = db.prepare(`SELECT * FROM services WHERE rid = 'R1'`).get();
   assert.equal(inferScheduleDivides({ db, svc, stationName: () => "X" }).length, 0);
+});
+
+test("display associations drop ECS and freight headcodes", () => {
+  const rows = filterDisplayAssociations([
+    {
+      category: "NP",
+      role: "main",
+      otherRid: "N63312",
+      otherTrainId: "5P83",
+      tiploc: "MIA",
+      isCancelled: false,
+      isDeleted: false,
+    },
+    {
+      category: "VV",
+      role: "main",
+      otherRid: "R2",
+      otherTrainId: "1C64",
+      tiploc: "GLOSTER",
+      otherDestinationName: "Plymouth",
+      isCancelled: false,
+      isDeleted: false,
+    },
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].otherTrainId, "1C64");
 });

@@ -278,6 +278,13 @@
   display: none;
 }
 
+.svc-calling-stack,
+.svc-working-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
 /* Table view for calling pattern */
 .svc-table-wrap {
   width: 100%;

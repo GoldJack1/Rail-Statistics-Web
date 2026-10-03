@@ -3,10 +3,12 @@ import { createServer } from "node:http";
 import { existsSync, readdirSync } from "node:fs";
 import { dayPath, openCatalog, openDayDb, operatingDayYmd, platformText } from "./db.js";
 import { addCalendarDays, locationBoardDays, londonCalendarYmd, londonInstant, ssdFromRid } from "./calendar-day.js";
+import { longRangeAheadDays } from "./cif-schedule.js";
 import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
-import { collapseCallsByTiploc, sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
+import { isPassengerHeadcode } from "./headcode.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
@@ -90,7 +92,7 @@ function json(res, status, body, extra = {}) {
 }
 
 function timetableHorizonYmd() {
-  return addCalendarDays(londonCalendarYmd(), Number(process.env.TT_LOOKAHEAD_DAYS || 6));
+  return addCalendarDays(londonCalendarYmd(), longRangeAheadDays(process.env.TT_LOOKAHEAD_DAYS || process.env.TT_CIF_AHEAD_DAYS));
 }
 
 function listDayYmds() {
@@ -258,7 +260,7 @@ async function liveDepartures(crs, opts) {
   let now = londonNow();
   if (at) {
     const t = londonInstant(ymd, at);
-    if (!Number.isNaN(t.getTime())) now = t;
+    if (t && !Number.isNaN(t.getTime())) now = t;
   }
   let board = emptyBoard(loc.crs, hours, loc.matchedAs);
   for (const fileYmd of days) {
@@ -295,7 +297,8 @@ async function liveDepartures(crs, opts) {
     board.hspPending = false;
   }
   if (historicalDate) board.historicalDate = historicalDate;
-  else board.historicalDate = ymd;
+  else if (at) board.historicalDate = ymd;
+  else board.historicalDate = null;
   if (at) board.historicalAt = at;
   board.windowHours = hours;
   board.matchedAs = loc.matchedAs;
@@ -353,7 +356,7 @@ function trimCallsToDestination(rows, svc) {
   const out = [];
   for (const c of ordered) {
     out.push(c);
-    const pass = Boolean(Number(c.is_passing)) || Boolean(c.wtp && !c.sta && !c.std);
+    const pass = isWorkingPass(c);
     if (pass) continue;
     seenPublic = true;
     const crs = String(c.crs || "").toUpperCase();
@@ -366,9 +369,8 @@ function trimCallsToDestination(rows, svc) {
   if (!destHits.length) return out.length ? out : ordered;
   const cut = destHits[destHits.length - 1];
   const laterAdvertised = out.slice(cut + 1).some((c) => {
-    const pass = Boolean(Number(c.is_passing)) || Boolean(c.wtp && !c.sta && !c.std);
-    if (pass) return false;
-    return Boolean(String(c.crs || "").trim()) && Boolean(c.sta || c.std);
+    if (isWorkingPass(c)) return false;
+    return Boolean(String(c.crs || "").trim()) && Boolean(c.sta || c.std || c.wta || c.wtd);
   });
   if (laterAdvertised) return out;
   return out.slice(0, cut + 1);
@@ -447,6 +449,10 @@ function findService(db, id, ymd) {
   const uid = s.toUpperCase();
   const rows = db.prepare(`SELECT * FROM services WHERE UPPER(IFNULL(uid,'')) = ?`).all(uid);
   if (!rows.length) return null;
+  const darwin = rows.find((r) => /^\d{15}$/.test(String(r.rid || "")));
+  const withCalls = (svc) =>
+    svc && db.prepare(`SELECT COUNT(*) AS n FROM calls WHERE rid = ?`).get(svc.rid).n > 0 ? svc : null;
+  if (withCalls(darwin)) return darwin;
   const compact = String(ymd || "").replace(/-/g, "");
   const dated = compact ? rows.find((r) => String(r.rid || "").startsWith(compact)) : null;
   if (dated) return dated;
@@ -525,14 +531,12 @@ function lookupServiceAnyDay(id, ymd) {
 }
 
 function publicEndName(db, svc) {
-  const rows = sortCallsByJourneyTime(
-    db.prepare(`SELECT * FROM calls WHERE rid = ? AND IFNULL(is_passing,0)=0`).all(svc.rid),
+  const { origin, dest } = publicJourneyEnds(
+    db.prepare(`SELECT * FROM calls WHERE rid = ?`).all(svc.rid),
   );
-  const last = rows[rows.length - 1];
-  const first = rows[0];
   return {
-    origin: stationName(first?.crs, first?.tiploc) || svc.origin_name,
-    dest: stationName(last?.crs, last?.tiploc) || svc.destination_name,
+    origin: stationName(origin?.crs, origin?.tiploc) || svc.origin_name,
+    dest: stationName(dest?.crs, dest?.tiploc) || svc.destination_name,
   };
 }
 
@@ -540,19 +544,7 @@ function gatherServiceCalls(ymd, svc) {
   const db = openDay(ymd);
   if (!db) return [];
   const rows = db.prepare(`SELECT * FROM calls WHERE rid = ?`).all(svc.rid);
-  for (const day of [addCalendarDays(ymd, -1), addCalendarDays(ymd, 1)]) {
-    const other = openDay(day);
-    if (!other) continue;
-    const extra = other.prepare(`SELECT * FROM calls WHERE rid = ?`).all(svc.rid);
-    const seen = new Set(rows.map((c) => `${String(c.tiploc || "").toUpperCase()}|${c.seq ?? ""}`));
-    for (const c of extra) {
-      const key = `${String(c.tiploc || "").toUpperCase()}|${c.seq ?? ""}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      rows.push(c);
-    }
-  }
-  return collapseCallsByTiploc(rows);
+  return collapseCallsByTiploc(dropCifTailAfterPublicTerminus(rows)).map(recoverBookedPublic);
 }
 
 function concatCallsAtTpl(first, second, tpl) {
@@ -593,7 +585,7 @@ function adjacentServiceDatabases(ymd) {
     .filter((row) => row.db);
 }
 
-async function serviceDetail(ymd, rid, atRaw) {
+async function serviceDetail(ymd, rid, atRaw, hop = 0) {
   const at = parseAtParam(atRaw);
   for (const day of [ymd, addCalendarDays(ymd, -1), addCalendarDays(ymd, 1)]) {
     if (day && day !== londonCalendarYmd()) await ensureDayImported(day);
@@ -610,6 +602,43 @@ async function serviceDetail(ymd, rid, atRaw) {
   }
   const resolvedRid = svc.rid;
   let rawCalls = gatherServiceCalls(ymd, svc);
+  if (!rawCalls.length && hop < 1) {
+    const np = db
+      .prepare(
+        `SELECT main_uid, assoc_uid, main_rid, assoc_rid FROM associations
+         WHERE category = 'NP' AND IFNULL(is_deleted,0) = 0
+           AND (assoc_rid = ? OR main_rid = ? OR UPPER(IFNULL(assoc_uid,'')) = UPPER(?) OR UPPER(IFNULL(main_uid,'')) = UPPER(?))`,
+      )
+      .all(resolvedRid, resolvedRid, svc.uid || "", svc.uid || "");
+    const selfUid = String(svc.uid || "").toUpperCase();
+    const selfRid = String(resolvedRid).toUpperCase();
+    const selfTail = String(svc.headcode || svc.train_id || "").slice(1).toUpperCase();
+    const others = [];
+    for (const row of np) {
+      const assocUid = String(row.assoc_uid || "").toUpperCase();
+      const other =
+        assocUid === selfUid || String(row.assoc_rid || "").toUpperCase() === selfRid
+          ? row.main_uid || row.main_rid
+          : row.assoc_uid || row.assoc_rid;
+      if (!other) continue;
+      const otherKey = String(other).toUpperCase();
+      if (otherKey === selfUid || otherKey === selfRid) continue;
+      others.push(other);
+    }
+    const scored = others.map((id) => {
+      const hit = lookupServiceAnyDay(id, ymd);
+      const hc = String(hit?.svc?.headcode || hit?.svc?.train_id || "").toUpperCase();
+      const n = hit ? gatherServiceCalls(hit.day, hit.svc).length : 0;
+      let score = n;
+      if (selfTail && hc.slice(1) === selfTail) score += 1000;
+      if (!isPassengerHeadcode(hc)) score -= 10_000;
+      if (/^[129]/.test(hc)) score += 100;
+      return { id, score, n };
+    });
+    scored.sort((a, b) => b.score - a.score);
+    const hopTo = scored.find((row) => row.n && row.score > 0);
+    if (hopTo) return serviceDetail(ymd, hopTo.id, atRaw, hop + 1);
+  }
   let storedAssoc = hydrateAssociations(ymd, associationsForRid(db, resolvedRid, stationName));
   const consist = consistForService(ymd, svc);
   const consistInferred = inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, stationName });
@@ -630,32 +659,10 @@ async function serviceDetail(ymd, rid, atRaw) {
     journeyTpls,
   );
   persistInferred(db, resolvedRid, []);
-  const seenPortions = new Set([resolvedRid, svc.uid].filter(Boolean).map((v) => String(v).toUpperCase()));
-  for (const a of associations) {
-    if (a.category !== "NP" || a.isDeleted) continue;
-    const otherId = a.otherUid || a.otherRid;
-    if (!otherId || seenPortions.has(String(otherId).toUpperCase())) continue;
-    const hit = lookupServiceAnyDay(otherId, ymd);
-    if (!hit) continue;
-    seenPortions.add(hit.svc.rid.toUpperCase());
-    if (hit.svc.uid) seenPortions.add(String(hit.svc.uid).toUpperCase());
-    const otherCalls = gatherServiceCalls(hit.day, hit.svc);
-    rawCalls = a.role === "main"
-      ? concatCallsAtTpl(rawCalls, otherCalls, a.tiploc)
-      : concatCallsAtTpl(otherCalls, rawCalls, a.tiploc);
-    associations = filterDisplayAssociations(
-      collapseOvernightAssociates(
-        mergeAssociations(
-          associations,
-          hydrateAssociations(hit.day, associationsForRid(hit.db, hit.svc.rid, stationName)),
-        ),
-        ssdFromRid(resolvedRid) || ymd,
-      ),
-      svc.toc,
-      journeyTpls,
-    );
-  }
-  const calls = maskCallsAsOf(trimCallsToDestination(sortCallsByJourneyTime(rawCalls), svc), at);
+  const calls = maskCallsAsOf(
+    trimCallsToDestination(sortCallsByJourneyTime(dropCifTailAfterPublicTerminus(rawCalls)), svc),
+    at,
+  );
   const units = Array.isArray(consist?.allocations)
     ? [...new Set(consist.allocations.flatMap((a) => (a.resourceGroups || []).map((g) => g.unitId).filter(Boolean)))]
     : [];
@@ -663,9 +670,7 @@ async function serviceDetail(ymd, rid, atRaw) {
       crs: c.crs,
       tiploc: c.tiploc,
       seq: c.seq,
-      isPassing:
-        Boolean(Number(c.is_passing)) ||
-        Boolean(c.wtp && !c.sta && !c.std),
+      isPassing: isWorkingPass(c),
       platform: platformText(c.platform),
       sta: c.sta,
       std: c.std,
@@ -686,32 +691,37 @@ async function serviceDetail(ymd, rid, atRaw) {
     .filter((i) => i >= 0);
   const firstPax = passengerIdx[0] ?? 0;
   const lastPax = passengerIdx[passengerIdx.length - 1] ?? callingPoints.length - 1;
-  const stops = callingPoints.map((c, i) => ({
-    tpl: c.tiploc,
-    name: stationName(c.crs, c.tiploc),
-    crs: c.crs,
-    slot: c.isPassing ? "PP" : i === firstPax ? "OR" : i === lastPax ? "DT" : "IP",
-    pta: c.sta,
-    ptd: c.std,
-    wta: c.wta,
-    wtd: c.wtd,
-    wtp: c.wtp,
-    ata: c.ata,
-    atd: c.atd,
-    atp: c.atp,
-    platform: c.platform,
-    livePlatform: c.platform,
-    activity: null,
-    liveTime: c.isPassing
-      ? c.atp || c.etp || c.wtp
-      : c.atd || c.ata || c.atp || c.etd || c.eta || c.etp || c.std || c.sta || c.wtp,
-    liveKind: liveClockFromCall(c, c.isPassing ? "departure" : i === lastPax ? "arrival" : "departure").kind || c.liveKind,
-    cancelledAtStop: false,
-    cancelReasonAtStop: null,
-    loadingPercentage: c.loading_percentage ?? null,
-    coachLoading: parseCoachLoading(c.coach_loading),
-    actualSource: c.actualSource,
-  }));
+  const stops = callingPoints.map((c, i) => {
+    const movement = c.isPassing ? "departure" : i === lastPax ? "arrival" : "departure";
+    const clock = liveClockFromCall(c, movement);
+    return {
+      tpl: c.tiploc,
+      name: stationName(c.crs, c.tiploc),
+      crs: c.crs,
+      slot: c.isPassing ? "PP" : i === firstPax ? "OR" : i === lastPax ? "DT" : "IP",
+      pta: c.sta,
+      ptd: c.std,
+      wta: c.wta,
+      wtd: c.wtd,
+      wtp: c.wtp,
+      ata: c.ata,
+      atd: c.atd,
+      atp: c.atp,
+      eta: c.eta,
+      etd: c.etd,
+      etp: c.etp,
+      platform: c.platform,
+      livePlatform: c.platform,
+      activity: null,
+      liveTime: clock.time,
+      liveKind: clock.kind || "scheduled",
+      cancelledAtStop: false,
+      cancelReasonAtStop: null,
+      loadingPercentage: c.loading_percentage ?? null,
+      coachLoading: parseCoachLoading(c.coach_loading),
+      actualSource: c.actualSource,
+    };
+  });
   const hspPending = serviceHspPending(db, ymd, resolvedRid);
   if (hspPending) startBoardHspFill(ymd, [resolvedRid]);
   const originStop = stops.find((s) => s.slot === "OR") || stops.find((s) => s.crs && s.slot !== "PP");
@@ -730,7 +740,7 @@ async function serviceDetail(ymd, rid, atRaw) {
     origin: originStop?.crs || svc.origin_crs || "",
     originName: originStop?.name || stationName(originStop?.crs, originStop?.tpl) || svc.origin_name,
     destination: destStop?.crs || svc.destination_crs || "",
-    destinationName: combinedDestinationName(ownDest, associations, svc.toc, journeyTpls),
+    destinationName: ownDest,
     cancelled: Boolean(svc.cancelled),
     cancellation: null,
     partiallyCancelled: false,

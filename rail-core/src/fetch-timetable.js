@@ -9,6 +9,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { operatingDayYmd } from "./db.js";
+import { addCalendarDays } from "./calendar-day.js";
 
 const TT_DIR = process.env.TT_DIR ?? "./tt";
 mkdirSync(TT_DIR, { recursive: true });
@@ -180,7 +181,9 @@ if (process.env.TT_IMPORT_CIF !== "0") {
   const latestCif = cifFiles[cifFiles.length - 1];
   if (latestCif) {
     const ahead = String(Math.min(28, Math.max(0, Number(process.env.TT_CIF_AHEAD_DAYS ?? 14) || 0)));
-    runRetry("import-tt", ["src/import-tt.js", latestCif, today, ahead]);
+    const from = addCalendarDays(today, 1);
+    console.log("CIF from", from, "ahead", ahead, "(skips Darwin operating day)");
+    runRetry("import-tt", ["src/import-tt.js", latestCif, from, ahead]);
   }
   else console.log("no CIF MCA in tt/cif");
 }
