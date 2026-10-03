@@ -105,7 +105,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 4px;
+  gap: 8px;
   height: 40px;
   min-height: 40px;
   flex: 1 1 0;
@@ -161,7 +161,7 @@
 }
 
 .rs-service-card__status-label {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -170,8 +170,8 @@
 }
 
 .rs-service-card__status-mode {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 0 0 auto;
+  margin-left: 8px;
   text-align: right;
   white-space: nowrap;
 }
