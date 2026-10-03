@@ -18,9 +18,40 @@ export function railwayDayMinutes(clockMins, overnightLong = false) {
   return clockMins < RAILWAY_DAY_START_MINUTES ? clockMins + 1440 : clockMins;
 }
 
+/** CIF/Darwin often store 00:00 public times on working locations that are not midnight stops. */
+export function publicCallTime(value, row) {
+  if (value == null || value === "") return null;
+  const hm = String(value).trim().slice(0, 5);
+  if (hm !== "00:00") return String(value).trim();
+  const work = parseHmMinutes(row?.wtp || row?.wtd || row?.wta);
+  if (work == null) return hm;
+  if (work >= 22 * 60 || work < 3 * 60) return hm;
+  return null;
+}
+
+export function isAdvertisedCall(c) {
+  return Boolean(publicCallTime(c?.sta, c) || publicCallTime(c?.std, c));
+}
+
+export function isWorkingPass(c) {
+  if (Number(c?.is_passing)) return true;
+  const sta = publicCallTime(c?.sta, c);
+  const std = publicCallTime(c?.std, c);
+  return Boolean(c?.wtp && !sta && !std);
+}
+
 export function callScheduledMinutes(c) {
   return parseHmMinutes(
-    c.std || c.sta || c.wtd || c.wta || c.wtp || c.ptd || c.pta || c.etd || c.eta || c.etp,
+    publicCallTime(c.std, c) ||
+      publicCallTime(c.sta, c) ||
+      c.wtd ||
+      c.wta ||
+      c.wtp ||
+      c.ptd ||
+      c.pta ||
+      c.etd ||
+      c.eta ||
+      c.etp,
   );
 }
 
@@ -75,9 +106,11 @@ export function sortCallsByJourneyTime(rows) {
 }
 
 export function publicJourneyEnds(calls) {
-  const ordered = sortCallsByJourneyTime(calls || []).filter((c) => !Number(c.is_passing));
+  const ordered = sortCallsByJourneyTime(calls || []).filter((c) => !isWorkingPass(c));
   if (!ordered.length) return { origin: null, dest: null };
-  const origin = ordered.find((c) => c.crs) || ordered[0];
-  const dest = ordered[ordered.length - 1];
+  const advertised = ordered.filter((c) => isAdvertisedCall(c) && c.crs);
+  const legs = advertised.length ? advertised : ordered.filter((c) => c.crs).length ? ordered.filter((c) => c.crs) : ordered;
+  const origin = legs.find((c) => c.crs) || legs[0];
+  const dest = legs[legs.length - 1];
   return { origin, dest };
 }

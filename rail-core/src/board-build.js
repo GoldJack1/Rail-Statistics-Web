@@ -4,7 +4,7 @@
  */
 import { platformText } from "./db.js";
 import { tocDisplayName } from "./toc-names.js";
-import { callScheduledMinutes, sortCallsByJourneyTime } from "./journey-order.js";
+import { callScheduledMinutes, isAdvertisedCall, isWorkingPass, sortCallsByJourneyTime } from "./journey-order.js";
 import { maskCallAsOf, maskCallsAsOf, maskTrustOverlay, maskTrustOverlayCalls } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
 import { lookupConsistsForUids, unitIdsAtBoardCall } from "./ptac-apply.js";
@@ -121,10 +121,12 @@ function sameBoardTrain(a, b) {
 
 function preferBoardRow(a, b) {
   const score = (row) =>
+    (/^\d{15}$/.test(String(row.rid || "")) ? 20 : 0) +
     liveRank(row) * 10 +
     (row.unitIds?.length ? 2 : 0) +
     (row.originCrs ? 1 : 0) +
     (row.destinationCrs ? 1 : 0) +
+    (row.toc ? 1 : 0) +
     (row.destinationName ? 1 : 0);
   return score(a) >= score(b) ? a : b;
 }
@@ -212,13 +214,13 @@ export function liveClockFromCall(call, movement) {
 }
 
 function isPassengerCall(c) {
-  if (Number(c.is_passing)) return false;
+  if (isWorkingPass(c)) return false;
   if (!c.crs) return false;
-  return Boolean(c.sta || c.std);
+  return isAdvertisedCall(c);
 }
 
 function slotOf(call, journey) {
-  if (Number(call.is_passing) || (!call.sta && !call.std && call.wtp)) return "PP";
+  if (Number(call.is_passing) || isWorkingPass(call)) return "PP";
   const pax = journey.filter(isPassengerCall);
   if (!pax.length) return "IP";
   if (pax[0] === call || (pax[0].tiploc === call.tiploc && pax[0].seq === call.seq)) return "OR";

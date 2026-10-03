@@ -1,9 +1,8 @@
 import { londonInstant } from "./calendar-day.js";
-import { parseHmMinutes } from "./journey-order.js";
-import { sortCallsByJourneyTime } from "./journey-order.js";
+import { isWorkingPass, parseHmMinutes, sortCallsByJourneyTime } from "./journey-order.js";
 
 function isPass(c) {
-  return Boolean(Number(c.is_passing)) || Boolean(c.wtp && !c.sta && !c.std);
+  return isWorkingPass(c);
 }
 
 function actualClock(c) {

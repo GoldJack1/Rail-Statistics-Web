@@ -554,3 +554,57 @@ test("Darwin JSON @et forecasts parse onto calls", () => {
   assert.ok(parsed);
   assert.equal(parsed.calls[0].etd, "23:24");
 });
+
+test("Darwin overlay still adopts a CIF uid stub onto the 15-digit RID", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rail-core-"));
+  const db = openDayDb(dir, "2026-10-03");
+  upsertService(db, {
+    rid: "20261003L89273",
+    uid: "L89273",
+    train_id: "2I21",
+    rs_id: null,
+    toc: null,
+    operator_name: null,
+    origin_crs: null,
+    origin_name: "Wigan Wallgate",
+    destination_crs: null,
+    destination_name: "Leeds West Junction",
+    via: null,
+    service_type: "passenger",
+    cancelled: 0,
+    cancel_reason: null,
+    delay_reason: null,
+    is_charter: 0,
+    category: "OO",
+    headcode: "2I21",
+    updated_at: 1,
+  });
+  applyParsed(db, {
+    fullJourney: false,
+    service: {
+      rid: "202610037689273",
+      uid: "L89273",
+      train_id: "2I21",
+      rs_id: null,
+      toc: "NT",
+      operator_name: "NT",
+      origin_crs: "WGW",
+      origin_name: "Wigan Wallgate",
+      destination_crs: "LDS",
+      destination_name: "Leeds",
+      via: null,
+      service_type: "passenger",
+      cancelled: 0,
+      cancel_reason: null,
+      delay_reason: null,
+      is_charter: 0,
+      category: "OO",
+      headcode: "2I21",
+      updated_at: 2,
+    },
+    calls: [],
+  });
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM services WHERE uid='L89273'`).get().n, 1);
+  assert.equal(db.prepare(`SELECT rid, toc FROM services WHERE uid='L89273'`).get().rid, "202610037689273");
+  db.close();
+});

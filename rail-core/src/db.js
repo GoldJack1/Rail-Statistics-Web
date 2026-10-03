@@ -298,7 +298,8 @@ export function upsertCall(db, row, opts = {}) {
         `UPDATE calls SET
           crs=COALESCE(crs, @crs),
           wta=COALESCE(wta, @wta), wtd=COALESCE(wtd, @wtd), wtp=COALESCE(wtp, @wtp),
-          sta=COALESCE(sta, @sta), std=COALESCE(std, @std)
+          sta=COALESCE(sta, @sta), std=COALESCE(std, @std),
+          platform=COALESCE(platform, @platform)
          WHERE rid=@rid AND tiploc=@tiploc`,
       ).run({
         rid: payload.rid,
@@ -309,6 +310,7 @@ export function upsertCall(db, row, opts = {}) {
         wtp: payload.wtp,
         sta: payload.sta,
         std: payload.std,
+        platform: payload.platform,
       });
       return;
     }
@@ -438,6 +440,6 @@ export function refreshServiceJourney(db, rid, lookupName) {
   const destName = lookupName ? lookupName(dest.crs, dest.tiploc) : null;
   db.prepare(
     `UPDATE services SET origin_crs = ?, origin_name = COALESCE(?, origin_name),
-      destination_crs = ?, destination_name = COALESCE(?, destination_name) WHERE rid = ?`
-  ).run(origin.crs, originName, dest.crs, destName, rid);
+      destination_crs = ?, destination_name = COALESCE(?, ?) WHERE rid = ?`
+  ).run(origin.crs, originName, dest.crs, destName, dest.tiploc, rid);
 }

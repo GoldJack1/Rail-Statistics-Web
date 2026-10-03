@@ -3,10 +3,11 @@ import { createServer } from "node:http";
 import { existsSync, readdirSync } from "node:fs";
 import { dayPath, openCatalog, openDayDb, operatingDayYmd, platformText } from "./db.js";
 import { addCalendarDays, locationBoardDays, londonCalendarYmd, londonInstant, ssdFromRid } from "./calendar-day.js";
+import { longRangeAheadDays } from "./cif-schedule.js";
 import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
-import { collapseCallsByTiploc, sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, isWorkingPass, publicJourneyEnds, sortCallsByJourneyTime } from "./journey-order.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
@@ -90,7 +91,7 @@ function json(res, status, body, extra = {}) {
 }
 
 function timetableHorizonYmd() {
-  return addCalendarDays(londonCalendarYmd(), Number(process.env.TT_LOOKAHEAD_DAYS || 6));
+  return addCalendarDays(londonCalendarYmd(), longRangeAheadDays(process.env.TT_LOOKAHEAD_DAYS || process.env.TT_CIF_AHEAD_DAYS));
 }
 
 function listDayYmds() {
@@ -353,7 +354,7 @@ function trimCallsToDestination(rows, svc) {
   const out = [];
   for (const c of ordered) {
     out.push(c);
-    const pass = Boolean(Number(c.is_passing)) || Boolean(c.wtp && !c.sta && !c.std);
+    const pass = isWorkingPass(c);
     if (pass) continue;
     seenPublic = true;
     const crs = String(c.crs || "").toUpperCase();
@@ -366,9 +367,8 @@ function trimCallsToDestination(rows, svc) {
   if (!destHits.length) return out.length ? out : ordered;
   const cut = destHits[destHits.length - 1];
   const laterAdvertised = out.slice(cut + 1).some((c) => {
-    const pass = Boolean(Number(c.is_passing)) || Boolean(c.wtp && !c.sta && !c.std);
-    if (pass) return false;
-    return Boolean(String(c.crs || "").trim()) && Boolean(c.sta || c.std);
+    if (isWorkingPass(c)) return false;
+    return Boolean(String(c.crs || "").trim()) && Boolean(c.sta || c.std || c.wta || c.wtd);
   });
   if (laterAdvertised) return out;
   return out.slice(0, cut + 1);
@@ -447,6 +447,8 @@ function findService(db, id, ymd) {
   const uid = s.toUpperCase();
   const rows = db.prepare(`SELECT * FROM services WHERE UPPER(IFNULL(uid,'')) = ?`).all(uid);
   if (!rows.length) return null;
+  const darwin = rows.find((r) => /^\d{15}$/.test(String(r.rid || "")));
+  if (darwin) return darwin;
   const compact = String(ymd || "").replace(/-/g, "");
   const dated = compact ? rows.find((r) => String(r.rid || "").startsWith(compact)) : null;
   if (dated) return dated;
@@ -525,14 +527,12 @@ function lookupServiceAnyDay(id, ymd) {
 }
 
 function publicEndName(db, svc) {
-  const rows = sortCallsByJourneyTime(
-    db.prepare(`SELECT * FROM calls WHERE rid = ? AND IFNULL(is_passing,0)=0`).all(svc.rid),
+  const { origin, dest } = publicJourneyEnds(
+    db.prepare(`SELECT * FROM calls WHERE rid = ?`).all(svc.rid),
   );
-  const last = rows[rows.length - 1];
-  const first = rows[0];
   return {
-    origin: stationName(first?.crs, first?.tiploc) || svc.origin_name,
-    dest: stationName(last?.crs, last?.tiploc) || svc.destination_name,
+    origin: stationName(origin?.crs, origin?.tiploc) || svc.origin_name,
+    dest: stationName(dest?.crs, dest?.tiploc) || svc.destination_name,
   };
 }
 
@@ -632,7 +632,7 @@ async function serviceDetail(ymd, rid, atRaw) {
   persistInferred(db, resolvedRid, []);
   const seenPortions = new Set([resolvedRid, svc.uid].filter(Boolean).map((v) => String(v).toUpperCase()));
   for (const a of associations) {
-    if (a.category !== "NP" || a.isDeleted) continue;
+    if (a.category !== "NP" || a.isDeleted || a.role !== "main") continue;
     const otherId = a.otherUid || a.otherRid;
     if (!otherId || seenPortions.has(String(otherId).toUpperCase())) continue;
     const hit = lookupServiceAnyDay(otherId, ymd);
@@ -663,9 +663,7 @@ async function serviceDetail(ymd, rid, atRaw) {
       crs: c.crs,
       tiploc: c.tiploc,
       seq: c.seq,
-      isPassing:
-        Boolean(Number(c.is_passing)) ||
-        Boolean(c.wtp && !c.sta && !c.std),
+      isPassing: isWorkingPass(c),
       platform: platformText(c.platform),
       sta: c.sta,
       std: c.std,
