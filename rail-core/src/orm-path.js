@@ -39,9 +39,11 @@ export const DEFAULT_MAX_EDGE_M = 4500;
 export const DEFAULT_KNN = 6;
 /** Corridor fill between consecutive spine tipocs (Holbeck / Cottingley / Batley). */
 export const DEFAULT_CORRIDOR_OFFSET_M = 650;
-export const DEFAULT_CORRIDOR_MIN_PROG_M = 80;
-export const DEFAULT_CORRIDOR_SPACING_M = 250;
-export const DEFAULT_CORRIDOR_MAX_MIDS = 6;
+/** Allow near-endpoint CRS/junctions (Mirfield ~24 m past Mirfield East). */
+export const DEFAULT_CORRIDOR_MIN_PROG_M = 20;
+export const DEFAULT_CORRIDOR_SPACING_M = 400;
+export const DEFAULT_CORRIDOR_MAX_MIDS = 3;
+export const DEFAULT_CORRIDOR_MIN_GAP_M = 2000;
 /** Reject graph paths that detour far off the chord (Wakefield via). */
 export const DEFAULT_MAX_PATH_DETOUR = 1.2;
 
@@ -221,12 +223,20 @@ function isPassengerCrsTiploc(tpl, tipocMeta) {
   return Boolean(crs) && !crs.startsWith("X");
 }
 
+function isJunctionName(meta = {}) {
+  return /\bjn\b|junction/i.test(String(meta.name || ""));
+}
+
 /**
  * Tipocs on the spatial corridor between consecutive known spine tipocs.
- * Allows CRS stations that sit on the chord (Cottingley, Batley) — the spine
- * gap is the evidence, not free station inventing off-path.
+ * Junctions on-chord are always eligible. CRS stations need a schedule edge
+ * to A or B (other trains prove the tipoc sits on this corridor).
  */
-export function corridorGeometryMids(from, to, { tipocMeta = null, geoByTpl = null, geoIndex = null } = {}) {
+export function corridorGeometryMids(
+  from,
+  to,
+  { tipocMeta = null, geoByTpl = null, geoIndex = null, scheduleAdj = null } = {},
+) {
   const aTpl = String(from || "").toUpperCase();
   const bTpl = String(to || "").toUpperCase();
   if (!aTpl || !bTpl || !geoByTpl) return [];
@@ -234,7 +244,7 @@ export function corridorGeometryMids(from, to, { tipocMeta = null, geoByTpl = nu
   const b = geoByTpl.get(bTpl);
   if (!a || !b) return [];
   const ab = haversineM(a, b);
-  if (ab < DEFAULT_CORRIDOR_MIN_PROG_M * 2) return [];
+  if (ab < DEFAULT_CORRIDOR_MIN_GAP_M) return [];
 
   const index =
     geoIndex ||
@@ -242,11 +252,22 @@ export function corridorGeometryMids(from, to, { tipocMeta = null, geoByTpl = nu
       [...geoByTpl.values()].map((p) => ({ tiploc: p.tiploc, lat: p.lat, lon: p.lon })),
     );
 
+  const schedTouch = (tpl) => {
+    if (!scheduleAdj) return true;
+    const nA = scheduleAdj.get(aTpl) || [];
+    const nB = scheduleAdj.get(bTpl) || [];
+    return nA.some((x) => x.to === tpl) || nB.some((x) => x.to === tpl);
+  };
+
   const hits = [];
   for (const pt of candidatesNearSegment(index, a, b)) {
     if (pt.tiploc === aTpl || pt.tiploc === bTpl) continue;
     const meta = tipocMeta?.get(pt.tiploc) || {};
     if (isNonPassengerLocation(pt.tiploc, meta)) continue;
+    const crs = String(meta.crs || "").trim();
+    const junction = !crs || isJunctionName(meta);
+    // Passenger CRS needs schedule adjacency to an endpoint (not free invent).
+    if (crs && !crs.toUpperCase().startsWith("X") && !junction && !schedTouch(pt.tiploc)) continue;
     const { offsetM, t } = distToSegmentM(pt, a, b);
     if (offsetM > DEFAULT_CORRIDOR_OFFSET_M) continue;
     if (t <= 0.02 || t >= 0.98) continue;
@@ -254,13 +275,15 @@ export function corridorGeometryMids(from, to, { tipocMeta = null, geoByTpl = nu
     const tb = haversineM(pt, b);
     if (at < DEFAULT_CORRIDOR_MIN_PROG_M || tb < DEFAULT_CORRIDOR_MIN_PROG_M) continue;
     if (at + tb > ab * 1.2) continue;
-    hits.push({ tiploc: pt.tiploc, t, at, offsetM });
+    hits.push({ tiploc: pt.tiploc, t, at, offsetM, junction: Boolean(junction || !crs) });
   }
-  hits.sort((x, y) => x.t - y.t || x.offsetM - y.offsetM);
+  // Prefer junctions, then lower offset.
+  hits.sort((x, y) => Number(y.junction) - Number(x.junction) || x.t - y.t || x.offsetM - y.offsetM);
 
   const picked = [];
   let lastAt = -DEFAULT_CORRIDOR_SPACING_M;
-  for (const h of hits) {
+  const ordered = [...hits].sort((x, y) => x.t - y.t || x.offsetM - y.offsetM);
+  for (const h of ordered) {
     if (h.at - lastAt < DEFAULT_CORRIDOR_SPACING_M) continue;
     picked.push(h.tiploc);
     lastAt = h.at;
@@ -345,7 +368,12 @@ export function ormIntermediatePath(adj, from, to, opts = {}) {
   const ab = a && b ? haversineM(a, b) : null;
 
   // Primary: tipocs on the chord between consecutive spine tipocs.
-  const corridor = corridorGeometryMids(aTpl, bTpl, { tipocMeta, geoByTpl, geoIndex });
+  const corridor = corridorGeometryMids(aTpl, bTpl, {
+    tipocMeta,
+    geoByTpl,
+    geoIndex,
+    scheduleAdj: opts.scheduleAdj || null,
+  });
 
   // Secondary: short on-corridor graph path (no Wakefield-scale detours).
   const hit = shortestOrmPath(adj, aTpl, bTpl, opts);
@@ -423,6 +451,7 @@ export function stitchCallsWithOrmPath(calls, adj, opts = {}) {
   const tipocMeta = opts.tipocMeta || null;
   const geoByTpl = opts.geoByTpl || null;
   const geoIndex = opts.geoIndex || null;
+  const scheduleAdj = opts.scheduleAdj || null;
   const maxHops = opts.maxHops ?? DEFAULT_MAX_HOPS;
   const spine = (calls || []).filter((c) => c?.tiploc);
   if (spine.length < 2) {
@@ -448,6 +477,7 @@ export function stitchCallsWithOrmPath(calls, adj, opts = {}) {
       tipocMeta,
       geoByTpl,
       geoIndex,
+      scheduleAdj,
     });
     const t0 = callClock(spine[i - 1]);
     const t1 = callClock(cur);
@@ -521,6 +551,8 @@ export function stitchOrmPathsForDay(dataDir, dayYmd, opts = {}) {
   const geoIndex =
     opts.geoIndex ||
     buildGeoIndex([...geoByTpl.values()].map((p) => ({ tiploc: p.tiploc, lat: p.lat, lon: p.lon })));
+  // Low minEdge so rare but real schedule adjacencies still gate CRS corridor fills.
+  const scheduleAdj = opts.scheduleAdj || loadAdjFromCatalog(dataDir, { minEdge: 1 });
   const catalog = openCatalog(dataDir);
   const crsStmt = catalog.prepare(`SELECT crs FROM tiploc WHERE tiploc = ?`);
   const nameByCrs = catalog.prepare(`SELECT name FROM tiploc WHERE crs = ? LIMIT 1`);
@@ -553,6 +585,7 @@ export function stitchOrmPathsForDay(dataDir, dayYmd, opts = {}) {
       tipocMeta,
       geoByTpl,
       geoIndex,
+      scheduleAdj,
       maxHops: opts.maxHops ?? DEFAULT_MAX_HOPS,
     });
     const mileageChanged = filled.some(

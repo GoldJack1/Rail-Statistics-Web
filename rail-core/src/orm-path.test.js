@@ -61,13 +61,17 @@ test("stitch attaches leg/cum metres for corridor CRS mid", () => {
     ["B", { tiploc: "B", lat: 53.75, lon: -1.591 }],
   ]);
   const tipocMeta = new Map([["COT", { crs: "COT", name: "Cottingley" }]]);
+  const scheduleAdj = undirected([
+    ["A", "COT", 1],
+    ["COT", "B", 1],
+  ]);
   const { calls, inserted } = stitchCallsWithOrmPath(
     [
       { tiploc: "A", wtp: "10:00", is_passing: 1 },
       { tiploc: "B", wtp: "10:10", is_passing: 1 },
     ],
     adj,
-    { tipocMeta, geoByTpl },
+    { tipocMeta, geoByTpl, scheduleAdj },
   );
   assert.equal(inserted, 1);
   assert.equal(calls[1].tiploc, "COT");
@@ -131,7 +135,11 @@ test("corridor geometry inserts Holbeck and Cottingley between Whitehall and Mor
     ["COTNGLY", { crs: "COT", name: "Cottingley" }],
     ["EGLSMSL", { crs: "", name: "Eaglescliffe Marshalls Ews" }],
   ]);
-  const mids = corridorGeometryMids("WHRDJN", "MRLY", { tipocMeta, geoByTpl });
+  const scheduleAdj = undirected([
+    ["WHRDJN", "COTNGLY", 1],
+    ["COTNGLY", "MRLY", 1],
+  ]);
+  const mids = corridorGeometryMids("WHRDJN", "MRLY", { tipocMeta, geoByTpl, scheduleAdj });
   assert.ok(mids.includes("HOLBJCN"));
   assert.ok(mids.includes("COTNGLY"));
   assert.ok(!mids.includes("EGLSMSL"));
