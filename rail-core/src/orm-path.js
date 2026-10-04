@@ -43,7 +43,9 @@ export const DEFAULT_CORRIDOR_OFFSET_M = 650;
 export const DEFAULT_CORRIDOR_MIN_PROG_M = 20;
 export const DEFAULT_CORRIDOR_SPACING_M = 400;
 export const DEFAULT_CORRIDOR_MAX_MIDS = 3;
-export const DEFAULT_CORRIDOR_MIN_GAP_M = 2000;
+export const DEFAULT_CORRIDOR_MIN_GAP_M = 1000;
+/** CRS on-chord without schedule edge if this close (Elland-class). */
+export const DEFAULT_CRS_FREE_OFFSET_M = 500;
 /** Reject graph paths that detour far off the chord (Wakefield via). */
 export const DEFAULT_MAX_PATH_DETOUR = 1.2;
 
@@ -266,15 +268,18 @@ export function corridorGeometryMids(
     if (isNonPassengerLocation(pt.tiploc, meta)) continue;
     const crs = String(meta.crs || "").trim();
     const junction = !crs || isJunctionName(meta);
-    // Passenger CRS needs schedule adjacency to an endpoint (not free invent).
-    if (crs && !crs.toUpperCase().startsWith("X") && !junction && !schedTouch(pt.tiploc)) continue;
     const { offsetM, t } = distToSegmentM(pt, a, b);
     if (offsetM > DEFAULT_CORRIDOR_OFFSET_M) continue;
-    if (t <= 0.02 || t >= 0.98) continue;
+    // Passenger CRS: schedule adjacency, or very tight on-chord.
+    if (crs && !crs.toUpperCase().startsWith("X") && !junction) {
+      if (!schedTouch(pt.tiploc) && offsetM > DEFAULT_CRS_FREE_OFFSET_M) continue;
+    }
+    if (t < 0 || t > 1) continue;
     const at = haversineM(a, pt);
     const tb = haversineM(pt, b);
+    // Near-endpoint stations (Mirfield, Sowerby) project to t≈0/1; metre floor gates them.
     if (at < DEFAULT_CORRIDOR_MIN_PROG_M || tb < DEFAULT_CORRIDOR_MIN_PROG_M) continue;
-    if (at + tb > ab * 1.2) continue;
+    if (at + tb > ab * 1.25) continue;
     hits.push({ tiploc: pt.tiploc, t, at, offsetM, junction: Boolean(junction || !crs) });
   }
   // Prefer junctions, then lower offset.
