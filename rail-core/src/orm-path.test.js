@@ -5,6 +5,7 @@ import {
   ormIntermediatePath,
   shortestOrmPath,
   stitchCallsWithOrmPath,
+  triangleCorridorMids,
 } from "./orm-path.js";
 
 function undirected(pairs) {
@@ -74,4 +75,23 @@ test("metresToMiles", () => {
 test("unreachable returns null", () => {
   const adj = undirected([["A", "B", 1]]);
   assert.equal(shortestOrmPath(adj, "A", "Z"), null);
+});
+
+test("triangle corridor inserts Holbeck when direct chord is shorter", () => {
+  const adj = undirected([
+    ["WHRDJN", "HOLBJCN", 587],
+    ["HOLBJCN", "COTNGLY", 2922],
+    ["WHRDJN", "COTNGLY", 3261],
+  ]);
+  const geoByTpl = new Map([
+    ["WHRDJN", { tiploc: "WHRDJN", lat: 53.79193, lon: -1.55945 }],
+    ["HOLBJCN", { tiploc: "HOLBJCN", lat: 53.79147, lon: -1.56836 }],
+    ["COTNGLY", { tiploc: "COTNGLY", lat: 53.76782, lon: -1.58771 }],
+  ]);
+  const tipocMeta = new Map([["HOLBJCN", { crs: "", name: "Holbeck Junction" }]]);
+  assert.deepEqual(triangleCorridorMids(adj, "WHRDJN", "COTNGLY", { tipocMeta, geoByTpl }), [
+    "HOLBJCN",
+  ]);
+  const hit = ormIntermediatePath(adj, "WHRDJN", "COTNGLY", { tipocMeta, geoByTpl });
+  assert.deepEqual(hit.mids, ["HOLBJCN"]);
 });
