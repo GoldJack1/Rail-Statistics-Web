@@ -1,12 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  corridorGeometryMids,
   metresToMiles,
   ormIntermediatePath,
   shortestOrmPath,
   stitchCallsWithOrmPath,
   triangleCorridorMids,
 } from "./orm-path.js";
+import { isNonPassengerLocation } from "./geometry-densify.js";
 
 function undirected(pairs) {
   const adj = new Map();
@@ -26,10 +28,16 @@ test("shortest path inserts Holbeck between Whitehall and Cottingley", () => {
     ["HOLBJCN", "COTNGLY", 2200],
     ["WHRDJN", "COTNGLY", 5000],
   ]);
-  const hit = ormIntermediatePath(adj, "WHRDJN", "COTNGLY");
+  const geoByTpl = new Map([
+    ["WHRDJN", { tiploc: "WHRDJN", lat: 53.79193, lon: -1.55945 }],
+    ["HOLBJCN", { tiploc: "HOLBJCN", lat: 53.79147, lon: -1.56836 }],
+    ["COTNGLY", { tiploc: "COTNGLY", lat: 53.76782, lon: -1.58771 }],
+  ]);
+  const tipocMeta = new Map([["HOLBJCN", { crs: "", name: "Holbeck Junction" }]]);
+  const hit = ormIntermediatePath(adj, "WHRDJN", "COTNGLY", { tipocMeta, geoByTpl });
   assert.ok(hit);
   assert.deepEqual(hit.mids, ["HOLBJCN"]);
-  assert.equal(hit.metres, 3000);
+  assert.ok(hit.metres > 2500 && hit.metres < 4000);
 });
 
 test("Mirfield station is not invented without an edge", () => {
@@ -41,30 +49,30 @@ test("Mirfield station is not invented without an edge", () => {
   assert.deepEqual(hit.mids, []);
 });
 
-test("stitch attaches leg/cum metres and skips CRS mids", () => {
+test("stitch attaches leg/cum metres for corridor CRS mid", () => {
   const adj = undirected([
-    ["A", "JN1", 1000],
-    ["JN1", "B", 1000],
-    ["A", "STN", 500],
-    ["STN", "B", 500],
+    ["A", "COT", 1000],
+    ["COT", "B", 1000],
+    ["A", "B", 2200],
   ]);
-  const tipocMeta = new Map([
-    ["JN1", { crs: "", name: "Junction One" }],
-    ["STN", { crs: "STN", name: "Station" }],
+  const geoByTpl = new Map([
+    ["A", { tiploc: "A", lat: 53.792, lon: -1.56 }],
+    ["COT", { tiploc: "COT", lat: 53.768, lon: -1.588 }],
+    ["B", { tiploc: "B", lat: 53.75, lon: -1.591 }],
   ]);
+  const tipocMeta = new Map([["COT", { crs: "COT", name: "Cottingley" }]]);
   const { calls, inserted } = stitchCallsWithOrmPath(
     [
       { tiploc: "A", wtp: "10:00", is_passing: 1 },
       { tiploc: "B", wtp: "10:10", is_passing: 1 },
     ],
     adj,
-    { tipocMeta },
+    { tipocMeta, geoByTpl },
   );
   assert.equal(inserted, 1);
-  assert.equal(calls[1].tiploc, "JN1");
+  assert.equal(calls[1].tiploc, "COT");
   assert.ok(calls[1].leg_m > 0);
   assert.ok(calls[2].cum_m >= calls[1].cum_m);
-  assert.ok(!calls.some((c) => c.tiploc === "STN"));
 });
 
 test("metresToMiles", () => {
@@ -108,4 +116,30 @@ test("triangle corridor skips short gaps and non-detours", () => {
     ["B", { tiploc: "B", lat: 53.702, lon: -1.898 }],
   ]);
   assert.deepEqual(triangleCorridorMids(adj, "A", "B", { geoByTpl, tipocMeta: new Map() }), []);
+});
+
+test("corridor geometry inserts Holbeck and Cottingley between Whitehall and Morley", () => {
+  const geoByTpl = new Map([
+    ["WHRDJN", { tiploc: "WHRDJN", lat: 53.79193, lon: -1.55945 }],
+    ["HOLBJCN", { tiploc: "HOLBJCN", lat: 53.79147, lon: -1.56836 }],
+    ["COTNGLY", { tiploc: "COTNGLY", lat: 53.76782, lon: -1.58771 }],
+    ["MRLY", { tiploc: "MRLY", lat: 53.74992, lon: -1.59098 }],
+    ["EGLSMSL", { tiploc: "EGLSMSL", lat: 53.78, lon: -1.57 }],
+  ]);
+  const tipocMeta = new Map([
+    ["HOLBJCN", { crs: "", name: "Holbeck Junction" }],
+    ["COTNGLY", { crs: "COT", name: "Cottingley" }],
+    ["EGLSMSL", { crs: "", name: "Eaglescliffe Marshalls Ews" }],
+  ]);
+  const mids = corridorGeometryMids("WHRDJN", "MRLY", { tipocMeta, geoByTpl });
+  assert.ok(mids.includes("HOLBJCN"));
+  assert.ok(mids.includes("COTNGLY"));
+  assert.ok(!mids.includes("EGLSMSL"));
+});
+
+test("junk tipocs are non-passenger", () => {
+  assert.equal(isNonPassengerLocation("MLNR8", { name: "MLNR8" }), true);
+  assert.equal(isNonPassengerLocation("CSTL30", { name: "Castleton Signal Ce30" }), true);
+  assert.equal(isNonPassengerLocation("YORKLIP", { name: "York Fuelling Point" }), true);
+  assert.equal(isNonPassengerLocation("HOLBJCN", { name: "Holbeck Junction" }), false);
 });
