@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS calls (
   status TEXT,
   live_kind TEXT NOT NULL DEFAULT 'scheduled',
   actual_source TEXT,
+  leg_m REAL,
+  cum_m REAL,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (rid, seq)
 );
@@ -130,3 +132,30 @@ CREATE TABLE IF NOT EXISTS trust_events (
   received_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_trust_train ON trust_events (train_id, received_at);
+
+CREATE TABLE IF NOT EXISTS td_trains (
+  headcode TEXT PRIMARY KEY,
+  area_id TEXT,
+  berth TEXT,
+  from_berth TEXT,
+  msg_type TEXT,
+  train_id TEXT,
+  rid TEXT,
+  tiploc TEXT,
+  stanox TEXT,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS td_events (
+  event_id TEXT PRIMARY KEY,
+  headcode TEXT,
+  area_id TEXT,
+  berth TEXT,
+  from_berth TEXT,
+  msg_type TEXT,
+  tiploc TEXT,
+  stanox TEXT,
+  json TEXT,
+  received_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_td_events_headcode ON td_events (headcode, received_at);

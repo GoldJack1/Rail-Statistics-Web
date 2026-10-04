@@ -269,6 +269,10 @@ export interface ServiceStop {
   loadingPercentage: number | null;
   /** Per-stop, per-coach loading (0–100%). */
   coachLoading: CoachLoadingValue[] | null;
+  /** Along-track miles from previous calling point (ORM path); detailed view. */
+  legMiles?: number | null;
+  /** Cumulative along-track miles from journey origin. */
+  cumMiles?: number | null;
 }
 
 export interface FormationCoach {

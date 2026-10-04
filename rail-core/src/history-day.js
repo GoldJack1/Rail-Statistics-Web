@@ -42,7 +42,7 @@ function importLocalTimetable() {
   const xml = files.find((n) => /v8\.xml/i.test(n));
   const cif = files.find((n) => /\.cif$/i.test(n) || /\.CIF$/.test(n));
   if (xml) {
-    spawnSync(process.execPath, ["src/import-pptimetable.js", join(ttDir, xml), ymd], {
+    spawnSync(process.execPath, ["src/import-pptimetable.js", "--replace", join(ttDir, xml), ymd], {
       cwd: ROOT,
       env: process.env,
       stdio: "inherit",

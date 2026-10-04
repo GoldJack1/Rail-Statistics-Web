@@ -215,6 +215,26 @@ const server = createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true, applied: n }));
       return;
     }
+    if (url.pathname === "/ingest/vstp") {
+      const { vstpMessages, applyVstpFrame } = await import("./vstp-apply.js");
+      let n = 0;
+      for (const msg of vstpMessages(raw)) {
+        if (applyVstpFrame(DATA_DIR, msg)) n++;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, applied: n }));
+      return;
+    }
+    if (url.pathname === "/ingest/td") {
+      const { tdMessages, applyTdFrame } = await import("./td-apply.js");
+      let n = 0;
+      for (const msg of tdMessages(raw)) {
+        if (applyTdFrame(DATA_DIR, msg)) n++;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, applied: n }));
+      return;
+    }
     if (url.pathname === "/ingest/rtppm") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, skipped: true }));

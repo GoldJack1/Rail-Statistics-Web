@@ -1,0 +1,443 @@
+#!/usr/bin/env node
+/**
+ * Offline UK tipoc rail graph path stitcher.
+ *
+ * Only inserts intermediate TIPLOCs that already exist in catalog (with geo)
+ * and lie on the shortest path between consecutive *known* tipocs
+ * (ITPS/Darwin spine ∪ TRUST ∪ TD/SMART). Never invents free CRS stations.
+ *
+ * Edge metres prefer stored ORM track length; schedule/geo edges use tipoc-to-tipoc
+ * haversine as a stand-in until a full OpenRailwayMap rail extract is imported.
+ */
+import { pathToFileURL } from "node:url";
+import {
+  openCatalog,
+  openDayDb,
+  operatingDayYmd,
+  refreshServiceJourney,
+  restoreCallLive,
+  snapshotCallLive,
+  upsertCall,
+} from "./db.js";
+import { haversineM, isNonPassengerLocation, loadTiplocMeta } from "./geometry-densify.js";
+import {
+  callClock,
+  ensureTiplocGraphTable,
+  interpolateHm,
+  loadAdjFromCatalog,
+} from "./tiploc-graph.js";
+
+export const DEFAULT_MAX_HOPS = 12;
+export const DEFAULT_MAX_EDGE_M = 4500;
+export const DEFAULT_KNN = 6;
+
+export function ensureOrmTables(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS orm_edges (
+      from_tpl TEXT NOT NULL,
+      to_tpl TEXT NOT NULL,
+      metres REAL NOT NULL,
+      source TEXT,
+      PRIMARY KEY (from_tpl, to_tpl)
+    );
+    CREATE INDEX IF NOT EXISTS idx_orm_edges_from ON orm_edges (from_tpl);
+  `);
+}
+
+function addUndirected(adj, a, b, metres) {
+  if (!a || !b || a === b || !Number.isFinite(metres) || metres <= 0) return;
+  if (!adj.has(a)) adj.set(a, []);
+  if (!adj.has(b)) adj.set(b, []);
+  adj.get(a).push({ to: b, metres });
+  adj.get(b).push({ to: a, metres });
+}
+
+/** Build adjacency from catalog orm_edges (and optionally rebuild from schedule+geo). */
+export function loadOrmAdj(dataDir) {
+  const catalog = openCatalog(dataDir);
+  ensureOrmTables(catalog);
+  const rows = catalog.prepare(`SELECT from_tpl, to_tpl, metres FROM orm_edges`).all();
+  catalog.close();
+  const adj = new Map();
+  for (const row of rows) {
+    addUndirected(adj, String(row.from_tpl).toUpperCase(), String(row.to_tpl).toUpperCase(), Number(row.metres));
+  }
+  return adj;
+}
+
+/**
+ * Rebuild orm_edges from schedule tipoc_edges + tipoc_geo kNN among eligible tipocs.
+ * @returns {number} edge count (directed pairs stored undirected once each way as two rows)
+ */
+export function rebuildOrmGraphFromCatalog(dataDir, opts = {}) {
+  const maxEdgeM = opts.maxEdgeM ?? DEFAULT_MAX_EDGE_M;
+  const knn = opts.knn ?? DEFAULT_KNN;
+  const catalog = openCatalog(dataDir);
+  ensureOrmTables(catalog);
+  ensureTiplocGraphTable(catalog);
+
+  const geoRows = catalog.prepare(`SELECT tiploc, lat, lon FROM tiploc_geo`).all();
+  const byTpl = new Map();
+  for (const row of geoRows) {
+    const t = String(row.tiploc || "").toUpperCase();
+    const lat = Number(row.lat);
+    const lon = Number(row.lon);
+    if (!t || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    byTpl.set(t, { tiploc: t, lat, lon });
+  }
+
+  const tipocMeta = loadTiplocMeta(dataDir);
+  const eligible = [...byTpl.keys()].filter(
+    (t) => !isNonPassengerLocation(t, tipocMeta.get(t) || {}),
+  );
+
+  /** @type {Map<string, number>} */
+  const edgeMap = new Map();
+  const put = (a, b, metres, _source) => {
+    if (!a || !b || a === b) return;
+    if (!byTpl.has(a) || !byTpl.has(b)) return;
+    if (!Number.isFinite(metres) || metres <= 0 || metres > maxEdgeM * 3) return;
+    const key = a < b ? `${a}\t${b}` : `${b}\t${a}`;
+    const prev = edgeMap.get(key);
+    if (prev == null || metres < prev) edgeMap.set(key, metres);
+  };
+
+  // Schedule-mined tipoc pairs (strong evidence of a rail connection).
+  const sched = catalog.prepare(`SELECT from_tpl, to_tpl FROM tiploc_edges`).all();
+  for (const row of sched) {
+    const a = String(row.from_tpl || "").toUpperCase();
+    const b = String(row.to_tpl || "").toUpperCase();
+    const pa = byTpl.get(a);
+    const pb = byTpl.get(b);
+    if (!pa || !pb) continue;
+    put(a, b, haversineM(pa, pb), "schedule");
+  }
+
+  // Local kNN among eligible tipocs — fills junctions (e.g. Holbeck) between spine tipocs.
+  const pts = eligible.map((t) => byTpl.get(t)).filter(Boolean);
+  for (const p of pts) {
+    const near = [];
+    for (const q of pts) {
+      if (q.tiploc === p.tiploc) continue;
+      const d = haversineM(p, q);
+      if (d > 0 && d <= maxEdgeM) near.push({ t: q.tiploc, d });
+    }
+    near.sort((a, b) => a.d - b.d);
+    for (const n of near.slice(0, knn)) put(p.tiploc, n.t, n.d, "geo-knn");
+  }
+
+  catalog.exec("BEGIN");
+  catalog.exec("DELETE FROM orm_edges");
+  const ins = catalog.prepare(
+    `INSERT INTO orm_edges (from_tpl, to_tpl, metres, source) VALUES (?, ?, ?, ?)`,
+  );
+  let n = 0;
+  for (const [key, metres] of edgeMap) {
+    const [a, b] = key.split("\t");
+    ins.run(a, b, metres, "catalog");
+    ins.run(b, a, metres, "catalog");
+    n += 2;
+  }
+  catalog.exec("COMMIT");
+  catalog.close();
+  return n;
+}
+
+function isPassengerCrsTiploc(tpl, tipocMeta) {
+  if (!tipocMeta) return false;
+  const meta = tipocMeta.get(String(tpl || "").toUpperCase());
+  const crs = String(meta?.crs || "").trim().toUpperCase();
+  return Boolean(crs) && !crs.startsWith("X");
+}
+
+/**
+ * Dijkstra shortest path. Returns { path: tipocs inclusive, metres } or null.
+ * Passenger CRS tipocs are not traversed as intermediates (never invent stations).
+ */
+export function shortestOrmPath(adj, from, to, { maxHops = DEFAULT_MAX_HOPS, tipocMeta = null } = {}) {
+  const start = String(from || "").toUpperCase();
+  const goal = String(to || "").toUpperCase();
+  if (!start || !goal || start === goal) return null;
+  if (!adj.has(start) || !adj.has(goal)) return null;
+
+  const dist = new Map([[start, 0]]);
+  const prev = new Map();
+  const hops = new Map([[start, 0]]);
+  /** @type {Set<string>} */
+  const open = new Set([start]);
+
+  while (open.size) {
+    let u = null;
+    let best = Infinity;
+    for (const n of open) {
+      const d = dist.get(n) ?? Infinity;
+      if (d < best) {
+        best = d;
+        u = n;
+      }
+    }
+    if (u == null) break;
+    open.delete(u);
+    if (u === goal) break;
+    const h = hops.get(u) ?? 0;
+    if (h >= maxHops) continue;
+    for (const e of adj.get(u) || []) {
+      const next = e.to;
+      if (next !== goal && next !== start && isPassengerCrsTiploc(next, tipocMeta)) continue;
+      if (next !== goal && next !== start && tipocMeta && isNonPassengerLocation(next, tipocMeta.get(next) || {})) {
+        continue;
+      }
+      const alt = best + e.metres;
+      const prevD = dist.get(next);
+      if (prevD == null || alt < prevD) {
+        dist.set(next, alt);
+        prev.set(next, u);
+        hops.set(next, h + 1);
+        open.add(next);
+      }
+    }
+  }
+
+  if (!dist.has(goal)) return null;
+  const path = [];
+  for (let cur = goal; cur; cur = prev.get(cur)) {
+    path.push(cur);
+    if (cur === start) break;
+  }
+  path.reverse();
+  if (path[0] !== start) return null;
+  return { path, metres: dist.get(goal) };
+}
+
+/** Intermediate tipocs only (excludes from/to). */
+export function ormIntermediatePath(adj, from, to, opts = {}) {
+  const hit = shortestOrmPath(adj, from, to, opts);
+  if (!hit || hit.path.length < 3) return hit ? { mids: [], metres: hit.metres, path: hit.path } : null;
+  return { mids: hit.path.slice(1, -1), metres: hit.metres, path: hit.path };
+}
+
+/**
+ * Stitch known tipocs with ORM mids; attach leg_m / cum_m along the path.
+ * Known tipocs = existing calls (caller should strip densify ghosts via ITPS re-overlay first).
+ */
+export function stitchCallsWithOrmPath(calls, adj, opts = {}) {
+  const tipocMeta = opts.tipocMeta || null;
+  const maxHops = opts.maxHops ?? DEFAULT_MAX_HOPS;
+  const spine = (calls || []).filter((c) => c?.tiploc);
+  if (spine.length < 2) {
+    return { calls: spine.map((c, seq) => ({ ...c, seq, leg_m: null, cum_m: null })), inserted: 0 };
+  }
+
+  const out = [];
+  let inserted = 0;
+  let cum = 0;
+
+  for (let i = 0; i < spine.length; i++) {
+    const cur = { ...spine[i] };
+    if (i === 0) {
+      cur.leg_m = null;
+      cur.cum_m = 0;
+      out.push(cur);
+      continue;
+    }
+    const a = String(spine[i - 1].tiploc).toUpperCase();
+    const b = String(cur.tiploc).toUpperCase();
+    const hit = ormIntermediatePath(adj, a, b, { maxHops, tipocMeta });
+    const t0 = callClock(spine[i - 1]);
+    const t1 = callClock(cur);
+
+    if (hit?.mids?.length) {
+      const segMetres = hit.metres;
+      const stepM = hit.mids.length + 1;
+      // Distribute path metres across mid legs + final leg proportionally by hop count.
+      const perHop = segMetres / stepM;
+      for (let j = 0; j < hit.mids.length; j++) {
+        const tpl = hit.mids[j];
+        cum += perHop;
+        out.push({
+          tiploc: tpl,
+          crs: null,
+          is_passing: 1,
+          cancelled: 0,
+          platform: null,
+          sta: null,
+          std: null,
+          wta: null,
+          wtd: null,
+          wtp: interpolateHm(t0, t1, j, hit.mids.length),
+          live_kind: "scheduled",
+          actual_source: null,
+          ormPass: true,
+          leg_m: perHop,
+          cum_m: cum,
+        });
+        inserted++;
+      }
+      cum += perHop;
+      cur.leg_m = perHop;
+      cur.cum_m = cum;
+    } else if (hit && Number.isFinite(hit.metres)) {
+      cum += hit.metres;
+      cur.leg_m = hit.metres;
+      cur.cum_m = cum;
+    } else {
+      cur.leg_m = null;
+      cur.cum_m = cum || null;
+    }
+    out.push(cur);
+  }
+
+  return { calls: out.map((c, seq) => ({ ...c, seq })), inserted };
+}
+
+export function metresToMiles(m) {
+  if (m == null || !Number.isFinite(Number(m))) return null;
+  return Math.round((Number(m) / 1609.344) * 100) / 100;
+}
+
+export function stitchOrmPathsForDay(dataDir, dayYmd, opts = {}) {
+  let adj = loadOrmAdj(dataDir);
+  if (!adj.size || opts.rebuild) {
+    rebuildOrmGraphFromCatalog(dataDir, opts);
+    adj = loadOrmAdj(dataDir);
+  }
+  // Fallback: if ORM empty, seed from schedule adj with geo lengths via rebuild.
+  if (!adj.size) {
+    // Ensure schedule edges exist in catalog when a schedule file was just mined.
+    loadAdjFromCatalog(dataDir, { minEdge: 1 });
+    rebuildOrmGraphFromCatalog(dataDir, opts);
+    adj = loadOrmAdj(dataDir);
+  }
+  if (!adj.size) return { services: 0, inserted: 0, edges: 0 };
+
+  const tipocMeta = opts.tipocMeta || loadTiplocMeta(dataDir);
+  const catalog = openCatalog(dataDir);
+  const crsStmt = catalog.prepare(`SELECT crs FROM tiploc WHERE tiploc = ?`);
+  const nameByCrs = catalog.prepare(`SELECT name FROM tiploc WHERE crs = ? LIMIT 1`);
+  const nameByTpl = catalog.prepare(`SELECT name FROM tiploc WHERE tiploc = ?`);
+  const resolveCrs = (tpl) => crsStmt.get(String(tpl).toUpperCase())?.crs || null;
+  const resolveName = (crs, tpl) =>
+    (crs && nameByCrs.get(crs)?.name) ||
+    (tpl && nameByTpl.get(String(tpl).toUpperCase())?.name) ||
+    null;
+
+  const db = openDayDb(dataDir, dayYmd);
+  db.exec("PRAGMA busy_timeout=300000");
+  const svcs = db
+    .prepare(
+      `SELECT rid FROM services
+       WHERE length(rid)=15 AND rid GLOB '[0-9]*'`,
+    )
+    .all();
+  const locStmt = db.prepare(`SELECT * FROM calls WHERE rid = ? ORDER BY seq`);
+  const delCalls = db.prepare(`DELETE FROM calls WHERE rid = ?`);
+
+  let services = 0;
+  let inserted = 0;
+  for (const svc of svcs) {
+    const before = locStmt.all(svc.rid);
+    if (before.length < 2) continue;
+    const { calls: filled, inserted: n } = stitchCallsWithOrmPath(before, adj, {
+      tipocMeta,
+      maxHops: opts.maxHops,
+    });
+    const mileageChanged = filled.some(
+      (c, i) => c.leg_m !== before[i]?.leg_m || c.cum_m !== before[i]?.cum_m,
+    );
+    if (!n && !mileageChanged && filled.length === before.length) continue;
+
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const live = snapshotCallLive(db, svc.rid);
+      delCalls.run(svc.rid);
+      for (const row of filled) {
+        const payload = row.ormPass
+          ? {
+              rid: svc.rid,
+              tiploc: row.tiploc,
+              crs: resolveCrs(row.tiploc),
+              seq: row.seq,
+              is_passing: 1,
+              cancelled: 0,
+              platform: null,
+              length_cars: null,
+              formation: null,
+              sta: null,
+              std: null,
+              wta: null,
+              wtd: null,
+              wtp: row.wtp,
+              ata: null,
+              atd: null,
+              atp: null,
+              eta: null,
+              etd: null,
+              etp: null,
+              delay_minutes: null,
+              status: null,
+              live_kind: "scheduled",
+              actual_source: null,
+              leg_m: row.leg_m ?? null,
+              cum_m: row.cum_m ?? null,
+              updated_at: Date.now(),
+            }
+          : {
+              ...row,
+              rid: svc.rid,
+              seq: row.seq,
+              leg_m: row.leg_m ?? null,
+              cum_m: row.cum_m ?? null,
+            };
+        delete payload.ormPass;
+        upsertCall(db, payload);
+      }
+      if (live.length) restoreCallLive(db, svc.rid, live);
+      // Re-apply mileage after upsert (upsert may not know columns yet on old payloads).
+      const upd = db.prepare(`UPDATE calls SET leg_m = ?, cum_m = ? WHERE rid = ? AND tiploc = ?`);
+      for (const row of filled) {
+        upd.run(row.leg_m ?? null, row.cum_m ?? null, svc.rid, row.tiploc);
+      }
+      refreshServiceJourney(db, svc.rid, resolveName);
+      db.exec("COMMIT");
+    } catch (err) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      throw err;
+    }
+    services++;
+    inserted += n;
+  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('orm_path_at', ?)`).run(
+      new Date().toISOString(),
+    );
+    db.exec("COMMIT");
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+  db.close();
+  catalog.close();
+  return { services, inserted, edges: adj.size };
+}
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  const ymd = process.argv[2] || operatingDayYmd();
+  const DATA_DIR = process.env.DATA_DIR ?? "./data";
+  const rebuild = String(process.env.TT_ORM_REBUILD || "1").trim() !== "0";
+  if (rebuild) {
+    const n = rebuildOrmGraphFromCatalog(DATA_DIR);
+    console.log("orm edges", n);
+  }
+  const out = stitchOrmPathsForDay(DATA_DIR, ymd, { rebuild: false });
+  console.log(`orm-path ${ymd} services=${out.services} inserted=${out.inserted} edgeNodes=${out.edges}`);
+}

@@ -115,7 +115,8 @@ function delayReasonText(delayReason?: string | null, alertText?: string | null)
   return (delayReason || alertText || '').replace(/\s+/g, ' ').trim()
 }
 
-function buildStopStatus(
+/** Exported for unit tests — densify-only passes must not inherit bare "Delayed". */
+export function buildStopStatus(
   stop: ServiceStop,
   kind: StopKind,
   deltaMinutes: number | null,
@@ -123,6 +124,8 @@ function buildStopStatus(
   historical: boolean,
   delayReason?: string | null,
   alertText?: string | null,
+  /** True when a later tipoc already has a live report — this pass was skipped. */
+  passedBeyond = false,
 ): StopStatus {
   if (stop.cancelledAtStop) return { verb: 'Cancelled', time: '', delay: '', tone: 'cancelled' }
 
@@ -133,6 +136,21 @@ function buildStopStatus(
     stop.liveKind === 'est-arr' ||
     stop.liveKind === 'working' ||
     Boolean(trimSeconds(stop.etd || stop.eta || stop.etp))
+  const bookedTime = scheduledTime !== '—' ? scheduledTime : ''
+  // Working/densify passes with a booked clock but no live feed: never bare "Delayed".
+  // Ahead of the train → Due + wtp; already passed without a report → No report.
+  if (kind === 'pass' && !hasActual && !hasEst && !live) {
+    if (passedBeyond) {
+      return { verb: 'No report', time: bookedTime, delay: '', tone: 'ontime' }
+    }
+    if (bookedTime) {
+      return { verb: historical ? '' : 'Due', time: bookedTime, delay: '', tone: 'ontime' }
+    }
+    if (!historical) {
+      return { verb: 'No report', time: '', delay: '', tone: 'ontime' }
+    }
+  }
+
   const reason = delayReasonText(delayReason, alertText)
   const delayedOngoing =
     !hasActual &&
@@ -151,7 +169,7 @@ function buildStopStatus(
     }
   }
 
-  const eventTime = live || (scheduledTime !== '—' ? scheduledTime : '')
+  const eventTime = live || bookedTime
 
   if (!eventTime) {
     return { verb: historical ? '—' : 'Due', time: '', delay: '', tone: 'ontime' }
@@ -252,6 +270,7 @@ function ServiceStopRow({
   alertText,
   progressText,
   delayMinutes: delayMinutesProp,
+  passedBeyond = false,
 }: {
   stop: ServiceStop
   index: number
@@ -266,6 +285,7 @@ function ServiceStopRow({
   alertText?: string | null
   progressText?: string | null
   delayMinutes?: number | null
+  passedBeyond?: boolean
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -286,7 +306,16 @@ function ServiceStopRow({
   const clocks = rowClocks(kind, stop)
   const deltaMinutes = delayMinutesProp ?? delayFromStop(stop, kind)
   const time = primaryTime(stop, kind)
-  const status = buildStopStatus(stop, kind, deltaMinutes, time.value, historical, delayReason, alertText)
+  const status = buildStopStatus(
+    stop,
+    kind,
+    deltaMinutes,
+    time.value,
+    historical,
+    delayReason,
+    alertText,
+    passedBeyond,
+  )
   const code = (stop.tpl || stop.crs || '').toUpperCase()
   const detailed = viewMode === 'detailed'
 
@@ -337,6 +366,11 @@ function ServiceStopRow({
               <span className="svc-stop-name-text">{label}</span>
               {stop.crs ? <span className="svc-stop-name-crs">{stop.crs}</span> : null}
               {kind !== 'pass' && <ActivityPill activity={stop.activity} />}
+              {detailed && stop.legMiles != null && Number.isFinite(stop.legMiles) ? (
+                <span className="svc-stop-leg-miles" title={stop.cumMiles != null ? `${stop.cumMiles} mi from origin` : undefined}>
+                  +{stop.legMiles.toFixed(1)} mi
+                </span>
+              ) : null}
             </span>
           </button>
         </td>
@@ -632,6 +666,7 @@ export function ServiceStopList({
                 alertText={alertText}
                 progressText={viewMode === 'simple' && liveHighlightIdx === stripeIndex ? progressText : null}
                 delayMinutes={delayMinutesByStripe[stripeIndex]}
+                passedBeyond={reportedFull != null && index < reportedFull}
               />
               {showAssociations
                 ? associations

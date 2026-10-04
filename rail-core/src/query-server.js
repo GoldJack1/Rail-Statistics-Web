@@ -664,6 +664,8 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
   const units = Array.isArray(consist?.allocations)
     ? [...new Set(consist.allocations.flatMap((a) => (a.resourceGroups || []).map((g) => g.unitId).filter(Boolean)))]
     : [];
+  const toMiles = (m) =>
+    m == null || !Number.isFinite(Number(m)) ? null : Math.round((Number(m) / 1609.344) * 100) / 100;
   const callingPoints = calls.map((c) => ({
       crs: c.crs,
       tiploc: c.tiploc,
@@ -683,6 +685,10 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
       etp: c.etp,
       liveKind: c.live_kind,
       actualSource: c.actual_source,
+      legM: c.leg_m ?? null,
+      cumM: c.cum_m ?? null,
+      legMiles: toMiles(c.leg_m),
+      cumMiles: toMiles(c.cum_m),
     }));
   const passengerIdx = callingPoints
     .map((c, i) => (c.isPassing ? -1 : i))
@@ -718,6 +724,8 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
       loadingPercentage: c.loading_percentage ?? null,
       coachLoading: parseCoachLoading(c.coach_loading),
       actualSource: c.actualSource,
+      legMiles: c.legMiles,
+      cumMiles: c.cumMiles,
     };
   });
   const hspPending = serviceHspPending(db, ymd, resolvedRid);
@@ -725,6 +733,19 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
   const originStop = stops.find((s) => s.slot === "OR") || stops.find((s) => s.crs && s.slot !== "PP");
   const destStop = [...stops].reverse().find((s) => s.slot === "DT") || [...stops].reverse().find((s) => s.crs && s.slot !== "PP");
   const location = computeServiceLocation(calls, { stationName, ymd, now: at ? londonInstant(ymd, at) || new Date() : new Date() });
+  let td = null;
+  try {
+    const { tdForHeadcode } = await import("./td-apply.js");
+    td = tdForHeadcode(db, svc.headcode || svc.train_id);
+    if (td?.tiploc) {
+      td = {
+        ...td,
+        tiplocName: stationName(null, td.tiploc) || null,
+      };
+    }
+  } catch {
+    td = null;
+  }
   const ownDest = destStop?.name || stationName(destStop?.crs, destStop?.tpl) || svc.destination_name;
   return {
     rid: svc.rid,
@@ -755,6 +776,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     historicalDate: isLiveServiceDay(ymd) ? null : ymd,
     historicalAt: at,
     location,
+    td,
     hspPending,
   };
 }
