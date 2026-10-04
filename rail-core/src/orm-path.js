@@ -19,7 +19,12 @@ import {
   snapshotCallLive,
   upsertCall,
 } from "./db.js";
-import { haversineM, isNonPassengerLocation, loadTiplocMeta } from "./geometry-densify.js";
+import {
+  distToSegmentM,
+  haversineM,
+  isNonPassengerLocation,
+  loadTiplocMeta,
+} from "./geometry-densify.js";
 import {
   callClock,
   ensureTiplocGraphTable,
@@ -44,15 +49,13 @@ export function ensureOrmTables(db) {
   `);
 }
 
-function addUndirected(adj, a, b, metres) {
+function addDirected(adj, a, b, metres) {
   if (!a || !b || a === b || !Number.isFinite(metres) || metres <= 0) return;
   if (!adj.has(a)) adj.set(a, []);
-  if (!adj.has(b)) adj.set(b, []);
   adj.get(a).push({ to: b, metres });
-  adj.get(b).push({ to: a, metres });
 }
 
-/** Build adjacency from catalog orm_edges (and optionally rebuild from schedule+geo). */
+/** Build adjacency from catalog orm_edges (rows are stored both ways). */
 export function loadOrmAdj(dataDir) {
   const catalog = openCatalog(dataDir);
   ensureOrmTables(catalog);
@@ -60,9 +63,60 @@ export function loadOrmAdj(dataDir) {
   catalog.close();
   const adj = new Map();
   for (const row of rows) {
-    addUndirected(adj, String(row.from_tpl).toUpperCase(), String(row.to_tpl).toUpperCase(), Number(row.metres));
+    addDirected(adj, String(row.from_tpl).toUpperCase(), String(row.to_tpl).toUpperCase(), Number(row.metres));
   }
   return adj;
+}
+
+export function loadGeoByTpl(dataDir) {
+  const catalog = openCatalog(dataDir);
+  const rows = catalog.prepare(`SELECT tiploc, lat, lon FROM tiploc_geo`).all();
+  catalog.close();
+  const byTpl = new Map();
+  for (const row of rows) {
+    const t = String(row.tiploc || "").toUpperCase();
+    const lat = Number(row.lat);
+    const lon = Number(row.lon);
+    if (!t || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    byTpl.set(t, { tiploc: t, lat, lon });
+  }
+  return byTpl;
+}
+
+/**
+ * Junction tipocs that form A—N—B with both edges, sitting on the AB corridor.
+ * Catches Holbeck when a direct chord A—B is slightly shorter than via N.
+ */
+export function triangleCorridorMids(adj, from, to, { tipocMeta = null, geoByTpl = null, maxOffsetM = 550, maxDetour = 1.25 } = {}) {
+  const aTpl = String(from || "").toUpperCase();
+  const bTpl = String(to || "").toUpperCase();
+  if (!aTpl || !bTpl || !geoByTpl) return [];
+  const a = geoByTpl.get(aTpl);
+  const b = geoByTpl.get(bTpl);
+  if (!a || !b) return [];
+  const ab = haversineM(a, b);
+  if (ab < 80) return [];
+
+  const hits = [];
+  const seen = new Set();
+  for (const e of adj.get(aTpl) || []) {
+    const n = e.to;
+    if (!n || n === bTpl || n === aTpl || seen.has(n)) continue;
+    seen.add(n);
+    if (isPassengerCrsTiploc(n, tipocMeta)) continue;
+    if (tipocMeta && isNonPassengerLocation(n, tipocMeta.get(n) || {})) continue;
+    if (!(adj.get(n) || []).some((x) => x.to === bTpl)) continue;
+    const p = geoByTpl.get(n);
+    if (!p) continue;
+    const { offsetM, t } = distToSegmentM(p, a, b);
+    if (offsetM > maxOffsetM) continue;
+    if (t <= 0.02 || t >= 0.98) continue;
+    const via = haversineM(a, p) + haversineM(p, b);
+    if (via > ab * maxDetour) continue;
+    hits.push({ tiploc: n, t, offsetM });
+  }
+  hits.sort((x, y) => x.t - y.t || x.offsetM - y.offsetM);
+  return hits.map((h) => h.tiploc);
 }
 
 /**
@@ -212,8 +266,54 @@ export function shortestOrmPath(adj, from, to, { maxHops = DEFAULT_MAX_HOPS, tip
 /** Intermediate tipocs only (excludes from/to). */
 export function ormIntermediatePath(adj, from, to, opts = {}) {
   const hit = shortestOrmPath(adj, from, to, opts);
-  if (!hit || hit.path.length < 3) return hit ? { mids: [], metres: hit.metres, path: hit.path } : null;
-  return { mids: hit.path.slice(1, -1), metres: hit.metres, path: hit.path };
+  const triangles = triangleCorridorMids(adj, from, to, opts);
+  if (!hit && !triangles.length) return null;
+
+  const mids = [];
+  const seen = new Set();
+  const push = (tpl) => {
+    const t = String(tpl || "").toUpperCase();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    mids.push(t);
+  };
+  for (const tpl of hit?.path?.slice(1, -1) || []) push(tpl);
+  for (const tpl of triangles) push(tpl);
+
+  // Order mids along AB when geo available.
+  const geoByTpl = opts.geoByTpl;
+  const a = geoByTpl?.get(String(from).toUpperCase());
+  const b = geoByTpl?.get(String(to).toUpperCase());
+  if (a && b && mids.length > 1) {
+    mids.sort((x, y) => {
+      const px = geoByTpl.get(x);
+      const py = geoByTpl.get(y);
+      if (!px || !py) return 0;
+      return distToSegmentM(px, a, b).t - distToSegmentM(py, a, b).t;
+    });
+  }
+
+  let metres = hit?.metres;
+  if (mids.length && geoByTpl && a && b) {
+    let sum = 0;
+    let prev = a;
+    for (const tpl of mids) {
+      const p = geoByTpl.get(tpl);
+      if (!p) continue;
+      sum += haversineM(prev, p);
+      prev = p;
+    }
+    sum += haversineM(prev, b);
+    metres = sum;
+  } else if (metres == null && a && b) {
+    metres = haversineM(a, b);
+  }
+
+  return {
+    mids,
+    metres: metres ?? null,
+    path: [String(from).toUpperCase(), ...mids, String(to).toUpperCase()],
+  };
 }
 
 /**
@@ -222,6 +322,7 @@ export function ormIntermediatePath(adj, from, to, opts = {}) {
  */
 export function stitchCallsWithOrmPath(calls, adj, opts = {}) {
   const tipocMeta = opts.tipocMeta || null;
+  const geoByTpl = opts.geoByTpl || null;
   const maxHops = opts.maxHops ?? DEFAULT_MAX_HOPS;
   const spine = (calls || []).filter((c) => c?.tiploc);
   if (spine.length < 2) {
@@ -242,7 +343,7 @@ export function stitchCallsWithOrmPath(calls, adj, opts = {}) {
     }
     const a = String(spine[i - 1].tiploc).toUpperCase();
     const b = String(cur.tiploc).toUpperCase();
-    const hit = ormIntermediatePath(adj, a, b, { maxHops, tipocMeta });
+    const hit = ormIntermediatePath(adj, a, b, { maxHops, tipocMeta, geoByTpl });
     const t0 = callClock(spine[i - 1]);
     const t1 = callClock(cur);
 
@@ -266,7 +367,7 @@ export function stitchCallsWithOrmPath(calls, adj, opts = {}) {
           wtd: null,
           wtp: interpolateHm(t0, t1, j, hit.mids.length),
           live_kind: "scheduled",
-          actual_source: null,
+          actual_source: "orm",
           ormPass: true,
           leg_m: perHop,
           cum_m: cum,
@@ -311,6 +412,7 @@ export function stitchOrmPathsForDay(dataDir, dayYmd, opts = {}) {
   if (!adj.size) return { services: 0, inserted: 0, edges: 0 };
 
   const tipocMeta = opts.tipocMeta || loadTiplocMeta(dataDir);
+  const geoByTpl = opts.geoByTpl || loadGeoByTpl(dataDir);
   const catalog = openCatalog(dataDir);
   const crsStmt = catalog.prepare(`SELECT crs FROM tiploc WHERE tiploc = ?`);
   const nameByCrs = catalog.prepare(`SELECT name FROM tiploc WHERE crs = ? LIMIT 1`);
@@ -335,16 +437,19 @@ export function stitchOrmPathsForDay(dataDir, dayYmd, opts = {}) {
   let services = 0;
   let inserted = 0;
   for (const svc of svcs) {
-    const before = locStmt.all(svc.rid);
+    const raw = locStmt.all(svc.rid);
+    // Drop prior ORM inserts so restitch does not compound triangle mids.
+    const before = raw.filter((c) => String(c.actual_source || "") !== "orm");
     if (before.length < 2) continue;
     const { calls: filled, inserted: n } = stitchCallsWithOrmPath(before, adj, {
       tipocMeta,
+      geoByTpl,
       maxHops: opts.maxHops,
     });
     const mileageChanged = filled.some(
       (c, i) => c.leg_m !== before[i]?.leg_m || c.cum_m !== before[i]?.cum_m,
     );
-    if (!n && !mileageChanged && filled.length === before.length) continue;
+    if (!n && !mileageChanged && filled.length === before.length && before.length === raw.length) continue;
 
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -376,7 +481,7 @@ export function stitchOrmPathsForDay(dataDir, dayYmd, opts = {}) {
               delay_minutes: null,
               status: null,
               live_kind: "scheduled",
-              actual_source: null,
+              actual_source: "orm",
               leg_m: row.leg_m ?? null,
               cum_m: row.cum_m ?? null,
               updated_at: Date.now(),
