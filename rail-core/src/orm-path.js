@@ -260,6 +260,10 @@ export function corridorGeometryMids(
     const nB = scheduleAdj.get(bTpl) || [];
     return nA.some((x) => x.to === tpl) || nB.some((x) => x.to === tpl);
   };
+  const schedOutFrom = (endpoint, tpl) => {
+    if (!scheduleAdj) return true;
+    return (scheduleAdj.get(endpoint) || []).some((x) => x.to === tpl);
+  };
 
   const hits = [];
   for (const pt of candidatesNearSegment(index, a, b)) {
@@ -282,6 +286,11 @@ export function corridorGeometryMids(
     // Reject tipocs that lie beyond an endpoint (Sowerby past Milner Royd on Greetland→Milner).
     if (at > ab + 40 || tb > ab + 40) continue;
     if (at + tb > ab * 1.25) continue;
+    // CRS closer to B belongs on the next gap (Sowerby after Milner Royd, not before).
+    if (crs && !crs.toUpperCase().startsWith("X") && !junction) {
+      if (tb <= at) continue;
+      if (at < 200 && !schedOutFrom(aTpl, pt.tiploc)) continue;
+    }
     hits.push({ tiploc: pt.tiploc, t, at, offsetM, junction: Boolean(junction || !crs) });
   }
   // Prefer junctions, then lower offset.
