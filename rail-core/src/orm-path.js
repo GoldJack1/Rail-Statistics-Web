@@ -367,7 +367,7 @@ export function stitchCallsWithOrmPath(calls, adj, opts = {}) {
           wtd: null,
           wtp: interpolateHm(t0, t1, j, hit.mids.length),
           live_kind: "scheduled",
-          actual_source: null,
+          actual_source: "orm",
           ormPass: true,
           leg_m: perHop,
           cum_m: cum,
@@ -437,7 +437,9 @@ export function stitchOrmPathsForDay(dataDir, dayYmd, opts = {}) {
   let services = 0;
   let inserted = 0;
   for (const svc of svcs) {
-    const before = locStmt.all(svc.rid);
+    const raw = locStmt.all(svc.rid);
+    // Drop prior ORM inserts so restitch does not compound triangle mids.
+    const before = raw.filter((c) => String(c.actual_source || "") !== "orm");
     if (before.length < 2) continue;
     const { calls: filled, inserted: n } = stitchCallsWithOrmPath(before, adj, {
       tipocMeta,
@@ -447,7 +449,7 @@ export function stitchOrmPathsForDay(dataDir, dayYmd, opts = {}) {
     const mileageChanged = filled.some(
       (c, i) => c.leg_m !== before[i]?.leg_m || c.cum_m !== before[i]?.cum_m,
     );
-    if (!n && !mileageChanged && filled.length === before.length) continue;
+    if (!n && !mileageChanged && filled.length === before.length && before.length === raw.length) continue;
 
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -479,7 +481,7 @@ export function stitchOrmPathsForDay(dataDir, dayYmd, opts = {}) {
               delay_minutes: null,
               status: null,
               live_kind: "scheduled",
-              actual_source: null,
+              actual_source: "orm",
               leg_m: row.leg_m ?? null,
               cum_m: row.cum_m ?? null,
               updated_at: Date.now(),
