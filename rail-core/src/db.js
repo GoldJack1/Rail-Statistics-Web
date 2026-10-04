@@ -23,8 +23,46 @@ export function openDayDb(dataDir, ymd) {
   ensureUnitJoinColumns(db);
   ensureServiceFormationColumn(db);
   ensureCallLoadingColumns(db);
+  ensureCallMileageColumns(db);
   ensureAssociationsTable(db);
+  ensureTdTables(db);
   return db;
+}
+
+function ensureTdTables(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS td_trains (
+      headcode TEXT PRIMARY KEY,
+      area_id TEXT,
+      berth TEXT,
+      from_berth TEXT,
+      msg_type TEXT,
+      train_id TEXT,
+      rid TEXT,
+      tiploc TEXT,
+      stanox TEXT,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS td_events (
+      event_id TEXT PRIMARY KEY,
+      headcode TEXT,
+      area_id TEXT,
+      berth TEXT,
+      from_berth TEXT,
+      msg_type TEXT,
+      tiploc TEXT,
+      stanox TEXT,
+      json TEXT,
+      received_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_td_events_headcode ON td_events (headcode, received_at);
+  `);
+  const trainCols = new Set(db.prepare(`PRAGMA table_info(td_trains)`).all().map((c) => c.name));
+  if (!trainCols.has("tiploc")) db.exec(`ALTER TABLE td_trains ADD COLUMN tiploc TEXT`);
+  if (!trainCols.has("stanox")) db.exec(`ALTER TABLE td_trains ADD COLUMN stanox TEXT`);
+  const eventCols = new Set(db.prepare(`PRAGMA table_info(td_events)`).all().map((c) => c.name));
+  if (!eventCols.has("tiploc")) db.exec(`ALTER TABLE td_events ADD COLUMN tiploc TEXT`);
+  if (!eventCols.has("stanox")) db.exec(`ALTER TABLE td_events ADD COLUMN stanox TEXT`);
 }
 
 function ensureAssociationsTable(db) {
@@ -50,6 +88,12 @@ function ensureCallLoadingColumns(db) {
   const cols = new Set(db.prepare(`PRAGMA table_info(calls)`).all().map((c) => c.name));
   if (!cols.has("loading_percentage")) db.exec(`ALTER TABLE calls ADD COLUMN loading_percentage REAL`);
   if (!cols.has("coach_loading")) db.exec(`ALTER TABLE calls ADD COLUMN coach_loading TEXT`);
+}
+
+function ensureCallMileageColumns(db) {
+  const cols = new Set(db.prepare(`PRAGMA table_info(calls)`).all().map((c) => c.name));
+  if (!cols.has("leg_m")) db.exec(`ALTER TABLE calls ADD COLUMN leg_m REAL`);
+  if (!cols.has("cum_m")) db.exec(`ALTER TABLE calls ADD COLUMN cum_m REAL`);
 }
 
 function ensureServiceFormationColumn(db) {
@@ -109,6 +153,15 @@ export function openCatalog(dataDir) {
       PRIMARY KEY (uid, ssd, origin_hhmm)
     );
     CREATE INDEX IF NOT EXISTS idx_consists_ssd ON consists (ssd, headcode);
+    CREATE TABLE IF NOT EXISTS tiploc_geo (
+      tiploc TEXT PRIMARY KEY,
+      easting REAL,
+      northing REAL,
+      lat REAL NOT NULL,
+      lon REAL NOT NULL,
+      source TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_tiploc_geo_latlon ON tiploc_geo (lat, lon);
   `);
   migrateCorpusTable(db);
   db.exec(`
@@ -290,6 +343,8 @@ export function upsertCall(db, row, opts = {}) {
     status: row.status ?? null,
     live_kind: row.live_kind ?? "scheduled",
     actual_source: row.actual_source ?? null,
+    leg_m: row.leg_m ?? null,
+    cum_m: row.cum_m ?? null,
     updated_at: row.updated_at ?? Date.now(),
   };
   if (existing) {
@@ -371,7 +426,9 @@ export function upsertCall(db, row, opts = {}) {
         loading_percentage=COALESCE(@loading_percentage, loading_percentage),
         coach_loading=COALESCE(@coach_loading, coach_loading),
         delay_minutes=@delay_minutes, status=@status, live_kind=@live_kind,
-        actual_source=COALESCE(@actual_source, actual_source), updated_at=@updated_at
+        actual_source=COALESCE(@actual_source, actual_source),
+        leg_m=COALESCE(@leg_m, leg_m), cum_m=COALESCE(@cum_m, cum_m),
+        updated_at=@updated_at
        WHERE rid=@rid AND tiploc=@tiploc`
     ).run({
       rid: payload.rid,
@@ -399,6 +456,8 @@ export function upsertCall(db, row, opts = {}) {
       status: payload.status,
       live_kind: payload.live_kind,
       actual_source: payload.actual_source,
+      leg_m: payload.leg_m,
+      cum_m: payload.cum_m,
       updated_at: payload.updated_at,
     });
     return;
@@ -406,10 +465,12 @@ export function upsertCall(db, row, opts = {}) {
   db.prepare(
     `INSERT INTO calls (rid, tiploc, crs, seq, is_passing, cancelled, platform, length_cars, formation,
       loading_percentage, coach_loading,
-      sta, std, wta, wtd, wtp, ata, atd, atp, eta, etd, etp, delay_minutes, status, live_kind, actual_source, updated_at)
+      sta, std, wta, wtd, wtp, ata, atd, atp, eta, etd, etp, delay_minutes, status, live_kind, actual_source,
+      leg_m, cum_m, updated_at)
      VALUES (@rid, @tiploc, @crs, @seq, @is_passing, @cancelled, @platform, @length_cars, @formation,
       @loading_percentage, @coach_loading,
-      @sta, @std, @wta, @wtd, @wtp, @ata, @atd, @atp, @eta, @etd, @etp, @delay_minutes, @status, @live_kind, @actual_source, @updated_at)`
+      @sta, @std, @wta, @wtd, @wtp, @ata, @atd, @atp, @eta, @etd, @etp, @delay_minutes, @status, @live_kind, @actual_source,
+      @leg_m, @cum_m, @updated_at)`
   ).run(payload);
 }
 

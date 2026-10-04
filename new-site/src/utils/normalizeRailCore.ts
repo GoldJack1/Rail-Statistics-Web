@@ -21,6 +21,8 @@ type RailCoreCall = {
   actualSource?: string | null
   loadingPercentage?: number | null
   coachLoading?: ServiceStop['coachLoading']
+  legMiles?: number | null
+  cumMiles?: number | null
 }
 
 function liveFromCall(c: RailCoreCall): { liveTime: string | null; liveKind: ServiceStop['liveKind'] } {
@@ -235,6 +237,8 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
         loadingPercentage: typeof c.loadingPercentage === 'number' ? c.loadingPercentage : null,
         coachLoading: Array.isArray(c.coachLoading) ? c.coachLoading : null,
         actualSource: c.actualSource ?? null,
+        legMiles: typeof c.legMiles === 'number' ? c.legMiles : null,
+        cumMiles: typeof c.cumMiles === 'number' ? c.cumMiles : null,
       }
     })
     return {

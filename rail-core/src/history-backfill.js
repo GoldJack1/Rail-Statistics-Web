@@ -68,7 +68,7 @@ for (const ymd of ymds(from, to)) {
     : [];
   const xml = files.sort()[0];
   if (xml) {
-    spawnSync(process.execPath, ["src/import-pptimetable.js", xml, ymd], { stdio: "inherit", env: process.env });
+    spawnSync(process.execPath, ["src/import-pptimetable.js", "--replace", xml, ymd], { stdio: "inherit", env: process.env });
   } else {
     console.warn(ymd, "no dated v8 — HSP-only public stops if RIDs already known");
   }

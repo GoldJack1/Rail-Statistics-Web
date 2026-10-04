@@ -1,5 +1,5 @@
 [Unit]
-Description=rail-core NR STOMP TRUST movements
+Description=rail-core NR STOMP TRUST + VSTP + TD
 After=network.target rail-core-ingest.service
 
 [Service]

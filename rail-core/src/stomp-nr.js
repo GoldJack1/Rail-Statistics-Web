@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Network Rail Open Data STOMP → ingest-server (local TRUST).
- * Requires `stompit` (`npm i` in rail-core).
+ * Network Rail Open Data STOMP → ingest-server.
+ * TRUST movements, VSTP schedules, TD berths, RTPPM.
  */
 import "./load-env.js";
 const host = process.env.NR_STOMP_HOST ?? "publicdatafeeds.networkrail.co.uk";
@@ -37,25 +37,45 @@ stompit.connect(connectOptions, (err, client) => {
     console.error(err?.message || String(err));
     process.exit(1);
   }
-  const sub = (topic, path) => {
-    const headers = { destination: topic, ack: 'auto' }
+  const sub = (topic, path, enabled = true) => {
+    if (!enabled || !topic) return;
+    const headers = { destination: topic, ack: "auto" };
     client.subscribe(headers, (e, message) => {
-      if (e || !message) return
-      message.readString('utf-8', async (_e2, body) => {
-        if (!body) return
+      if (e || !message) return;
+      message.readString("utf-8", async (_e2, body) => {
+        if (!body) return;
         try {
           await fetch(`${ingest}${path}`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: body.startsWith('{') || body.startsWith('[') ? body : JSON.stringify({ raw: body }),
-          })
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: body.startsWith("{") || body.startsWith("[") ? body : JSON.stringify({ raw: body }),
+          });
         } catch {
           /* ingest down */
         }
-      })
-    })
-  }
-  sub(process.env.NR_RTPPM_TOPIC ?? '/topic/RTPPM_ALL', '/ingest/rtppm')
-  sub(process.env.NR_TRUST_TOPIC ?? '/topic/TRAIN_MVT_ALL_TOC', '/ingest/trust')
-  console.log('NR STOMP subscribed RTPPM + TRUST')
-})
+      });
+    });
+  };
+
+  const trustOn = process.env.NR_TRUST !== "0";
+  const vstpOn = process.env.NR_VSTP !== "0";
+  const tdOn = process.env.NR_TD !== "0";
+  const rtppmOn = process.env.NR_RTPPM !== "0";
+
+  sub(process.env.NR_TRUST_TOPIC ?? "/topic/TRAIN_MVT_ALL_TOC", "/ingest/trust", trustOn);
+  sub(process.env.NR_VSTP_TOPIC ?? "/topic/VSTP_ALL", "/ingest/vstp", vstpOn);
+  sub(process.env.NR_TD_TOPIC ?? "/topic/TD_ALL_SIG_AREA", "/ingest/td", tdOn);
+  sub(process.env.NR_RTPPM_TOPIC ?? "/topic/RTPPM_ALL", "/ingest/rtppm", rtppmOn);
+
+  console.log(
+    "NR STOMP subscribed",
+    [
+      trustOn ? "TRUST" : null,
+      vstpOn ? "VSTP" : null,
+      tdOn ? "TD" : null,
+      rtppmOn ? "RTPPM" : null,
+    ]
+      .filter(Boolean)
+      .join(" + "),
+  );
+});

@@ -1,0 +1,10 @@
+[Unit]
+Description=06:30 Europe/London ITPS SCHEDULE overlay
+
+[Timer]
+OnCalendar=*-*-* 06:30:00 Europe/London
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

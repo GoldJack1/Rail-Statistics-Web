@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * 04:00 Europe/London GCS pull (same window as the old daemon).
- * Stage 1: today’s Darwin v8, retried until it lands (files often 04:00–04:30).
- * Stage 2: NLC, TOPS, long-range CIF only after that import succeeds.
+ * Stage 1: today’s Darwin v8 (--replace so CIF tails from the previous night cannot stick).
+ * Stage 2: NLC, TOPS, long-range CIF only after that import succeeds (from tomorrow).
  */
 import "./load-env.js";
 import { spawnSync } from "node:child_process";
@@ -59,11 +59,12 @@ function pickLatest(uris, matcher) {
   return hits[hits.length - 1].uri;
 }
 
-function gsCpOne(uri, destDir) {
+function gsCpOne(uri, destDir, { skipExisting = true } = {}) {
   if (!uri) return false;
   mkdirSync(destDir, { recursive: true });
-  console.log("gsutil cp", uri);
-  const r = spawnSync(gsutil, ["cp", "-n", uri, destDir], { stdio: "inherit", env: process.env });
+  console.log("gsutil cp", uri, skipExisting ? "(skip existing)" : "(replace)");
+  const args = skipExisting ? ["cp", "-n", uri, destDir] : ["cp", uri, destDir];
+  const r = spawnSync(gsutil, args, { stdio: "inherit", env: process.env });
   return r.status === 0;
 }
 
@@ -83,9 +84,22 @@ function unpackLongRangeZips(cifDir) {
   const zips = collectFiles(cifDir).filter((f) => /\.zip$/i.test(f)).sort();
   for (const zip of zips) {
     console.log("unzip", zip);
-    spawnSync("unzip", ["-o", "-j", zip, "-d", cifDir], {
-      stdio: "inherit",
-    });
+    const unzip = spawnSync("unzip", ["-o", "-j", zip, "-d", cifDir], { stdio: "inherit" });
+    if (!unzip.status) continue;
+    console.log("unzip missing/failed, using python zipfile");
+    const py = spawnSync(
+      process.execPath.replace(/node$/, "python3") === process.execPath ? "python3" : "python3",
+      [
+        "-c",
+        "import zipfile,sys,os; d=sys.argv[2]; z=zipfile.ZipFile(sys.argv[1]);\n" +
+          "os.makedirs(d,exist_ok=True)\n" +
+          "[open(os.path.join(d, os.path.basename(i.filename)),'wb').write(z.read(i)) for i in z.infolist() if i.filename and not i.is_dir()]",
+        zip,
+        cifDir,
+      ],
+      { stdio: "inherit" },
+    );
+    if (py.status) console.error("python unzip failed", py.status);
   }
 }
 
@@ -156,7 +170,9 @@ let ttOk = false;
 if (!todayFiles.length) {
   console.error("no today’s v8 PPTimetable — keeping previous timetable, skipping NLC/TOPS/CIF");
 } else {
-  ttOk = todayFiles.every((full) => runRetry("import-pptimetable", ["src/import-pptimetable.js", full, today]));
+  ttOk = todayFiles.every((full) =>
+    runRetry("import-pptimetable", ["src/import-pptimetable.js", "--replace", full, today]),
+  );
 }
 
 if (!ttOk) {
@@ -168,11 +184,18 @@ console.log("stage 2: NLC, TOPS, long-range (after v8 ok)");
 gsCpOne(pickLatest(gsList(CORPUS), /^NLC.*\.xml\.gz$/i), TT_DIR);
 gsCpOne(pickLatest(gsList(TOPS), /^tops-location.*\.csv$/i), TT_DIR);
 runRetry("fetch-corpus", ["src/fetch-corpus.js"]);
+runRetry("fetch-smart", ["src/fetch-smart.js"]);
+
+// Daily ITPS JSON is usually not ready at 04:00 UK — rail-core-schedule.timer (~06:30) overlays it.
+if (process.env.TT_IMPORT_ITPS !== "0") {
+  console.log("stage 2b: ITPS overlay deferred to rail-core-schedule (~06:30 Europe/London)");
+}
 
 if (process.env.TT_IMPORT_CIF !== "0") {
   gsCpOne(
     pickLatest(gsList(LONG), /timetable_full.*\.zip$/i) || pickLatest(gsList(LONG), /\.zip$/i),
     join(TT_DIR, "cif"),
+    { skipExisting: false },
   );
   unpackLongRangeZips(join(TT_DIR, "cif"));
   const cifFiles = collectFiles(join(TT_DIR, "cif"))
@@ -184,8 +207,7 @@ if (process.env.TT_IMPORT_CIF !== "0") {
     const from = addCalendarDays(today, 1);
     console.log("CIF from", from, "ahead", ahead, "(skips Darwin operating day)");
     runRetry("import-tt", ["src/import-tt.js", latestCif, from, ahead]);
-  }
-  else console.log("no CIF MCA in tt/cif");
+  } else console.log("no CIF MCA in tt/cif for future days");
 }
 
 console.log("timetable ingest done");

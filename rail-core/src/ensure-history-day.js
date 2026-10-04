@@ -50,7 +50,7 @@ export async function ensureDayImported(ymd) {
           .sort()
       : [];
     if (files[0]) {
-      await run(process.execPath, ["src/import-pptimetable.js", files[0], ymd]);
+      await run(process.execPath, ["src/import-pptimetable.js", "--replace", files[0], ymd]);
       return serviceCount(ymd) > 0;
     }
     const cifDir = join(TT_DIR, "cif");

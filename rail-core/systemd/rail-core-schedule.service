@@ -1,0 +1,12 @@
+[Unit]
+Description=rail-core ~06:30 UK ITPS SCHEDULE overlay + graph pass fill
+After=network.target rail-core-tt.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=2h
+WorkingDirectory=/home/darwin/rail-core
+EnvironmentFile=/home/darwin/rail-core/.env
+Environment=TZ=Europe/London
+ExecStart=/usr/bin/node src/fetch-and-overlay-schedule.js
+User=darwin

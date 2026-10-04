@@ -344,6 +344,17 @@
   white-space: nowrap;
 }
 
+.svc-stops-table .svc-stop-leg-miles {
+  display: block;
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+  font-size: 0.75em;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
 .svc-stops-table .svc-stop--pass .svc-stop-name-text {
   font-weight: 500;
 }

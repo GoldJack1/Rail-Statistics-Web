@@ -129,3 +129,175 @@ export function cifBsRunsOn(line, ymd) {
   if (days.length >= 7 && days[cifWeekdayIndex(ymd)] === "0") return false;
   return true;
 }
+
+/** CIF STP indicator (column 80): overlay/new beat the permanent booked path. */
+export function cifStpRank(line) {
+  const stp = String(line?.[79] || "").toUpperCase();
+  if (stp === "O") return 3;
+  if (stp === "N") return 2;
+  if (stp === "P") return 1;
+  return 0;
+}
+
+function cifTpl(loc) {
+  return String(loc?.tiploc || "").trim().toUpperCase();
+}
+
+function cifLocIsPublic(loc) {
+  return Boolean(loc?.pta || loc?.ptd);
+}
+
+function cifPassRow(loc) {
+  const passing = Boolean(loc.passing) || Boolean(loc.wtp && !loc.wta && !loc.wtd && !loc.pta && !loc.ptd);
+  return {
+    tiploc: cifTpl(loc),
+    crs: loc.crs ?? null,
+    is_passing: passing ? 1 : 0,
+    cancelled: 0,
+    platform: loc.platform ?? null,
+    sta: loc.pta ?? null,
+    std: loc.ptd ?? null,
+    wta: loc.wta ?? null,
+    wtd: loc.wtd ?? null,
+    wtp: passing ? loc.wtp || loc.wtd || null : loc.wtp ?? null,
+    live_kind: "scheduled",
+    actual_source: null,
+    cifPass: true,
+  };
+}
+
+function findCifTpl(cif, tpl, from) {
+  const u = String(tpl || "").toUpperCase();
+  for (let i = from; i < cif.length; i++) {
+    if (cifTpl(cif[i]) === u) return i;
+  }
+  return -1;
+}
+
+function darwinAdvertised(c) {
+  if (Number(c?.is_passing)) return false;
+  const sta = c?.sta && String(c.sta).slice(0, 5) !== "00:00";
+  const std = c?.std && String(c.std).slice(0, 5) !== "00:00";
+  return Boolean(sta || std);
+}
+
+/** Public times / live actuals / booked stops — not invented working passes. */
+export function darwinScheduleAnchors(calls) {
+  const rows = (calls || []).filter((c) => cifTpl(c));
+  const anchors = rows.filter((c) => {
+    if (c?.ata || c?.atd || c?.atp) return true;
+    const sta = c?.sta && String(c.sta).slice(0, 5) !== "00:00";
+    const std = c?.std && String(c.std).slice(0, 5) !== "00:00";
+    if (sta || std) return true;
+    if (!Number(c?.is_passing)) return true;
+    return false;
+  });
+  return anchors.length >= 2 ? anchors : rows;
+}
+
+function callClock(c) {
+  const raw = c?.wtp || c?.wtd || c?.wta || c?.std || c?.sta || c?.ptd || c?.pta;
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(raw || ""));
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/** True when CIF is the same working as Darwin (no extra public stops such as Huddersfield). */
+export function cifMatchesDarwinPublicPath(darwinCalls, cifLocs) {
+  const darwin = (darwinCalls || []).filter((c) => cifTpl(c));
+  const cif = (cifLocs || []).filter((c) => cifTpl(c));
+  if (!darwin.length || !cif.length) return false;
+  const darwinSet = new Set(darwin.map((c) => cifTpl(c)));
+  if (cif.some((loc) => cifLocIsPublic(loc) && !darwinSet.has(cifTpl(loc)))) return false;
+  let from = 0;
+  for (const c of darwin) {
+    if (!darwinAdvertised(c)) continue;
+    const i = findCifTpl(cif, c.tiploc, from);
+    if (i < 0) return false;
+    from = i + 1;
+  }
+  return true;
+}
+
+function mergeFullCifWtt(darwin, cif) {
+  const byTpl = new Map();
+  for (const c of darwin) byTpl.set(cifTpl(c), c);
+  const used = new Set();
+  const out = [];
+  for (const loc of cif) {
+    const tpl = cifTpl(loc);
+    const d = byTpl.get(tpl);
+    if (d) {
+      // Keep Darwin live/public fields; prefer ITPS/CIF working times (fixes stale densify clocks).
+      // When CIF has a stop arrival/departure, drop a leftover Darwin pass time.
+      const wtp =
+        loc.wtp != null ? loc.wtp : loc.wta || loc.wtd ? null : (d.wtp ?? null);
+      out.push({
+        ...d,
+        wta: loc.wta ?? d.wta ?? null,
+        wtd: loc.wtd ?? d.wtd ?? null,
+        wtp,
+      });
+      used.add(tpl);
+    } else {
+      out.push(cifPassRow(loc));
+    }
+  }
+  for (const d of darwin) {
+    const tpl = cifTpl(d);
+    if (used.has(tpl)) continue;
+    const mins = callClock(d);
+    // Skip clockless extras — splicing at end created orphan tipocs after destination.
+    if (mins == null) continue;
+    let at = out.length;
+    for (let i = 0; i < out.length; i++) {
+      const om = callClock(out[i]);
+      if (om != null && om > mins) {
+        at = i;
+        break;
+      }
+    }
+    out.splice(at, 0, d);
+    used.add(tpl);
+  }
+  return out;
+}
+
+function mergeCifBetweenDarwinAnchors(darwin, cif) {
+  const darwinSet = new Set(darwin.map((c) => cifTpl(c)));
+  const out = [];
+  let cifFrom = 0;
+  for (let i = 0; i < darwin.length; i++) {
+    out.push(darwin[i]);
+    if (i === darwin.length - 1) break;
+    const ia = findCifTpl(cif, darwin[i].tiploc, cifFrom);
+    if (ia < 0) continue;
+    const ib = findCifTpl(cif, darwin[i + 1].tiploc, ia + 1);
+    if (ib < 0) continue;
+    const extras = cif.slice(ia + 1, ib);
+    const mismatch = extras.some((loc) => cifLocIsPublic(loc) && !darwinSet.has(cifTpl(loc)));
+    if (mismatch) continue;
+    for (const loc of extras) {
+      const tpl = cifTpl(loc);
+      if (darwinSet.has(tpl)) continue;
+      darwinSet.add(tpl);
+      out.push(cifPassRow(loc));
+    }
+    cifFrom = ib;
+  }
+  return out;
+}
+
+/**
+ * Prefer the full CIF working timetable when it is the same passenger path as Darwin
+ * (RTT detailed). Otherwise only fill pass TIPLOCs between matching Darwin anchors.
+ */
+export function mergeDarwinCallsWithCifPasses(darwinCalls, cifLocs) {
+  const darwin = (darwinCalls || []).filter((c) => cifTpl(c));
+  const cif = (cifLocs || []).filter((c) => cifTpl(c));
+  if (!darwin.length) return [];
+  const merged = cifMatchesDarwinPublicPath(darwin, cif)
+    ? mergeFullCifWtt(darwin, cif)
+    : mergeCifBetweenDarwinAnchors(darwin, cif);
+  return merged.map((c, seq) => ({ ...c, seq }));
+}
