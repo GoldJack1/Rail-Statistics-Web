@@ -95,3 +95,17 @@ test("triangle corridor inserts Holbeck when direct chord is shorter", () => {
   const hit = ormIntermediatePath(adj, "WHRDJN", "COTNGLY", { tipocMeta, geoByTpl });
   assert.deepEqual(hit.mids, ["HOLBJCN"]);
 });
+
+test("triangle corridor skips short gaps and non-detours", () => {
+  const adj = undirected([
+    ["A", "M", 100],
+    ["M", "B", 100],
+    ["A", "B", 250],
+  ]);
+  const geoByTpl = new Map([
+    ["A", { tiploc: "A", lat: 53.7, lon: -1.9 }],
+    ["M", { tiploc: "M", lat: 53.701, lon: -1.899 }],
+    ["B", { tiploc: "B", lat: 53.702, lon: -1.898 }],
+  ]);
+  assert.deepEqual(triangleCorridorMids(adj, "A", "B", { geoByTpl, tipocMeta: new Map() }), []);
+});

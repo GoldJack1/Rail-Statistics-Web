@@ -84,10 +84,15 @@ export function loadGeoByTpl(dataDir) {
 }
 
 /**
- * Junction tipocs that form A—N—B with both edges, sitting on the AB corridor.
- * Catches Holbeck when a direct chord A—B is slightly shorter than via N.
+ * At most one junction tipoc that forms A—N—B with both edges, on the AB corridor.
+ * Only when a direct A—B chord exists and is slightly shorter than via N (Holbeck case).
  */
-export function triangleCorridorMids(adj, from, to, { tipocMeta = null, geoByTpl = null, maxOffsetM = 550, maxDetour = 1.25 } = {}) {
+export function triangleCorridorMids(
+  adj,
+  from,
+  to,
+  { tipocMeta = null, geoByTpl = null, maxOffsetM = 550, maxDetour = 1.15, minChordM = 1500 } = {},
+) {
   const aTpl = String(from || "").toUpperCase();
   const bTpl = String(to || "").toUpperCase();
   if (!aTpl || !bTpl || !geoByTpl) return [];
@@ -95,9 +100,11 @@ export function triangleCorridorMids(adj, from, to, { tipocMeta = null, geoByTpl
   const b = geoByTpl.get(bTpl);
   if (!a || !b) return [];
   const ab = haversineM(a, b);
-  if (ab < 80) return [];
+  if (ab < minChordM) return [];
+  // Only fill skipped junctions when a direct chord edge exists.
+  if (!(adj.get(aTpl) || []).some((x) => x.to === bTpl)) return [];
 
-  const hits = [];
+  let best = null;
   const seen = new Set();
   for (const e of adj.get(aTpl) || []) {
     const n = e.to;
@@ -110,13 +117,14 @@ export function triangleCorridorMids(adj, from, to, { tipocMeta = null, geoByTpl
     if (!p) continue;
     const { offsetM, t } = distToSegmentM(p, a, b);
     if (offsetM > maxOffsetM) continue;
-    if (t <= 0.02 || t >= 0.98) continue;
+    if (t <= 0.05 || t >= 0.95) continue;
     const via = haversineM(a, p) + haversineM(p, b);
-    if (via > ab * maxDetour) continue;
-    hits.push({ tiploc: n, t, offsetM });
+    if (via <= ab || via > ab * maxDetour) continue;
+    if (!best || offsetM < best.offsetM || (offsetM === best.offsetM && t < best.t)) {
+      best = { tiploc: n, t, offsetM };
+    }
   }
-  hits.sort((x, y) => x.t - y.t || x.offsetM - y.offsetM);
-  return hits.map((h) => h.tiploc);
+  return best ? [best.tiploc] : [];
 }
 
 /**
