@@ -279,6 +279,8 @@ export function corridorGeometryMids(
     const tb = haversineM(pt, b);
     // Near-endpoint stations (Mirfield, Sowerby) project to t≈0/1; metre floor gates them.
     if (at < DEFAULT_CORRIDOR_MIN_PROG_M || tb < DEFAULT_CORRIDOR_MIN_PROG_M) continue;
+    // Reject tipocs that lie beyond an endpoint (Sowerby past Milner Royd on Greetland→Milner).
+    if (at > ab + 40 || tb > ab + 40) continue;
     if (at + tb > ab * 1.25) continue;
     hits.push({ tiploc: pt.tiploc, t, at, offsetM, junction: Boolean(junction || !crs) });
   }
