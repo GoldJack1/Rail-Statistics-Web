@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "path";
 import { openCatalog, openDayDb } from "./db.js";
 import {
+  associationsForRid,
   collapseOvernightAssociates,
   combinedDestinationName,
   extractDarwinAssociationsXml,
@@ -396,6 +397,28 @@ test("schedule inference does not attach ordinary CrossCountry connections", () 
     ('R2','NOTNGHM','NOT',5,0,0,1,'scheduled','17:20',null)`).run();
   const svc = db.prepare(`SELECT * FROM services WHERE rid = 'R1'`).get();
   assert.equal(inferScheduleDivides({ db, svc, stationName: () => "X" }).length, 0);
+});
+
+test("associationsForRid keeps Darwin VV rows that omit UIDs", () => {
+  const dir = mkdtempSync(join(tmpdir(), "assoc-nouid-"));
+  const db = openDayDb(dir, "2026-10-04");
+  const insert = db.prepare(
+    `INSERT INTO services (rid, uid, train_id, rs_id, toc, operator_name, origin_crs, origin_name,
+      destination_crs, destination_name, via, service_type, cancelled, cancel_reason, delay_reason,
+      is_charter, category, headcode, updated_at)
+     VALUES (?, ?, ?, null, ?, 'Caledonian Sleeper', ?, ?, ?, ?, null, 'passenger', 0, null, null, 0, 'XZ', ?, 1)`,
+  );
+  insert.run("202610046704495", "C04495", "1S25", "CS", "EUS", "London Euston", "INV", "Inverness", "1S25");
+  insert.run("202610056704488", "C04488", "1A25", "CS", "EDB", "Edinburgh", "ABD", "Aberdeen", "1A25");
+  db.prepare(
+    `INSERT INTO associations (main_rid, assoc_rid, category, tiploc, main_uid, assoc_uid, is_cancelled, is_deleted, updated_at)
+     VALUES ('202610046704495', '202610056704488', 'VV', 'EDINBUR', null, null, 0, 0, 1)`,
+  ).run();
+  const found = associationsForRid(db, "202610046704495", (_c, t) => t);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].otherRid, "202610056704488");
+  assert.equal(found[0].otherDestinationName, "Aberdeen");
+  db.close();
 });
 
 test("display associations drop ECS and freight headcodes", () => {

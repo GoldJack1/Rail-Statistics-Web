@@ -478,9 +478,37 @@ export function adoptUidOntoRid(db, uid, rid) {
   if (!uid || !rid) return;
   const darwinRid = /^\d{15}$/.test(String(rid));
   if (!darwinRid) return;
-  const others = db.prepare(`SELECT rid FROM services WHERE uid = ? AND rid != ?`).all(uid, rid);
+  const others = db.prepare(`SELECT * FROM services WHERE uid = ? AND rid != ?`).all(uid, rid);
   for (const o of others) {
     if (/^\d{15}$/.test(String(o.rid))) continue;
+    // Copy CIF identity onto the Darwin stub before dropping the CIF RID —
+    // otherwise overnight CS portions keep null toc/headcode after adoption.
+    db.prepare(
+      `UPDATE services SET
+         train_id = COALESCE(NULLIF(train_id,''), ?),
+         toc = COALESCE(NULLIF(toc,''), ?),
+         operator_name = COALESCE(NULLIF(operator_name,''), ?),
+         category = COALESCE(NULLIF(category,''), ?),
+         headcode = COALESCE(NULLIF(headcode,''), ?),
+         origin_crs = COALESCE(NULLIF(origin_crs,''), ?),
+         origin_name = COALESCE(NULLIF(origin_name,''), ?),
+         destination_crs = COALESCE(NULLIF(destination_crs,''), ?),
+         destination_name = COALESCE(NULLIF(destination_name,''), ?),
+         service_type = COALESCE(NULLIF(service_type,''), ?)
+       WHERE rid = ?`,
+    ).run(
+      o.train_id || null,
+      o.toc || null,
+      o.operator_name || null,
+      o.category || null,
+      o.headcode || o.train_id || null,
+      o.origin_crs || null,
+      o.origin_name || null,
+      o.destination_crs || null,
+      o.destination_name || null,
+      o.service_type || null,
+      rid,
+    );
     const calls = db.prepare(`SELECT * FROM calls WHERE rid = ?`).all(o.rid);
     for (const c of calls) upsertCall(db, { ...c, rid }, { cifMerge: true });
     db.prepare(`DELETE FROM calls WHERE rid = ?`).run(o.rid);

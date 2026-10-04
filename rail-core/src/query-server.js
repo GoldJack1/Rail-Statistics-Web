@@ -17,6 +17,7 @@ import { consistDocument, lookupConsist, normalizePtacVehicles, unitIdsFromConsi
 import {
   associationsForRid,
   combinedDestinationName,
+  enrichAssociationsFromDays,
   inferAssociationsFromConsist,
   inferScheduleDivides,
   mergeAssociations,
@@ -266,6 +267,10 @@ async function liveDepartures(crs, opts) {
   for (const fileYmd of days) {
     const db = openDay(fileYmd);
     if (!db) continue;
+    const peerDatabases = [addCalendarDays(fileYmd, -1), fileYmd, addCalendarDays(fileYmd, 1)]
+      .filter(Boolean)
+      .map((day) => ({ ymd: day, db: openDay(day) }))
+      .filter((row) => row.db);
     const part = buildStationBoard({
       db,
       ymd: fileYmd,
@@ -282,6 +287,7 @@ async function liveDepartures(crs, opts) {
       boardDate: ymd,
       cisMode,
       catalog,
+      peerDatabases,
     });
     board.departures = mergeBoardRows(board.departures, part.departures);
     board.arrivals = mergeBoardRows(board.arrivals, part.arrivals);
@@ -636,15 +642,24 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     const hopTo = scored.find((row) => row.n && row.score > 0);
     if (hopTo) return serviceDetail(ymd, hopTo.id, atRaw, hop + 1);
   }
-  let storedAssoc = hydrateAssociations(ymd, associationsForRid(db, resolvedRid, stationName));
+  const peerDays = adjacentServiceDatabases(ymd);
+  let storedAssoc = enrichAssociationsFromDays(
+    hydrateAssociations(ymd, associationsForRid(db, resolvedRid, stationName)),
+    peerDays,
+    stationName,
+  );
   const consist = consistForService(ymd, svc);
   const consistInferred = inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, stationName });
-  const inferredAssoc = hydrateAssociations(
-    ymd,
-    mergeAssociations(
-      consistInferred,
-      inferScheduleDivides({ db, svc, stationName, ymd, databases: adjacentServiceDatabases(ymd) }),
+  const inferredAssoc = enrichAssociationsFromDays(
+    hydrateAssociations(
+      ymd,
+      mergeAssociations(
+        consistInferred,
+        inferScheduleDivides({ db, svc, stationName, ymd, databases: peerDays }),
+      ),
     ),
+    peerDays,
+    stationName,
   );
   const journeyTpls = rawCalls.filter((c) => !Number(c.is_passing)).map((c) => c.tiploc);
   let associations = filterDisplayAssociations(

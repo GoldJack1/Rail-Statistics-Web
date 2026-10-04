@@ -9,7 +9,14 @@ import { isPassengerHeadcode } from "./headcode.js";
 import { maskCallAsOf, maskCallsAsOf, maskTrustOverlay, maskTrustOverlayCalls } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
 import { lookupConsistsForUids, unitIdsAtBoardCall } from "./ptac-apply.js";
-import { associationsForRid, combinedDestinationName, filterDisplayAssociations, inferAssociationsFromConsist, mergeAssociations } from "./associations.js";
+import {
+  associationsForRid,
+  combinedDestinationName,
+  enrichAssociationsFromDays,
+  filterDisplayAssociations,
+  inferAssociationsFromConsist,
+  mergeAssociations,
+} from "./associations.js";
 import { callOnBoardDate, isOvernightSleeperJourney, londonInstant, ridVisibleOnBoard } from "./calendar-day.js";
 
 const UK_RAIL_ROLLOVER_MINUTES = 2 * 60;
@@ -272,8 +279,10 @@ export function buildStationBoard({
   boardDate = null,
   consistByUid = null,
   catalog = null,
+  peerDatabases = null,
 }) {
   const code = String(crs).toUpperCase();
+  const peerDays = peerDatabases?.length ? peerDatabases : [{ ymd, db }];
   const tpls = (tiplocs || []).map((t) => String(t).toUpperCase());
   const placeholders = tpls.map(() => "?").join(",") || "NULL";
   const tiplocOnly = matchBy === "tiploc" && tpls.length > 0;
@@ -405,18 +414,22 @@ export function buildStationBoard({
     let associations = assocByRid.get(r.s_rid);
     if (!associations) {
       associations = filterDisplayAssociations(
-        mergeAssociations(
-          associationsForRid(db, r.s_rid, stationName),
-          consistDoc
-            ? inferAssociationsFromConsist({
-                db,
-                catalog,
-                ymd,
-                svc: { rid: r.s_rid, uid: r.uid },
-                consist: consistDoc,
-                stationName,
-              })
-            : [],
+        enrichAssociationsFromDays(
+          mergeAssociations(
+            associationsForRid(db, r.s_rid, stationName),
+            consistDoc
+              ? inferAssociationsFromConsist({
+                  db,
+                  catalog,
+                  ymd,
+                  svc: { rid: r.s_rid, uid: r.uid },
+                  consist: consistDoc,
+                  stationName,
+                })
+              : [],
+          ),
+          peerDays,
+          stationName,
         ),
         toc,
         pax.map((c) => c.tiploc),

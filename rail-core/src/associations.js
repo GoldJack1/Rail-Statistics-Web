@@ -267,7 +267,21 @@ function listCsWorkings(databases) {
     if (!db) continue;
     const rows = db
       .prepare(
-        `SELECT * FROM services WHERE UPPER(IFNULL(toc,'')) = 'CS' AND IFNULL(cancelled,0)=0`,
+        `SELECT * FROM services
+         WHERE IFNULL(cancelled,0)=0
+           AND (
+             UPPER(IFNULL(toc,'')) = 'CS'
+             OR (
+               UPPER(IFNULL(uid,'')) GLOB 'C04*'
+               AND IFNULL(headcode, train_id) GLOB '[129]*'
+             )
+             OR (
+               UPPER(IFNULL(uid,'')) GLOB 'C04*'
+               AND IFNULL(toc,'') = ''
+               AND IFNULL(origin_name,'') != ''
+               AND IFNULL(destination_name,'') != ''
+             )
+           )`,
       )
       .all();
     for (const svc of rows) {
@@ -277,7 +291,11 @@ function listCsWorkings(databases) {
       if (head && !isPassengerHeadcode(head)) continue;
       const calls = passengerCalls(db, svc.rid);
       if (calls.length < 2) continue;
-      out.push({ db, ymd, svc, calls, ssd: serviceSsd(svc, ymd) });
+      // Adopted Darwin stubs can lose toc; treat known CS UIDs as CS for divides.
+      const enriched = svc.toc
+        ? svc
+        : { ...svc, toc: "CS", headcode: svc.headcode || svc.train_id || null };
+      out.push({ db, ymd, svc: enriched, calls, ssd: serviceSsd(enriched, ymd) });
     }
   }
   return out;
@@ -565,6 +583,44 @@ function originOfService(db, svc, stationName) {
   return stationName?.(row?.crs, row?.tiploc) || svc.origin_name || row?.tiploc || null;
 }
 
+/**
+ * Resolve peer service rows for associations whose other RID lives on an
+ * adjacent railway day (typical for overnight CS divides).
+ */
+export function enrichAssociationsFromDays(associations, databases, stationName) {
+  return (associations || []).map((a) => {
+    if (!a?.otherRid && !a?.otherUid) return a;
+    let other = null;
+    let otherDb = null;
+    for (const { db } of databases || []) {
+      if (!db) continue;
+      if (a.otherRid) {
+        other = db.prepare(`SELECT * FROM services WHERE rid = ?`).get(a.otherRid);
+      }
+      if (!other && a.otherUid) {
+        other = db
+          .prepare(`SELECT * FROM services WHERE UPPER(IFNULL(uid,'')) = ? LIMIT 1`)
+          .get(String(a.otherUid).toUpperCase());
+      }
+      if (other) {
+        otherDb = db;
+        break;
+      }
+    }
+    if (!other) return a;
+    return {
+      ...a,
+      otherRid: other.rid || a.otherRid,
+      otherUid: other.uid || a.otherUid,
+      otherTrainId: other.headcode || other.train_id || a.otherTrainId,
+      otherToc: other.toc || a.otherToc,
+      otherOriginName: originOfService(otherDb, other, stationName) || a.otherOriginName,
+      otherDestinationName: destOfService(otherDb, other, stationName) || a.otherDestinationName,
+      isCancelled: Boolean(a.isCancelled || other.cancelled),
+    };
+  });
+}
+
 export function associationsForRid(db, rid, stationName) {
   ensureAssociationsTable(db);
   const rows = db
@@ -575,12 +631,13 @@ export function associationsForRid(db, rid, stationName) {
   const out = [];
   for (const row of rows) {
     if (!["VV", "JJ", "NP"].includes(row.category)) continue;
-    if (row.category === "VV" && !row.main_uid && !row.assoc_uid) continue;
+    // Darwin often omits UIDs on VV; RIDs alone are enough (hydrate fills peers).
+    if (!row.main_rid || !row.assoc_rid) continue;
     const role = row.main_rid === rid ? "main" : "associated";
     const otherRid = role === "main" ? row.assoc_rid : row.main_rid;
     const other = db.prepare(`SELECT * FROM services WHERE rid = ?`).get(otherRid);
     const otherTrainId = other?.headcode || other?.train_id || null;
-    if (!isPassengerHeadcode(otherTrainId)) continue;
+    if (otherTrainId && !isPassengerHeadcode(otherTrainId)) continue;
     out.push({
       category: row.category,
       tiploc: row.tiploc,
