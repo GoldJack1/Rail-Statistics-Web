@@ -20,6 +20,8 @@ import {
   upsertCall,
 } from "./db.js";
 import {
+  buildGeoIndex,
+  candidatesNearSegment,
   distToSegmentM,
   haversineM,
   isNonPassengerLocation,
@@ -32,9 +34,20 @@ import {
   loadAdjFromCatalog,
 } from "./tiploc-graph.js";
 
-export const DEFAULT_MAX_HOPS = 12;
+export const DEFAULT_MAX_HOPS = 4;
 export const DEFAULT_MAX_EDGE_M = 4500;
 export const DEFAULT_KNN = 6;
+/** Corridor fill between consecutive spine tipocs (Holbeck / Cottingley / Batley). */
+export const DEFAULT_CORRIDOR_OFFSET_M = 650;
+/** Allow near-endpoint CRS/junctions (Mirfield ~24 m past Mirfield East). */
+export const DEFAULT_CORRIDOR_MIN_PROG_M = 20;
+export const DEFAULT_CORRIDOR_SPACING_M = 400;
+export const DEFAULT_CORRIDOR_MAX_MIDS = 3;
+export const DEFAULT_CORRIDOR_MIN_GAP_M = 1000;
+/** CRS on-chord without schedule edge if this close (Elland-class). */
+export const DEFAULT_CRS_FREE_OFFSET_M = 500;
+/** Reject graph paths that detour far off the chord (Wakefield via). */
+export const DEFAULT_MAX_PATH_DETOUR = 1.2;
 
 export function ensureOrmTables(db) {
   db.exec(`
@@ -212,9 +225,83 @@ function isPassengerCrsTiploc(tpl, tipocMeta) {
   return Boolean(crs) && !crs.startsWith("X");
 }
 
+function isJunctionName(meta = {}) {
+  return /\bjn\b|junction/i.test(String(meta.name || ""));
+}
+
+/**
+ * Tipocs on the spatial corridor between consecutive known spine tipocs.
+ * Junctions on-chord are always eligible. CRS stations need a schedule edge
+ * to A or B (other trains prove the tipoc sits on this corridor).
+ */
+export function corridorGeometryMids(
+  from,
+  to,
+  { tipocMeta = null, geoByTpl = null, geoIndex = null, scheduleAdj = null } = {},
+) {
+  const aTpl = String(from || "").toUpperCase();
+  const bTpl = String(to || "").toUpperCase();
+  if (!aTpl || !bTpl || !geoByTpl) return [];
+  const a = geoByTpl.get(aTpl);
+  const b = geoByTpl.get(bTpl);
+  if (!a || !b) return [];
+  const ab = haversineM(a, b);
+  if (ab < DEFAULT_CORRIDOR_MIN_GAP_M) return [];
+
+  const index =
+    geoIndex ||
+    buildGeoIndex(
+      [...geoByTpl.values()].map((p) => ({ tiploc: p.tiploc, lat: p.lat, lon: p.lon })),
+    );
+
+  const schedTouch = (tpl) => {
+    if (!scheduleAdj) return true;
+    const nA = scheduleAdj.get(aTpl) || [];
+    const nB = scheduleAdj.get(bTpl) || [];
+    return nA.some((x) => x.to === tpl) || nB.some((x) => x.to === tpl);
+  };
+
+  const hits = [];
+  for (const pt of candidatesNearSegment(index, a, b)) {
+    if (pt.tiploc === aTpl || pt.tiploc === bTpl) continue;
+    const meta = tipocMeta?.get(pt.tiploc) || {};
+    if (isNonPassengerLocation(pt.tiploc, meta)) continue;
+    const crs = String(meta.crs || "").trim();
+    const junction = !crs || isJunctionName(meta);
+    const { offsetM, t } = distToSegmentM(pt, a, b);
+    if (offsetM > DEFAULT_CORRIDOR_OFFSET_M) continue;
+    // Passenger CRS: schedule adjacency, or very tight on-chord.
+    if (crs && !crs.toUpperCase().startsWith("X") && !junction) {
+      if (!schedTouch(pt.tiploc) && offsetM > DEFAULT_CRS_FREE_OFFSET_M) continue;
+    }
+    if (t < 0 || t > 1) continue;
+    const at = haversineM(a, pt);
+    const tb = haversineM(pt, b);
+    // Near-endpoint stations (Mirfield, Sowerby) project to t≈0/1; metre floor gates them.
+    if (at < DEFAULT_CORRIDOR_MIN_PROG_M || tb < DEFAULT_CORRIDOR_MIN_PROG_M) continue;
+    // Reject tipocs that lie beyond an endpoint (Sowerby past Milner Royd on Greetland→Milner).
+    if (at > ab + 40 || tb > ab + 40) continue;
+    if (at + tb > ab * 1.25) continue;
+    hits.push({ tiploc: pt.tiploc, t, at, offsetM, junction: Boolean(junction || !crs) });
+  }
+  // Prefer junctions, then lower offset.
+  hits.sort((x, y) => Number(y.junction) - Number(x.junction) || x.t - y.t || x.offsetM - y.offsetM);
+
+  const picked = [];
+  let lastAt = -DEFAULT_CORRIDOR_SPACING_M;
+  const ordered = [...hits].sort((x, y) => x.t - y.t || x.offsetM - y.offsetM);
+  for (const h of ordered) {
+    if (h.at - lastAt < DEFAULT_CORRIDOR_SPACING_M) continue;
+    picked.push(h.tiploc);
+    lastAt = h.at;
+    if (picked.length >= DEFAULT_CORRIDOR_MAX_MIDS) break;
+  }
+  return picked;
+}
+
 /**
  * Dijkstra shortest path. Returns { path: tipocs inclusive, metres } or null.
- * Passenger CRS tipocs are not traversed as intermediates (never invent stations).
+ * Skips non-passenger / junk tipocs as intermediates.
  */
 export function shortestOrmPath(adj, from, to, { maxHops = DEFAULT_MAX_HOPS, tipocMeta = null } = {}) {
   const start = String(from || "").toUpperCase();
@@ -245,8 +332,12 @@ export function shortestOrmPath(adj, from, to, { maxHops = DEFAULT_MAX_HOPS, tip
     if (h >= maxHops) continue;
     for (const e of adj.get(u) || []) {
       const next = e.to;
-      if (next !== goal && next !== start && isPassengerCrsTiploc(next, tipocMeta)) continue;
-      if (next !== goal && next !== start && tipocMeta && isNonPassengerLocation(next, tipocMeta.get(next) || {})) {
+      if (
+        next !== goal &&
+        next !== start &&
+        tipocMeta &&
+        isNonPassengerLocation(next, tipocMeta.get(next) || {})
+      ) {
         continue;
       }
       const alt = best + e.metres;
@@ -273,25 +364,60 @@ export function shortestOrmPath(adj, from, to, { maxHops = DEFAULT_MAX_HOPS, tip
 
 /** Intermediate tipocs only (excludes from/to). */
 export function ormIntermediatePath(adj, from, to, opts = {}) {
-  const hit = shortestOrmPath(adj, from, to, opts);
-  const triangles = triangleCorridorMids(adj, from, to, opts);
-  if (!hit && !triangles.length) return null;
+  const tipocMeta = opts.tipocMeta || null;
+  const geoByTpl = opts.geoByTpl;
+  const geoIndex = opts.geoIndex || null;
+  const maxDetour = opts.maxPathDetour ?? DEFAULT_MAX_PATH_DETOUR;
+  const aTpl = String(from || "").toUpperCase();
+  const bTpl = String(to || "").toUpperCase();
+  const a = geoByTpl?.get(aTpl);
+  const b = geoByTpl?.get(bTpl);
+  const ab = a && b ? haversineM(a, b) : null;
+
+  // Primary: tipocs on the chord between consecutive spine tipocs.
+  const corridor = corridorGeometryMids(aTpl, bTpl, {
+    tipocMeta,
+    geoByTpl,
+    geoIndex,
+    scheduleAdj: opts.scheduleAdj || null,
+  });
+
+  // Secondary: short on-corridor graph path (no Wakefield-scale detours).
+  const hit = shortestOrmPath(adj, aTpl, bTpl, opts);
+  const graphMids = [];
+  if (hit?.path?.length >= 3 && ab != null && hit.metres <= ab * maxDetour) {
+    for (const tpl of hit.path.slice(1, -1)) {
+      if (tipocMeta && isNonPassengerLocation(tpl, tipocMeta.get(tpl) || {})) continue;
+      if (a && b && geoByTpl?.get(tpl)) {
+        const { offsetM } = distToSegmentM(geoByTpl.get(tpl), a, b);
+        if (offsetM > DEFAULT_CORRIDOR_OFFSET_M) continue;
+      }
+      graphMids.push(tpl);
+    }
+  }
+
+  const triangles = triangleCorridorMids(adj, aTpl, bTpl, opts);
+  if (!corridor.length && !graphMids.length && !triangles.length) {
+    return hit && Number.isFinite(hit.metres)
+      ? { mids: [], metres: hit.metres, path: [aTpl, bTpl] }
+      : ab != null
+        ? { mids: [], metres: ab, path: [aTpl, bTpl] }
+        : null;
+  }
 
   const mids = [];
   const seen = new Set();
   const push = (tpl) => {
     const t = String(tpl || "").toUpperCase();
     if (!t || seen.has(t)) return;
+    if (tipocMeta && isNonPassengerLocation(t, tipocMeta.get(t) || {})) return;
     seen.add(t);
     mids.push(t);
   };
-  for (const tpl of hit?.path?.slice(1, -1) || []) push(tpl);
+  for (const tpl of corridor) push(tpl);
+  for (const tpl of graphMids) push(tpl);
   for (const tpl of triangles) push(tpl);
 
-  // Order mids along AB when geo available.
-  const geoByTpl = opts.geoByTpl;
-  const a = geoByTpl?.get(String(from).toUpperCase());
-  const b = geoByTpl?.get(String(to).toUpperCase());
   if (a && b && mids.length > 1) {
     mids.sort((x, y) => {
       const px = geoByTpl.get(x);
@@ -301,8 +427,8 @@ export function ormIntermediatePath(adj, from, to, opts = {}) {
     });
   }
 
-  let metres = hit?.metres;
-  if (mids.length && geoByTpl && a && b) {
+  let metres = ab;
+  if (mids.length && a && b) {
     let sum = 0;
     let prev = a;
     for (const tpl of mids) {
@@ -313,14 +439,14 @@ export function ormIntermediatePath(adj, from, to, opts = {}) {
     }
     sum += haversineM(prev, b);
     metres = sum;
-  } else if (metres == null && a && b) {
-    metres = haversineM(a, b);
+  } else if (hit && Number.isFinite(hit.metres)) {
+    metres = hit.metres;
   }
 
   return {
     mids,
     metres: metres ?? null,
-    path: [String(from).toUpperCase(), ...mids, String(to).toUpperCase()],
+    path: [aTpl, ...mids, bTpl],
   };
 }
 
@@ -331,6 +457,8 @@ export function ormIntermediatePath(adj, from, to, opts = {}) {
 export function stitchCallsWithOrmPath(calls, adj, opts = {}) {
   const tipocMeta = opts.tipocMeta || null;
   const geoByTpl = opts.geoByTpl || null;
+  const geoIndex = opts.geoIndex || null;
+  const scheduleAdj = opts.scheduleAdj || null;
   const maxHops = opts.maxHops ?? DEFAULT_MAX_HOPS;
   const spine = (calls || []).filter((c) => c?.tiploc);
   if (spine.length < 2) {
@@ -351,7 +479,13 @@ export function stitchCallsWithOrmPath(calls, adj, opts = {}) {
     }
     const a = String(spine[i - 1].tiploc).toUpperCase();
     const b = String(cur.tiploc).toUpperCase();
-    const hit = ormIntermediatePath(adj, a, b, { maxHops, tipocMeta, geoByTpl });
+    const hit = ormIntermediatePath(adj, a, b, {
+      maxHops,
+      tipocMeta,
+      geoByTpl,
+      geoIndex,
+      scheduleAdj,
+    });
     const t0 = callClock(spine[i - 1]);
     const t1 = callClock(cur);
 
@@ -421,6 +555,11 @@ export function stitchOrmPathsForDay(dataDir, dayYmd, opts = {}) {
 
   const tipocMeta = opts.tipocMeta || loadTiplocMeta(dataDir);
   const geoByTpl = opts.geoByTpl || loadGeoByTpl(dataDir);
+  const geoIndex =
+    opts.geoIndex ||
+    buildGeoIndex([...geoByTpl.values()].map((p) => ({ tiploc: p.tiploc, lat: p.lat, lon: p.lon })));
+  // Low minEdge so rare but real schedule adjacencies still gate CRS corridor fills.
+  const scheduleAdj = opts.scheduleAdj || loadAdjFromCatalog(dataDir, { minEdge: 1 });
   const catalog = openCatalog(dataDir);
   const crsStmt = catalog.prepare(`SELECT crs FROM tiploc WHERE tiploc = ?`);
   const nameByCrs = catalog.prepare(`SELECT name FROM tiploc WHERE crs = ? LIMIT 1`);
@@ -452,7 +591,9 @@ export function stitchOrmPathsForDay(dataDir, dayYmd, opts = {}) {
     const { calls: filled, inserted: n } = stitchCallsWithOrmPath(before, adj, {
       tipocMeta,
       geoByTpl,
-      maxHops: opts.maxHops,
+      geoIndex,
+      scheduleAdj,
+      maxHops: opts.maxHops ?? DEFAULT_MAX_HOPS,
     });
     const mileageChanged = filled.some(
       (c, i) => c.leg_m !== before[i]?.leg_m || c.cum_m !== before[i]?.cum_m,

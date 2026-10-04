@@ -38,7 +38,7 @@ export const DEFAULT_VALIDATED_MID_MAX_SPAN = 8;
 export const DEFAULT_DENSIFY_PASSES = 2;
 
 const NON_PASSENGER_NAME =
-  /\b(metrolink|mtlk|t\.?\s*m\.?\s*d|t&r|depot|siemens|n\.?\s*y\.?|yard|down loop|up loop|loop\s*\(|h\.?\s*s\.?\b|trans systems|international dep)/i;
+  /\b(metrolink|mtlk|t\.?\s*m\.?\s*d|t&r|depot|siemens|n\.?\s*y\.?|yard|down loop|up loop|loop\s*\(|h\.?\s*s\.?\b|trans systems|international dep|marshall|fuelling|fuel(?:ling)?\s*point|turnback|tarmac|sidings?|sdgs?|signal\b|cess|headshunt|carriage\s*sid)/i;
 
 const EARTH_M = 6371000;
 
@@ -93,7 +93,7 @@ export function buildGeoIndex(rows) {
   return { byTpl, grid };
 }
 
-function candidatesNearSegment(index, a, b, padDeg = 0.02) {
+export function candidatesNearSegment(index, a, b, padDeg = 0.02) {
   const minLat = Math.min(a.lat, b.lat) - padDeg;
   const maxLat = Math.max(a.lat, b.lat) + padDeg;
   const minLon = Math.min(a.lon, b.lon) - padDeg;
@@ -121,11 +121,12 @@ export function isSignalOrElocTiploc(tiploc) {
   const t = String(tiploc || "").toUpperCase();
   if (!t) return true;
   if (t.startsWith("ELOC")) return true;
-  if (/\d{3,}/.test(t)) return true;
+  // Signal/berth-like codes: trailing digits (MLNR8, CSTL30) or 3+ embedded digits.
+  if (/\d+$/.test(t) || /\d{3,}/.test(t)) return true;
   return false;
 }
 
-/** Depots, yards, Metrolink, engineering CRS (X**), etc. */
+/** Depots, yards, Metrolink, engineering CRS (X**), marshalling, signals, etc. */
 export function isNonPassengerLocation(tiploc, { name = "", crs = "" } = {}) {
   const t = String(tiploc || "").toUpperCase();
   if (isSignalOrElocTiploc(t)) return true;
@@ -133,6 +134,7 @@ export function isNonPassengerLocation(tiploc, { name = "", crs = "" } = {}) {
   if (c.length === 3 && c.startsWith("X")) return true;
   if (NON_PASSENGER_NAME.test(String(name || ""))) return true;
   if (/\bmtlk\b/i.test(t) || /MTL/i.test(t)) return true;
+  if (/(MSL|SDG|TMD|CSD|SIG)$/i.test(t)) return true;
   return false;
 }
 
