@@ -286,10 +286,11 @@ export function corridorGeometryMids(
     // Reject tipocs that lie beyond an endpoint (Sowerby past Milner Royd on Greetland→Milner).
     if (at > ab + 40 || tb > ab + 40) continue;
     if (at + tb > ab * 1.25) continue;
-    // CRS closer to B belongs on the next gap (Sowerby after Milner Royd, not before).
+    // CRS hugging B belongs on the next gap (Sowerby ~40 m past Milner Royd).
+    // Mid-gap CRS like Cottingley (t≈0.6) must stay.
     if (crs && !crs.toUpperCase().startsWith("X") && !junction) {
-      if (tb <= at) continue;
-      if (at < 200 && !schedOutFrom(aTpl, pt.tiploc)) continue;
+      if (tb < 120) continue;
+      if (at < 120 && !schedOutFrom(aTpl, pt.tiploc)) continue;
     }
     hits.push({ tiploc: pt.tiploc, t, at, offsetM, junction: Boolean(junction || !crs) });
   }
