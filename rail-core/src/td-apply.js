@@ -5,6 +5,7 @@
  */
 import { hhmm, liveKind, openCatalog, openDayDb, operatingDayYmd, upsertCall } from "./db.js";
 import { resolveSmartTiploc } from "./import-smart.js";
+import { nrodCandidateDays, writeDaysForRid } from "./nrod-write-days.js";
 
 export function ensureTdTables(db) {
   db.exec(`
@@ -164,37 +165,22 @@ function upsertTdPass(db, { rid, tiploc, crs, platform, actual }) {
   );
 }
 
-export function applyTdFrame(dataDir, message, ymd = operatingDayYmd()) {
-  const parsed = unpackTd(message);
-  if (!parsed) return false;
-  const db = openDayDb(dataDir, ymd);
-  ensureTdTables(db);
-  const now = Date.now();
-  const rid = resolveRid(db, parsed.headcode);
-  const berth = parsed.berth || parsed.fromBerth;
-  if (!berth && !parsed.fromBerth) {
-    db.close();
-    return false;
-  }
-
-  let tiploc = null;
-  let stanox = null;
-  let crs = null;
-  let platform = null;
-  try {
-    const cat = openCatalog(dataDir);
-    const mapped = resolveSmartTiploc(cat, parsed.areaId, berth, parsed.fromBerth);
-    cat.close();
-    if (mapped) {
-      tiploc = mapped.tiploc;
-      stanox = mapped.stanox;
-      crs = mapped.crs;
-      platform = mapped.platform;
+function resolveRidAcrossDays(dataDir, operatingDay, headcode) {
+  for (const day of nrodCandidateDays(operatingDay)) {
+    const db = openDayDb(dataDir, day);
+    try {
+      const rid = resolveRid(db, headcode);
+      if (rid) return rid;
+    } finally {
+      db.close();
     }
-  } catch {
-    /* SMART optional */
   }
+  return null;
+}
 
+function applyTdToDay(db, message, parsed, { rid, tiploc, stanox, crs, platform, berth, now }) {
+  ensureTdTables(db);
+  const dayRid = resolveRid(db, parsed.headcode);
   db.prepare(
     `INSERT OR REPLACE INTO td_trains (headcode, area_id, berth, from_berth, msg_type, train_id, rid, tiploc, stanox, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -205,7 +191,7 @@ export function applyTdFrame(dataDir, message, ymd = operatingDayYmd()) {
     parsed.fromBerth,
     parsed.msgType,
     null,
-    rid,
+    dayRid,
     tiploc,
     stanox,
     now,
@@ -227,12 +213,47 @@ export function applyTdFrame(dataDir, message, ymd = operatingDayYmd()) {
   );
 
   // CA = berth step, CC = interpose. CB/CT handled elsewhere / ignored for path.
-  if (rid && tiploc && (parsed.msgType === "CA" || parsed.msgType === "CC")) {
+  if (dayRid && tiploc && (parsed.msgType === "CA" || parsed.msgType === "CC")) {
     const actual = parsed.time ? hhmm(parsed.time) : hhmm(now);
-    upsertTdPass(db, { rid, tiploc, crs, platform, actual });
+    upsertTdPass(db, { rid: dayRid, tiploc, crs, platform, actual });
+  }
+}
+
+export function applyTdFrame(dataDir, message, ymd = operatingDayYmd()) {
+  const parsed = unpackTd(message);
+  if (!parsed) return false;
+  const berth = parsed.berth || parsed.fromBerth;
+  if (!berth && !parsed.fromBerth) return false;
+
+  let tiploc = null;
+  let stanox = null;
+  let crs = null;
+  let platform = null;
+  try {
+    const cat = openCatalog(dataDir);
+    const mapped = resolveSmartTiploc(cat, parsed.areaId, berth, parsed.fromBerth);
+    cat.close();
+    if (mapped) {
+      tiploc = mapped.tiploc;
+      stanox = mapped.stanox;
+      crs = mapped.crs;
+      platform = mapped.platform;
+    }
+  } catch {
+    /* SMART optional */
   }
 
-  db.close();
+  const now = Date.now();
+  const rid = resolveRidAcrossDays(dataDir, ymd, parsed.headcode);
+  const days = writeDaysForRid(dataDir, ymd, rid);
+  for (const day of days) {
+    const db = openDayDb(dataDir, day);
+    try {
+      applyTdToDay(db, message, parsed, { rid, tiploc, stanox, crs, platform, berth, now });
+    } finally {
+      db.close();
+    }
+  }
   return true;
 }
 
