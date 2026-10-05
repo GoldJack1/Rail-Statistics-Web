@@ -74,6 +74,73 @@ test("upsert is change-friendly and keeps Darwin pass actuals", () => {
   db.close();
 });
 
+test("fillOnly overlay upgrades actual_source when filling pass actuals", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rail-core-fill-"));
+  const db = openDayDb(dir, "2026-09-30");
+  upsertCall(db, {
+    rid: "r2",
+    tiploc: "HOLBJCN",
+    crs: null,
+    seq: 1,
+    is_passing: 1,
+    cancelled: 0,
+    platform: null,
+    length_cars: null,
+    formation: null,
+    sta: null,
+    std: null,
+    wta: null,
+    wtd: null,
+    wtp: "15:46",
+    ata: null,
+    atd: null,
+    atp: null,
+    eta: null,
+    etd: null,
+    etp: null,
+    delay_minutes: null,
+    status: null,
+    live_kind: "scheduled",
+    actual_source: "orm",
+    updated_at: 1,
+  });
+  upsertCall(
+    db,
+    {
+      rid: "r2",
+      tiploc: "HOLBJCN",
+      crs: null,
+      seq: 1,
+      is_passing: 1,
+      cancelled: 0,
+      platform: null,
+      length_cars: null,
+      formation: null,
+      sta: null,
+      std: null,
+      wta: null,
+      wtd: null,
+      wtp: "15:46",
+      ata: null,
+      atd: null,
+      atp: "15:47",
+      eta: null,
+      etd: null,
+      etp: null,
+      delay_minutes: null,
+      status: "TD",
+      live_kind: "actual",
+      actual_source: "td",
+      updated_at: 2,
+    },
+    { overlay: true, fillOnly: true },
+  );
+  const row = db.prepare(`SELECT atp, actual_source FROM calls WHERE rid='r2'`).get();
+  assert.equal(row.atp, "15:47");
+  assert.equal(row.actual_source, "td");
+  db.close();
+});
+
 test("TS overlay does not rewrite TOC, origin, pass flags, or extra stops", () => {
   const dir = mkdtempSync(join(tmpdir(), "rail-core-"));
   const db = openDayDb(dir, "2026-09-30");

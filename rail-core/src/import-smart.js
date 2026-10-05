@@ -40,6 +40,88 @@ function normalizeStanox(v) {
   return s.padStart(5, "0").slice(-5);
 }
 
+/** TD berths: pad numeric ids to 4 chars (0401); leave alpha berths as-is (HOLB). */
+export function normalizeBerth(raw) {
+  const s = asStr(raw).toUpperCase();
+  if (!s) return "";
+  if (/^\d+$/.test(s)) return s.padStart(4, "0");
+  return s;
+}
+
+const EVENT_RANK = `CASE event_type WHEN 'C' THEN 0 WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'D' THEN 3 ELSE 4 END`;
+
+function lookupCorpusByStanox(catalog, stanox) {
+  const s = normalizeStanox(stanox);
+  if (!s) return null;
+  let row = catalog.prepare(`SELECT tiploc, crs, name FROM corpus WHERE stanox = ? LIMIT 1`).get(s);
+  if (!row && /^0/.test(s)) {
+    row = catalog
+      .prepare(`SELECT tiploc, crs, name FROM corpus WHERE stanox = ? LIMIT 1`)
+      .get(String(Number(s)));
+  }
+  return row?.tiploc
+    ? { tiploc: String(row.tiploc).toUpperCase(), crs: row.crs || null, name: row.name || null, stanox: s }
+    : null;
+}
+
+function pickSmartStep(catalog, rows, hintTiplocs = null) {
+  if (!rows?.length) return null;
+  if (hintTiplocs?.size) {
+    for (const row of rows) {
+      const corpus = lookupCorpusByStanox(catalog, row.stanox);
+      if (corpus?.tiploc && hintTiplocs.has(corpus.tiploc)) return { ...row, corpus };
+    }
+  }
+  const corpus = lookupCorpusByStanox(catalog, rows[0].stanox);
+  if (!corpus) return null;
+  return { ...rows[0], corpus };
+}
+
+function querySmartSteps(catalog, area, from, to) {
+  if (from && to) {
+    const pair = catalog
+      .prepare(
+        `SELECT stanox, event_type, platform FROM smart_steps
+         WHERE td_area = ? AND from_berth = ? AND to_berth = ? AND stanox IS NOT NULL
+         ORDER BY ${EVENT_RANK}`,
+      )
+      .all(area, from, to);
+    if (pair.length) return pair;
+  }
+  if (to) {
+    const hit = catalog
+      .prepare(
+        `SELECT stanox, event_type, platform FROM smart_steps
+         WHERE td_area = ? AND to_berth = ? AND stanox IS NOT NULL
+         ORDER BY ${EVENT_RANK}`,
+      )
+      .all(area, to);
+    if (hit.length) return hit;
+    if (/^0/.test(to)) {
+      const unpadded = String(Number(to));
+      if (unpadded !== to) {
+        return catalog
+          .prepare(
+            `SELECT stanox, event_type, platform FROM smart_steps
+             WHERE td_area = ? AND to_berth = ? AND stanox IS NOT NULL
+             ORDER BY ${EVENT_RANK}`,
+          )
+          .all(area, unpadded);
+      }
+    }
+  }
+  if (from) {
+    return catalog
+      .prepare(
+        `SELECT stanox, event_type, platform FROM smart_steps
+         WHERE td_area = ? AND from_berth = ? AND stanox IS NOT NULL
+         ORDER BY ${EVENT_RANK}`,
+      )
+      .all(area, from);
+  }
+  return [];
+}
+
 /**
  * Accept SMART JSON (array, {SMART:[…]}, gzip bytes, or Buffer).
  * @returns {Array<object>}
@@ -69,8 +151,8 @@ export function parseSmartPayload(raw) {
 
 export function normalizeSmartRow(row) {
   const td = asStr(row.TD || row.td || row.td_area || row.area).toUpperCase();
-  const toBerth = asStr(row.TOBERTH || row.to_berth || row.to || row.TO).toUpperCase();
-  const fromBerth = asStr(row.FROMBERTH || row.from_berth || row.from || row.FROM).toUpperCase();
+  const toBerth = normalizeBerth(row.TOBERTH || row.to_berth || row.to || row.TO);
+  const fromBerth = normalizeBerth(row.FROMBERTH || row.from_berth || row.from || row.FROM);
   if (!td || (!toBerth && !fromBerth)) return null;
   return {
     td_area: td,
@@ -118,47 +200,26 @@ export function importSmartPayload(db, rows) {
 
 /**
  * Resolve TD area+berth → TIPLOC via SMART STANOX + CORPUS.
- * Prefers to_berth match, then from_berth.
+ * Prefers (from→to) CA step, then to_berth, then from_berth.
+ * @param {Set<string>|null} [opts.hintTiplocs] service spine tipocs for disambiguation
  */
-export function resolveSmartTiploc(catalog, areaId, berth, fromBerth = null) {
+export function resolveSmartTiploc(catalog, areaId, berth, fromBerth = null, opts = {}) {
   ensureSmartTables(catalog);
   const area = asStr(areaId).toUpperCase();
-  const to = asStr(berth).toUpperCase();
-  const from = asStr(fromBerth).toUpperCase();
+  const to = normalizeBerth(berth);
+  const from = normalizeBerth(fromBerth);
   if (!area || (!to && !from)) return null;
 
-  const step =
-    (to &&
-      catalog
-        .prepare(
-          `SELECT stanox, event_type, platform FROM smart_steps
-           WHERE td_area = ? AND to_berth = ? AND stanox IS NOT NULL
-           ORDER BY CASE event_type WHEN 'C' THEN 0 WHEN 'A' THEN 1 WHEN 'B' THEN 2 ELSE 3 END
-           LIMIT 1`,
-        )
-        .get(area, to)) ||
-    (from &&
-      catalog
-        .prepare(
-          `SELECT stanox, event_type, platform FROM smart_steps
-           WHERE td_area = ? AND from_berth = ? AND stanox IS NOT NULL
-           ORDER BY CASE event_type WHEN 'C' THEN 0 WHEN 'A' THEN 1 WHEN 'B' THEN 2 ELSE 3 END
-           LIMIT 1`,
-        )
-        .get(area, from)) ||
-    null;
-  if (!step?.stanox) return null;
-  const corpus = catalog
-    .prepare(`SELECT tiploc, crs, name FROM corpus WHERE stanox = ? LIMIT 1`)
-    .get(step.stanox);
-  if (!corpus?.tiploc) return null;
+  const hintTiplocs = opts.hintTiplocs || null;
+  const hit = pickSmartStep(catalog, querySmartSteps(catalog, area, from, to), hintTiplocs);
+  if (!hit?.corpus) return null;
   return {
-    tiploc: String(corpus.tiploc).toUpperCase(),
-    crs: corpus.crs || null,
-    name: corpus.name || null,
-    stanox: step.stanox,
-    eventType: step.event_type || null,
-    platform: step.platform || null,
+    tiploc: hit.corpus.tiploc,
+    crs: hit.corpus.crs,
+    name: hit.corpus.name,
+    stanox: hit.corpus.stanox,
+    eventType: hit.event_type || null,
+    platform: hit.platform || null,
   };
 }
 
