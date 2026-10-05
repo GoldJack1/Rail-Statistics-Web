@@ -451,6 +451,8 @@ export function buildStationBoard({
     const plat = platformText(r.platform);
     const isPassing = slot === "PP";
     if (passengersOnly && isPassing) continue;
+    // ORM junction densify rows are for service detail only — not public CIS/WTT boards.
+    if (isPassing && String(r.actual_source || "") === "orm") continue;
 
     const baseRow = () => ({
       rid: r.s_rid,

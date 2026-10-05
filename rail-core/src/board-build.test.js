@@ -111,6 +111,78 @@ test("collapses CIF and Darwin rows that share a UID", () => {
   assert.equal(rows[0].rid, "202610037115982");
 });
 
+test("ORM passing inserts are excluded from station boards", async () => {
+  const { buildStationBoard } = await import("./board-build.js");
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { openDayDb, upsertCall, upsertService } = await import("./db.js");
+
+  const dir = mkdtempSync(join(tmpdir(), "board-orm-"));
+  const db = openDayDb(dir, "2026-10-05");
+  upsertService(db, {
+    rid: "202610058734291",
+    uid: "W34291",
+    train_id: "9S93",
+    rs_id: null,
+    toc: "VT",
+    operator_name: "Avanti",
+    origin_crs: "EUS",
+    origin_name: "London Euston",
+    destination_crs: "EDB",
+    destination_name: "Edinburgh",
+    via: null,
+    service_type: "passenger",
+    cancelled: 0,
+    cancel_reason: null,
+    delay_reason: null,
+    is_charter: 0,
+    category: null,
+    headcode: "9S93",
+    updated_at: 1,
+  });
+  upsertCall(db, {
+    rid: "202610058734291",
+    tiploc: "LEEDS",
+    crs: "LDS",
+    seq: 0,
+    is_passing: 0,
+    cancelled: 0,
+    std: "21:00",
+    live_kind: "scheduled",
+    updated_at: 1,
+  });
+  upsertCall(db, {
+    rid: "202610058734291",
+    tiploc: "DWBY",
+    crs: "DEW",
+    seq: 1,
+    is_passing: 1,
+    cancelled: 0,
+    wtp: "22:21",
+    live_kind: "scheduled",
+    actual_source: "orm",
+    updated_at: 1,
+  });
+  const board = buildStationBoard({
+    db,
+    ymd: "2026-10-05",
+    crs: "DEW",
+    tiplocs: ["DWBY"],
+    hours: 6,
+    now: new Date("2026-10-05T20:00:00+01:00"),
+    passengersOnly: false,
+    stationName: (crs) => (crs === "DEW" ? "Dewsbury" : crs),
+    matchBy: "crs",
+    fullDay: false,
+  });
+  assert.equal(
+    board.departures.find((d) => d.trainId === "9S93"),
+    undefined,
+  );
+  db.close();
+});
+
 test("departure movement keeps actual-arr while at platform", async () => {
   const { liveClockFromCall } = await import("./board-build.js");
   assert.deepEqual(
