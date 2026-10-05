@@ -286,25 +286,116 @@ export function applyTdFrame(dataDir, message, ymd = operatingDayYmd(), opts = {
   return true;
 }
 
-/** Re-apply stored TD events with current SMART/CORPUS (e.g. after SMART import). */
-export function replayTdEventsForDay(dataDir, ymd) {
-  const db = openDayDb(dataDir, ymd);
-  ensureTdTables(db);
-  const events = db
-    .prepare(`SELECT json, received_at FROM td_events ORDER BY received_at`)
-    .all();
-  db.close();
-
-  let applied = 0;
-  for (const row of events) {
-    try {
-      const message = JSON.parse(row.json);
-      if (applyTdFrame(dataDir, message, ymd, { replay: true, at: row.received_at })) applied++;
-    } catch {
-      /* skip malformed */
+function unambiguousHeadcodeRids(db) {
+  const ridByHead = new Map();
+  const ambiguous = new Set();
+  for (const row of db
+    .prepare(`SELECT headcode, rid FROM services WHERE headcode IS NOT NULL AND headcode != ''`)
+    .all()) {
+    const hc = String(row.headcode).toUpperCase();
+    if (ambiguous.has(hc)) continue;
+    if (ridByHead.has(hc)) {
+      ridByHead.delete(hc);
+      ambiguous.add(hc);
+    } else {
+      ridByHead.set(hc, row.rid);
     }
   }
-  return { applied, total: events.length };
+  return { ridByHead, ambiguous };
+}
+
+function mappingCacheKey(areaId, fromBerth, berth, hints) {
+  const hintList = hints?.size ? [...hints].sort().join(",") : "";
+  return `${areaId || ""}|${fromBerth || ""}|${berth || ""}|${hintList}`;
+}
+
+/** Re-apply stored TD events with current SMART/CORPUS (e.g. after SMART import). */
+export function replayTdEventsForDay(dataDir, ymd, opts = {}) {
+  const headcodeFilter = opts.headcode ? String(opts.headcode).toUpperCase() : null;
+
+  let catalog;
+  try {
+    catalog = openCatalog(dataDir);
+  } catch {
+    return { applied: 0, total: 0, skipped: "no catalog" };
+  }
+
+  const db = openDayDb(dataDir, ymd);
+  db.exec("PRAGMA busy_timeout=300000");
+  ensureTdTables(db);
+
+  const { ridByHead, ambiguous } = unambiguousHeadcodeRids(db);
+  const spineCache = new Map();
+  const mapCache = new Map();
+  const hintSpine = (rid) => {
+    if (!rid) return null;
+    if (!spineCache.has(rid)) spineCache.set(rid, spineTiplocs(db, rid));
+    return spineCache.get(rid);
+  };
+
+  const sql = headcodeFilter
+    ? `SELECT json, received_at, headcode, area_id, berth, from_berth, msg_type
+       FROM td_events
+       WHERE headcode = ? COLLATE NOCASE AND msg_type IN ('CA', 'CC')
+       ORDER BY received_at`
+    : `SELECT json, received_at, headcode, area_id, berth, from_berth, msg_type
+       FROM td_events
+       WHERE msg_type IN ('CA', 'CC')
+       ORDER BY received_at`;
+  const stmt = db.prepare(sql);
+  const rows = headcodeFilter ? stmt.iterate(headcodeFilter) : stmt.iterate();
+
+  let total = 0;
+  let applied = 0;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const row of rows) {
+      total++;
+      const headcode = String(row.headcode || "").toUpperCase();
+      if (!headcode || ambiguous.has(headcode)) continue;
+      const dayRid = ridByHead.get(headcode);
+      if (!dayRid) continue;
+
+      let parsed;
+      try {
+        parsed = unpackTd(JSON.parse(row.json));
+      } catch {
+        continue;
+      }
+      if (!parsed) continue;
+
+      const berth = row.berth || parsed.berth || parsed.fromBerth;
+      const fromBerth = row.from_berth || parsed.fromBerth;
+      const areaId = row.area_id || parsed.areaId;
+      const hints = hintSpine(dayRid);
+      const mk = mappingCacheKey(areaId, fromBerth, berth, hints);
+      let mapped = mapCache.get(mk);
+      if (!mapped) {
+        mapped = resolveTdMapping(catalog, { areaId, fromBerth }, berth, hints);
+        mapCache.set(mk, mapped);
+      }
+      const { tiploc, crs, platform } = mapped;
+      if (!tiploc) continue;
+
+      const actual = parsed.time ? hhmm(parsed.time) : hhmm(row.received_at);
+      upsertTdPass(db, { rid: dayRid, tiploc, crs, platform, actual });
+      applied++;
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* ignore */
+    }
+    db.close();
+    catalog.close();
+    throw err;
+  }
+
+  db.close();
+  catalog.close();
+  return { applied, total };
 }
 
 export function tdForHeadcode(db, headcode) {
@@ -325,7 +416,8 @@ export function tdForHeadcode(db, headcode) {
 const runningAsCli = process.argv[1]?.replace(/\\/g, "/").endsWith("/td-apply.js");
 if (runningAsCli) {
   const ymd = process.argv[2] || operatingDayYmd();
+  const headcode = process.argv[3] || null;
   const DATA_DIR = process.env.DATA_DIR ?? "./data";
-  const out = replayTdEventsForDay(DATA_DIR, ymd);
-  console.log(`td-replay ${ymd} applied=${out.applied} total=${out.total}`);
+  const out = replayTdEventsForDay(DATA_DIR, ymd, headcode ? { headcode } : {});
+  console.log(`td-replay ${ymd}${headcode ? ` headcode=${headcode}` : ""} applied=${out.applied} total=${out.total}`);
 }
