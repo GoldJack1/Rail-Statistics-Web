@@ -107,6 +107,62 @@ test("TD CA pair mapping fills ORM junction with td actual_source", () => {
   db.close();
 });
 
+test("replayTdEventsForDay supports rid filter for ambiguous headcodes", () => {
+  const dir = mkdtempSync(join(tmpdir(), "td-rid-replay-"));
+  seedCorpus(dir);
+  seedService(dir);
+  const other = openDayDb(dir, TODAY);
+  upsertService(other, {
+    rid: "202610058065826",
+    uid: "P65826",
+    train_id: "9E18",
+    rs_id: null,
+    toc: "VT",
+    operator_name: "Avanti",
+    origin_crs: "EUS",
+    origin_name: "Euston",
+    destination_crs: "GLC",
+    destination_name: "Glasgow Central",
+    via: null,
+    service_type: "passenger",
+    cancelled: 0,
+    cancel_reason: null,
+    delay_reason: null,
+    is_charter: 0,
+    category: "XX",
+    headcode: "9E18",
+    updated_at: 1,
+  });
+  other.close();
+
+  const db = openDayDb(dir, TODAY);
+  ensureTdTables(db);
+  const msg = {
+    CA_MSG: {
+      msg_type: "CA",
+      area_id: "T2",
+      from: "401",
+      to: "500",
+      descr: "9E18",
+      time: "160530",
+    },
+  };
+  db.prepare(
+    `INSERT INTO td_events (event_id, headcode, area_id, berth, from_berth, msg_type, json, received_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run("ev-rid", "9E18", "T2", "500", "401", "CA", JSON.stringify(msg), Date.now());
+  db.close();
+
+  const out = replayTdEventsForDay(dir, TODAY, { rid: RID });
+  assert.equal(out.applied, 1);
+  const day = openDayDb(dir, TODAY);
+  const row = day.prepare(`SELECT atp, actual_source FROM calls WHERE rid = ? AND tiploc = 'BROADGR'`).get(RID);
+  assert.equal(row.actual_source, "td");
+  assert.equal(row.atp, "16:05");
+  assert.equal(day.prepare(`SELECT atp FROM calls WHERE rid = ? AND tiploc = 'BROADGR'`).get("202610058065826"), undefined);
+  day.close();
+});
+
 test("replayTdEventsForDay re-applies calls after SMART import", () => {
   const dir = mkdtempSync(join(tmpdir(), "td-replay-"));
   const cat = openCatalog(dir);
