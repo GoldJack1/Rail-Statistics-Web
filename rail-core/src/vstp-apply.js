@@ -1,8 +1,10 @@
 /**
  * Apply Network Rail VSTP schedule JSON onto Darwin day calls (same merge as ITPS overlay).
  */
-import { operatingDayYmd } from "./db.js";
+import { addCalendarDays } from "./calendar-day.js";
+import { openDayDb, operatingDayYmd } from "./db.js";
 import { overlayOneWorking, workingFromScheduleJson } from "./cif-overlay.js";
+import { nrodCandidateDays, writeDaysForRid } from "./nrod-write-days.js";
 
 export function vstpMessages(raw) {
   if (raw == null) return [];
@@ -31,24 +33,50 @@ function scheduleDay(schedule) {
   );
 }
 
+function ridsForUid(dataDir, day, uid) {
+  const db = openDayDb(dataDir, day);
+  try {
+    return db
+      .prepare(
+        `SELECT rid FROM services
+         WHERE uid = ? COLLATE NOCASE
+           AND length(rid)=15 AND rid GLOB '[0-9]*'`,
+      )
+      .all(String(uid).toUpperCase())
+      .map((r) => r.rid);
+  } finally {
+    db.close();
+  }
+}
+
 export function applyVstpFrame(dataDir, message, ymd = operatingDayYmd()) {
   const schedule = unwrapSchedule(message);
   if (!schedule) return false;
   const day = scheduleDay(schedule);
   const target = /^\d{4}-\d{2}-\d{2}$/.test(day || "") ? day : ymd;
+  const tomorrow = addCalendarDays(ymd, 1);
   // Only touch today / tomorrow — VSTP can include far dates we do not want to rewrite.
-  if (target !== ymd) {
-    const tomorrow = (() => {
-      const [y, m, d] = ymd.split("-").map(Number);
-      const t = new Date(Date.UTC(y, m - 1, d + 1));
-      return t.toISOString().slice(0, 10);
-    })();
-    if (target !== tomorrow) return false;
-  }
+  if (target !== ymd && target !== tomorrow) return false;
   const stp = String(schedule.CIF_stp_indicator || schedule.stp_indicator || "N").toUpperCase();
   if (stp === "C") return false;
   const working = workingFromScheduleJson(schedule, { rank: 4, source: "vstp" });
   if (!working) return false;
-  const out = overlayOneWorking(dataDir, target, working);
-  return out.services > 0 || out.inserted > 0;
+
+  const days = new Set();
+  for (const cand of nrodCandidateDays(ymd)) {
+    if (cand !== ymd && cand !== tomorrow) continue;
+    for (const rid of ridsForUid(dataDir, cand, working.uid)) {
+      for (const writeDay of writeDaysForRid(dataDir, ymd, rid)) {
+        if (writeDay === ymd || writeDay === tomorrow) days.add(writeDay);
+      }
+    }
+  }
+  if (!days.size && (target === ymd || target === tomorrow)) days.add(target);
+
+  let applied = false;
+  for (const writeDay of days) {
+    const out = overlayOneWorking(dataDir, writeDay, working);
+    if (out.services > 0 || out.inserted > 0) applied = true;
+  }
+  return applied;
 }
