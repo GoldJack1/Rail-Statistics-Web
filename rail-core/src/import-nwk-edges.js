@@ -9,6 +9,7 @@
 import { createReadStream, existsSync, readdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
+import { createGunzip } from "node:zlib";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { openCatalog } from "./db.js";
 
@@ -55,8 +56,11 @@ export function parseNwkLine(line) {
 export async function parseNwkFile(path) {
   /** @type {NwkEdge[]} */
   const edges = [];
+  const input = /\.gz$/i.test(path)
+    ? createReadStream(path).pipe(createGunzip())
+    : createReadStream(path, { encoding: "utf8" });
   const rl = createInterface({
-    input: createReadStream(path, { encoding: "utf8" }),
+    input,
     crlfDelay: Infinity,
   });
   for await (const line of rl) {
@@ -122,6 +126,15 @@ export function findBplanFile() {
   if (env && existsSync(env)) return env;
   const ttDir = process.env.TT_DIR ?? join(ROOT, "tt");
   if (!existsSync(ttDir)) return null;
+  const link = join(ttDir, "bplan.pif");
+  if (existsSync(link)) return link;
+  const bplanDir = join(ttDir, "bplan");
+  if (existsSync(bplanDir)) {
+    const pifs = readdirSync(bplanDir)
+      .filter((n) => /^PIF.*\.txt(\.gz)?$/i.test(n))
+      .sort();
+    if (pifs.length) return join(bplanDir, pifs[pifs.length - 1]);
+  }
   const names = readdirSync(ttDir).sort();
   const hit = names.find((n) => /^bplan/i.test(n) || /\.pif$/i.test(n) || /^PIF/i.test(n));
   return hit ? join(ttDir, hit) : null;
