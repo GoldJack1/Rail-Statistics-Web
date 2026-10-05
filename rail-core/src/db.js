@@ -388,7 +388,16 @@ export function upsertCall(db, row, opts = {}) {
             WHEN @ata IS NOT NULL OR @atd IS NOT NULL OR @atp IS NOT NULL
               OR @eta IS NOT NULL OR @etd IS NOT NULL OR @etp IS NOT NULL
             THEN @live_kind ELSE live_kind END,
-          actual_source=${fill ? "COALESCE(actual_source, @actual_source)" : "COALESCE(@actual_source, actual_source)"},
+          actual_source=${
+            fill
+              ? `CASE
+            WHEN @actual_source IS NOT NULL
+              AND (@ata IS NOT NULL OR @atd IS NOT NULL OR @atp IS NOT NULL
+                OR @eta IS NOT NULL OR @etd IS NOT NULL OR @etp IS NOT NULL)
+            THEN @actual_source
+            ELSE COALESCE(actual_source, @actual_source) END`
+              : "COALESCE(@actual_source, actual_source)"
+          },
           updated_at=@updated_at
          WHERE rid=@rid AND tiploc=@tiploc`
       ).run({

@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   ensureSmartTables,
   importSmartPayload,
+  normalizeBerth,
   normalizeSmartRow,
   parseSmartPayload,
   resolveSmartTiploc,
@@ -66,5 +67,71 @@ test("import + resolveSmartTiploc via CORPUS stanox", () => {
   assert.equal(hit.stanox, "16421");
   const miss = resolveSmartTiploc(db, "Y2", "NOPE");
   assert.equal(miss, null);
+  db.close();
+});
+
+test("normalizeBerth pads numeric berths to four digits", () => {
+  assert.equal(normalizeBerth("401"), "0401");
+  assert.equal(normalizeBerth("0401"), "0401");
+  assert.equal(normalizeBerth("HOLB"), "HOLB");
+});
+
+test("resolveSmartTiploc prefers from→to pair over to alone", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE corpus (
+      tiploc TEXT PRIMARY KEY,
+      stanox TEXT,
+      crs TEXT,
+      name TEXT
+    );
+  `);
+  db.prepare(`INSERT INTO corpus VALUES (?, ?, ?, ?)`).run("ALPHA", "10001", null, "Alpha");
+  db.prepare(`INSERT INTO corpus VALUES (?, ?, ?, ?)`).run("BETA", "10002", null, "Beta");
+  ensureSmartTables(db);
+  importSmartPayload(
+    db,
+    parseSmartPayload(
+      JSON.stringify({
+        SMART: [
+          { TD: "T2", TOBERTH: "500", STANOX: "10001", EVENT: "C" },
+          { TD: "T2", FROMBERTH: "401", TOBERTH: "500", STANOX: "10002", EVENT: "C" },
+        ],
+      }),
+    ),
+  );
+  const pair = resolveSmartTiploc(db, "T2", "500", "401");
+  assert.equal(pair.tiploc, "BETA");
+  const lone = resolveSmartTiploc(db, "T2", "500");
+  assert.equal(lone.tiploc, "ALPHA");
+  db.close();
+});
+
+test("resolveSmartTiploc uses spine hints when to_berth is ambiguous", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE corpus (
+      tiploc TEXT PRIMARY KEY,
+      stanox TEXT,
+      crs TEXT,
+      name TEXT
+    );
+  `);
+  db.prepare(`INSERT INTO corpus VALUES (?, ?, ?, ?)`).run("ALPHA", "10001", null, "Alpha");
+  db.prepare(`INSERT INTO corpus VALUES (?, ?, ?, ?)`).run("BETA", "10002", null, "Beta");
+  ensureSmartTables(db);
+  importSmartPayload(
+    db,
+    parseSmartPayload(
+      JSON.stringify({
+        SMART: [
+          { TD: "T2", TOBERTH: "500", STANOX: "10001", EVENT: "C" },
+          { TD: "T2", TOBERTH: "500", STANOX: "10002", EVENT: "A" },
+        ],
+      }),
+    ),
+  );
+  const hinted = resolveSmartTiploc(db, "T2", "500", null, { hintTiplocs: new Set(["BETA"]) });
+  assert.equal(hinted.tiploc, "BETA");
   db.close();
 });

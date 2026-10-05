@@ -178,39 +178,62 @@ function resolveRidAcrossDays(dataDir, operatingDay, headcode) {
   return null;
 }
 
-function applyTdToDay(db, message, parsed, { rid, tiploc, stanox, crs, platform, berth, now }) {
+/** Service spine TIPLOCs for SMART disambiguation when berths map to multiple STANOX. */
+function spineTiplocs(db, rid) {
+  if (!rid) return null;
+  const rows = db.prepare(`SELECT tiploc FROM calls WHERE rid = ? ORDER BY seq`).all(rid);
+  if (!rows.length) return null;
+  return new Set(rows.map((r) => String(r.tiploc).toUpperCase()));
+}
+
+function resolveTdMapping(catalog, parsed, berth, hintTiplocs) {
+  const mapped = resolveSmartTiploc(catalog, parsed.areaId, berth, parsed.fromBerth, {
+    hintTiplocs,
+  });
+  if (!mapped) return { tiploc: null, stanox: null, crs: null, platform: null };
+  return {
+    tiploc: mapped.tiploc,
+    stanox: mapped.stanox,
+    crs: mapped.crs,
+    platform: mapped.platform,
+  };
+}
+
+function applyTdToDay(db, message, parsed, { rid, tiploc, stanox, crs, platform, berth, now, replay = false }) {
   ensureTdTables(db);
   const dayRid = resolveRid(db, parsed.headcode);
-  db.prepare(
-    `INSERT OR REPLACE INTO td_trains (headcode, area_id, berth, from_berth, msg_type, train_id, rid, tiploc, stanox, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    parsed.headcode,
-    parsed.areaId,
-    berth,
-    parsed.fromBerth,
-    parsed.msgType,
-    null,
-    dayRid,
-    tiploc,
-    stanox,
-    now,
-  );
-  db.prepare(
-    `INSERT OR IGNORE INTO td_events (event_id, headcode, area_id, berth, from_berth, msg_type, tiploc, stanox, json, received_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    `${now}:${parsed.areaId || ""}:${parsed.headcode}:${parsed.msgType}:${berth || ""}:${parsed.fromBerth || ""}`,
-    parsed.headcode,
-    parsed.areaId,
-    berth,
-    parsed.fromBerth,
-    parsed.msgType,
-    tiploc,
-    stanox,
-    JSON.stringify(message),
-    now,
-  );
+  if (!replay) {
+    db.prepare(
+      `INSERT OR REPLACE INTO td_trains (headcode, area_id, berth, from_berth, msg_type, train_id, rid, tiploc, stanox, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      parsed.headcode,
+      parsed.areaId,
+      berth,
+      parsed.fromBerth,
+      parsed.msgType,
+      null,
+      dayRid,
+      tiploc,
+      stanox,
+      now,
+    );
+    db.prepare(
+      `INSERT OR IGNORE INTO td_events (event_id, headcode, area_id, berth, from_berth, msg_type, tiploc, stanox, json, received_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      `${now}:${parsed.areaId || ""}:${parsed.headcode}:${parsed.msgType}:${berth || ""}:${parsed.fromBerth || ""}`,
+      parsed.headcode,
+      parsed.areaId,
+      berth,
+      parsed.fromBerth,
+      parsed.msgType,
+      tiploc,
+      stanox,
+      JSON.stringify(message),
+      now,
+    );
+  }
 
   // CA = berth step, CC = interpose. CB/CT handled elsewhere / ignored for path.
   if (dayRid && tiploc && (parsed.msgType === "CA" || parsed.msgType === "CC")) {
@@ -219,42 +242,69 @@ function applyTdToDay(db, message, parsed, { rid, tiploc, stanox, crs, platform,
   }
 }
 
-export function applyTdFrame(dataDir, message, ymd = operatingDayYmd()) {
+export function applyTdFrame(dataDir, message, ymd = operatingDayYmd(), opts = {}) {
   const parsed = unpackTd(message);
   if (!parsed) return false;
   const berth = parsed.berth || parsed.fromBerth;
   if (!berth && !parsed.fromBerth) return false;
 
-  let tiploc = null;
-  let stanox = null;
-  let crs = null;
-  let platform = null;
+  const now = opts.at ?? Date.now();
+  const rid = resolveRidAcrossDays(dataDir, ymd, parsed.headcode);
+  const days = writeDaysForRid(dataDir, ymd, rid);
+
+  let catalog = null;
   try {
-    const cat = openCatalog(dataDir);
-    const mapped = resolveSmartTiploc(cat, parsed.areaId, berth, parsed.fromBerth);
-    cat.close();
-    if (mapped) {
-      tiploc = mapped.tiploc;
-      stanox = mapped.stanox;
-      crs = mapped.crs;
-      platform = mapped.platform;
-    }
+    catalog = openCatalog(dataDir);
   } catch {
     /* SMART optional */
   }
 
-  const now = Date.now();
-  const rid = resolveRidAcrossDays(dataDir, ymd, parsed.headcode);
-  const days = writeDaysForRid(dataDir, ymd, rid);
   for (const day of days) {
     const db = openDayDb(dataDir, day);
     try {
-      applyTdToDay(db, message, parsed, { rid, tiploc, stanox, crs, platform, berth, now });
+      const dayRid = resolveRid(db, parsed.headcode) || rid;
+      const hints = spineTiplocs(db, dayRid);
+      const { tiploc, stanox, crs, platform } = catalog
+        ? resolveTdMapping(catalog, parsed, berth, hints)
+        : { tiploc: null, stanox: null, crs: null, platform: null };
+      applyTdToDay(db, message, parsed, {
+        rid,
+        tiploc,
+        stanox,
+        crs,
+        platform,
+        berth,
+        now,
+        replay: Boolean(opts.replay),
+      });
     } finally {
       db.close();
     }
   }
+
+  catalog?.close();
   return true;
+}
+
+/** Re-apply stored TD events with current SMART/CORPUS (e.g. after SMART import). */
+export function replayTdEventsForDay(dataDir, ymd) {
+  const db = openDayDb(dataDir, ymd);
+  ensureTdTables(db);
+  const events = db
+    .prepare(`SELECT json, received_at FROM td_events ORDER BY received_at`)
+    .all();
+  db.close();
+
+  let applied = 0;
+  for (const row of events) {
+    try {
+      const message = JSON.parse(row.json);
+      if (applyTdFrame(dataDir, message, ymd, { replay: true, at: row.received_at })) applied++;
+    } catch {
+      /* skip malformed */
+    }
+  }
+  return { applied, total: events.length };
 }
 
 export function tdForHeadcode(db, headcode) {
@@ -270,4 +320,12 @@ export function tdForHeadcode(db, headcode) {
       .get(String(headcode).toUpperCase()) || null;
   if (!row) return null;
   return row;
+}
+
+const runningAsCli = process.argv[1]?.replace(/\\/g, "/").endsWith("/td-apply.js");
+if (runningAsCli) {
+  const ymd = process.argv[2] || operatingDayYmd();
+  const DATA_DIR = process.env.DATA_DIR ?? "./data";
+  const out = replayTdEventsForDay(DATA_DIR, ymd);
+  console.log(`td-replay ${ymd} applied=${out.applied} total=${out.total}`);
 }
