@@ -19,6 +19,7 @@ const PPT = process.env.TT_GCS_PPT || `${BUCKET}/DARWINTTFILES/PPTimetable`;
 const CORPUS = process.env.TT_GCS_CORPUS || `${BUCKET}/DARWINCORPUS`;
 const TOPS = process.env.TT_GCS_TOPS || `${BUCKET}/DARWINTOPS`;
 const LONG = process.env.TT_GCS_LONG || `${BUCKET}/DARWINLONGRANGETTFILES`;
+const BPLAN = process.env.TT_GCS_BPLAN || `${BUCKET}/BPLAN`;
 const cred = process.env.GOOGLE_APPLICATION_CREDENTIALS || "/home/darwin/.config/gcloud/tt-fetch-sa.json";
 if (existsSync(cred)) process.env.GOOGLE_APPLICATION_CREDENTIALS = cred;
 process.env.CLOUDSDK_CORE_PROJECT = process.env.CLOUDSDK_CORE_PROJECT || "rail-statistics";
@@ -185,6 +186,18 @@ gsCpOne(pickLatest(gsList(CORPUS), /^NLC.*\.xml\.gz$/i), TT_DIR);
 gsCpOne(pickLatest(gsList(TOPS), /^tops-location.*\.csv$/i), TT_DIR);
 runRetry("fetch-corpus", ["src/fetch-corpus.js"]);
 runRetry("fetch-smart", ["src/fetch-smart.js"]);
+
+if (process.env.TT_IMPORT_BPLAN !== "0") {
+  const bplanDir = join(TT_DIR, "bplan");
+  mkdirSync(bplanDir, { recursive: true });
+  const bplanUri = pickLatest(gsList(BPLAN), /PIF\d+\.txt\.gz$/i);
+  if (bplanUri) {
+    gsCpOne(bplanUri, bplanDir, { skipExisting: true });
+    console.log("BPLAN PIF staged", basename(bplanUri), "→", bplanDir);
+  } else {
+    console.log("no BPLAN PIF in", BPLAN);
+  }
+}
 
 // Daily ITPS JSON is usually not ready at 04:00 UK — rail-core-schedule.timer (~06:30) overlays it.
 if (process.env.TT_IMPORT_ITPS !== "0") {

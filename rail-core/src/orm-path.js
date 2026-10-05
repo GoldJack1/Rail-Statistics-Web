@@ -33,6 +33,9 @@ import {
   interpolateHm,
   loadAdjFromCatalog,
 } from "./tiploc-graph.js";
+import { ensureNwkEdgesTable } from "./import-nwk-edges.js";
+
+const EDGE_SOURCE_RANK = { "geo-knn": 1, schedule: 2, nwk: 3 };
 
 export const DEFAULT_MAX_HOPS = 4;
 export const DEFAULT_MAX_EDGE_M = 4500;
@@ -166,15 +169,23 @@ export function rebuildOrmGraphFromCatalog(dataDir, opts = {}) {
     (t) => !isNonPassengerLocation(t, tipocMeta.get(t) || {}),
   );
 
-  /** @type {Map<string, number>} */
+  /** @type {Map<string, { metres: number, source: string }>} */
   const edgeMap = new Map();
-  const put = (a, b, metres, _source) => {
+  const put = (a, b, metres, source) => {
     if (!a || !b || a === b) return;
     if (!byTpl.has(a) || !byTpl.has(b)) return;
     if (!Number.isFinite(metres) || metres <= 0 || metres > maxEdgeM * 3) return;
     const key = a < b ? `${a}\t${b}` : `${b}\t${a}`;
     const prev = edgeMap.get(key);
-    if (prev == null || metres < prev) edgeMap.set(key, metres);
+    const rank = EDGE_SOURCE_RANK[source] ?? 0;
+    const prevRank = prev ? (EDGE_SOURCE_RANK[prev.source] ?? 0) : -1;
+    if (
+      !prev ||
+      rank > prevRank ||
+      (rank === prevRank && metres < prev.metres)
+    ) {
+      edgeMap.set(key, { metres, source });
+    }
   };
 
   // Schedule-mined tipoc pairs (strong evidence of a rail connection).
@@ -198,7 +209,16 @@ export function rebuildOrmGraphFromCatalog(dataDir, opts = {}) {
       if (d > 0 && d <= maxEdgeM) near.push({ t: q.tiploc, d });
     }
     near.sort((a, b) => a.d - b.d);
-    for (const n of near.slice(0, knn)) put(p.tiploc, n.t, n.d, "geo-knn");
+    for (const n of near.slice(0, knn))     put(p.tiploc, n.t, n.d, "geo-knn");
+  }
+
+  // BPLAN NWK track links (preferred over schedule haversine / geo kNN).
+  ensureNwkEdgesTable(catalog);
+  const nwk = catalog.prepare(`SELECT from_tpl, to_tpl, metres FROM nwk_edges`).all();
+  for (const row of nwk) {
+    const a = String(row.from_tpl || "").toUpperCase();
+    const b = String(row.to_tpl || "").toUpperCase();
+    put(a, b, Number(row.metres), "nwk");
   }
 
   catalog.exec("BEGIN");
@@ -207,10 +227,10 @@ export function rebuildOrmGraphFromCatalog(dataDir, opts = {}) {
     `INSERT INTO orm_edges (from_tpl, to_tpl, metres, source) VALUES (?, ?, ?, ?)`,
   );
   let n = 0;
-  for (const [key, metres] of edgeMap) {
+  for (const [key, { metres, source }] of edgeMap) {
     const [a, b] = key.split("\t");
-    ins.run(a, b, metres, "catalog");
-    ins.run(b, a, metres, "catalog");
+    ins.run(a, b, metres, source);
+    ins.run(b, a, metres, source);
     n += 2;
   }
   catalog.exec("COMMIT");

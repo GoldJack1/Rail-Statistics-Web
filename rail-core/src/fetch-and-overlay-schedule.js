@@ -17,6 +17,7 @@ import { densifyIntermediateGeometryForDay } from "./geometry-densify.js";
 import { fillIntermediatePassesForDay } from "./fill-intermediate-passes.js";
 import { stitchOrmPathsForDay } from "./orm-path.js";
 import { mineEdgesFromScheduleFile, saveEdgesToCatalog } from "./tiploc-graph.js";
+import { findBplanFile, importBplanNwkEdges } from "./import-nwk-edges.js";
 
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
 const today = operatingDayYmd();
@@ -67,6 +68,14 @@ console.log("mine TIPLOC schedule graph (ORM edge seed)");
   const edges = await mineEdgesFromScheduleFile(path);
   const edgeCount = saveEdgesToCatalog(DATA_DIR, edges);
   console.log("tiploc edges", edgeCount);
+}
+
+const bplan = findBplanFile();
+if (bplan) {
+  const nwkCount = await importBplanNwkEdges(bplan, DATA_DIR);
+  console.log("BPLAN NWK edges", nwkCount, "from", basename(bplan));
+} else {
+  console.log("BPLAN NWK skipped (no PIF in tt/ — set BPLAN_PATH when available)");
 }
 
 if (ormPath) {

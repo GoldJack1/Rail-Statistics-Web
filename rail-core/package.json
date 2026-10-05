@@ -29,6 +29,7 @@
     "fill-passes": "node src/fill-intermediate-passes.js",
     "geom-densify": "node src/geometry-densify.js",
     "orm-path": "node src/orm-path.js",
+    "import-nwk": "node src/import-nwk-edges.js",
     "ptac": "node src/kafka-ptac.js",
     "test": "node --test src/*.test.js"
   },
