@@ -132,3 +132,39 @@ test("PTAC unit_ids follow the latest diagram and drop detached units", () => {
   assert.deepEqual(JSON.parse(row.unit_ids), ["185128", "185129"]);
   cat.close();
 });
+
+test("PTAC EndOfDayMiles is logged per operating day on the unit catalog", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ptac-miles-"));
+  const cat = openCatalog(dir);
+  const body = (day, miles) => ({
+    unit_id: "185111",
+    uid: "G24937",
+    operating_day: day,
+    headcode: "1P90",
+    originHHMM: "10:00",
+    json: {
+      allocations: [
+        {
+          resourceGroups: [{ unitId: "185111", fleetId: "185", endOfDayMiles: miles, vehicles: [] }],
+        },
+      ],
+    },
+  });
+  applyPtacUnit(cat, body("2026-09-30", 120400));
+  applyPtacUnit(cat, body("2026-10-01", 120812));
+  applyPtacUnit(cat, {
+    unit_id: "185111",
+    uid: "G24999",
+    operating_day: "2026-10-01",
+    headcode: "1P91",
+    originHHMM: "18:00",
+    json: { allocations: [{ resourceGroups: [{ unitId: "185111", fleetId: "185", vehicles: [] }] }] },
+  });
+  const stored = JSON.parse(cat.prepare(`SELECT json FROM units WHERE unit_id = ?`).get("185111").json);
+  assert.equal(stored.lastEndOfDayMiles, 120812);
+  assert.deepEqual(stored.endOfDayMileageByDate, {
+    "2026-09-30": 120400,
+    "2026-10-01": 120812,
+  });
+  cat.close();
+});

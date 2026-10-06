@@ -337,6 +337,24 @@ function parseUnitCatalogJson(raw) {
   return parsed;
 }
 
+function catalogMileageByDate(inner) {
+  const raw = inner?.endOfDayMileageByDate || inner?.end_of_day_mileage_by_date || {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [day, miles] of Object.entries(raw)) {
+    const n = Number(miles);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(n)) out[day] = n;
+  }
+  return out;
+}
+
+function lastCatalogMiles(inner, byDate) {
+  const last = inner.last_end_of_day_miles ?? inner.lastEndOfDayMiles;
+  if (last != null && Number.isFinite(Number(last))) return Number(last);
+  const days = Object.keys(byDate).sort();
+  return days.length ? byDate[days[days.length - 1]] : null;
+}
+
 function collapseCalls(rows) {
   const map = new Map();
   for (const c of rows) {
@@ -862,11 +880,14 @@ function listUnitCatalog(params) {
     const fleetId = catalogFleetId(row);
     if (fleet && String(fleetId) !== fleet && !String(fleetId).startsWith(fleet)) continue;
     const inner = parseUnitCatalogJson(row.json);
+    const byDate = catalogMileageByDate(inner);
+    const lastEndOfDayMiles = lastCatalogMiles(inner, byDate);
     units.push({
       unitId,
       fleetId,
       serviceCount: milesByUnit.get(unitId)?.serviceCount || 0,
-      lastEndOfDayMiles: inner.last_end_of_day_miles ?? inner.lastEndOfDayMiles ?? null,
+      dayMiles: day && byDate[day] != null ? byDate[day] : null,
+      lastEndOfDayMiles,
     });
   }
   const slice = units.slice(cursor, cursor + limit);
@@ -905,6 +926,7 @@ async function unitDetail(unitId, dateRaw) {
   }
   if (!cat && !services.length) return null;
   const inner = parseUnitCatalogJson(cat?.json);
+  const endOfDayMileageByDate = catalogMileageByDate(inner);
   let vehiclesRaw = inner.vehicles || inner.Vehicles || [];
   if (typeof inner.vehicles_json === "string") {
     try {
@@ -923,7 +945,8 @@ async function unitDetail(unitId, dateRaw) {
     fleetId: catalogFleetId(cat || { unit_id: id, class: inner.fleetId, json: cat?.json }),
     vehicles: normalizePtacVehicles(vehiclesRaw),
     lastSeenRid,
-    lastEndOfDayMiles: inner.last_end_of_day_miles ?? inner.lastEndOfDayMiles ?? null,
+    endOfDayMileageByDate,
+    lastEndOfDayMiles: lastCatalogMiles(inner, endOfDayMileageByDate),
     updatedAt: cat?.updated_at ? new Date(cat.updated_at).toISOString() : new Date().toISOString(),
     latestService,
     services,
