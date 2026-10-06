@@ -22,7 +22,7 @@ describe('buildStopStatus densify / working passes', () => {
     expect(status.delay).toBe('')
   })
 
-  it('shows No report once progress has moved past with no live on the pass', () => {
+  it('marks passed-beyond unreported tipocs as No report (list omits those rows)', () => {
     const status = buildStopStatus(passStop(), 'pass', 6, '17:59', false, null, null, true)
     expect(status.verb).toBe('No report')
     expect(status.time).toBe('17:59')
