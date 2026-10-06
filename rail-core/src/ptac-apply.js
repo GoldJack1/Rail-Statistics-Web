@@ -213,8 +213,28 @@ export function unitIdsAtBoardCall(row, { tiploc, hhmm, movement } = {}) {
   return [...ids];
 }
 
-/** Fleet metadata only — does not store the live diagram. */
-function upsertFleet(catalog, unitId, body) {
+export function endOfDayMilesForUnit(json, unitId) {
+  let miles = null;
+  for (const alloc of parseJson(json).allocations || []) {
+    for (const group of alloc.resourceGroups || []) {
+      if (String(group.unitId) !== String(unitId)) continue;
+      const n = Number(group.endOfDayMiles);
+      if (Number.isFinite(n)) miles = n;
+    }
+  }
+  return miles;
+}
+
+function parseStoredUnitJson(raw) {
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Fleet metadata plus per-diagram-day EndOfDayMiles. */
+function upsertFleet(catalog, unitId, body, day) {
   const inner = body.json && typeof body.json === "object" ? body.json : {};
   const classId =
     body.class ?? inner.allocations?.[0]?.resourceGroups?.find((g) => String(g.unitId) === String(unitId))?.fleetId ?? null;
@@ -225,6 +245,12 @@ function upsertFleet(catalog, unitId, body) {
       for (const v of group.vehicles || []) vehicles.push(v);
     }
   }
+  const prev = catalog.prepare(`SELECT json FROM units WHERE unit_id = ?`).get(unitId);
+  const prevInner = parseStoredUnitJson(prev?.json);
+  const mileageByDate = { ...(prevInner.mileageByDate || prevInner.endOfDayMileageByDate || {}) };
+  const miles = endOfDayMilesForUnit(inner, unitId);
+  if (day && miles != null) mileageByDate[day] = miles;
+  const last = miles ?? prevInner.last_end_of_day_miles ?? prevInner.lastEndOfDayMiles ?? null;
   catalog.prepare(
     `INSERT INTO units (unit_id, class, operator, json, updated_at) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(unit_id) DO UPDATE SET
@@ -236,7 +262,13 @@ function upsertFleet(catalog, unitId, body) {
     unitId,
     classId,
     body.operator ?? inner.companyDarwin ?? null,
-    JSON.stringify({ unit_id: unitId, class: classId, vehicles }),
+    JSON.stringify({
+      unit_id: unitId,
+      class: classId,
+      vehicles,
+      mileageByDate,
+      last_end_of_day_miles: last,
+    }),
     Date.now(),
   );
 }
@@ -249,7 +281,7 @@ export function applyPtacUnit(catalog, _dbOrBody, maybeBody, fallbackDay) {
   if (!unitId) return { ok: false, error: "unit_id required" };
   const join = joinFromBody(body);
   const day = join.ssd || normalizePtacDay(body.operating_day || body.operatingDay, fallbackDay);
-  upsertFleet(catalog, unitId, body);
+  upsertFleet(catalog, unitId, body, day);
   if (!day) return { ok: true, unitId, rid: null, day: null };
 
   const uid = join.uid || "";

@@ -5,4 +5,5 @@ Description=rail-core prune day sqlite older than RETENTION_DAYS
 Type=oneshot
 WorkingDirectory=/home/darwin/rail-core
 EnvironmentFile=/home/darwin/rail-core/.env
+Environment=TZ=Europe/London
 ExecStart=/usr/bin/node src/prune.js

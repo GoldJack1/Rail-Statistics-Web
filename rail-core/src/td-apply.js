@@ -3,7 +3,7 @@
  * When SMART+CORPUS map a berth to a TIPLOC and RID is known, upsert a working pass
  * (same live restore pattern as TRUST).
  */
-import { hhmm, liveKind, openCatalog, openDayDb, operatingDayYmd, upsertCall } from "./db.js";
+import { hhmm, hhmmLondon, liveKind, openCatalog, openDayDb, operatingDayYmd, upsertCall } from "./db.js";
 import { resolveSmartTiploc } from "./import-smart.js";
 import { nrodCandidateDays, writeDaysForRid } from "./nrod-write-days.js";
 
@@ -261,7 +261,7 @@ function applyTdToDay(db, message, parsed, { rid, tiploc, stanox, crs, platform,
 
   // CA = berth step, CC = interpose. CB/CT handled elsewhere / ignored for path.
   if (tiploc && (parsed.msgType === "CA" || parsed.msgType === "CC")) {
-    const actual = parsed.time ? hhmm(parsed.time) : hhmm(now);
+    const actual = parsed.time ? hhmm(parsed.time) : hhmmLondon(now);
     for (const passRid of ridsForTdPass(db, parsed.headcode, tiploc, forcedRid)) {
       upsertTdPass(db, { rid: passRid, tiploc, crs, platform, actual });
     }
@@ -419,7 +419,7 @@ export function replayTdEventsForDay(dataDir, ymd, opts = {}) {
         }
         const { tiploc, crs, platform } = mapped;
         if (!tiploc) continue;
-        const actual = parsed.time ? hhmm(parsed.time) : hhmm(row.received_at);
+        const actual = parsed.time ? hhmm(parsed.time) : hhmmLondon(row.received_at);
         for (const passRid of ridsForTdPass(db, headcode, tiploc)) {
           upsertTdPass(db, { rid: passRid, tiploc, crs, platform, actual });
           applied++;
@@ -438,7 +438,7 @@ export function replayTdEventsForDay(dataDir, ymd, opts = {}) {
       const { tiploc, crs, platform } = mapped;
       if (!tiploc) continue;
 
-      const actual = parsed.time ? hhmm(parsed.time) : hhmm(row.received_at);
+      const actual = parsed.time ? hhmm(parsed.time) : hhmmLondon(row.received_at);
       for (const passRid of ridsForTdPass(db, headcode, tiploc, forcedRid)) {
         upsertTdPass(db, { rid: passRid, tiploc, crs, platform, actual });
         applied++;

@@ -232,25 +232,38 @@ export function platformText(value) {
   return s;
 }
 
+function formatHhmm(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    hour12: false,
+  }).formatToParts(date);
+  const hh = parts.find((p) => p.type === "hour")?.value;
+  const mm = parts.find((p) => p.type === "minute")?.value;
+  if (hh == null || mm == null) return null;
+  const hour = hh === "24" ? "00" : hh.padStart(2, "0");
+  return `${hour}:${mm.padStart(2, "0")}`;
+}
+
+/** Real UTC instants (Date.now(), TD received_at). Follows BST/GMT, including clock changes. */
+export function hhmmLondon(value) {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return null;
+  const ms = n > 0 && n < 1e11 ? n * 1000 : n;
+  if (ms <= 1e11) return null;
+  return formatHhmm(new Date(ms), "Europe/London");
+}
+
 export function hhmm(value) {
   if (!value) return null;
   const n = Number(value);
   if (Number.isFinite(n) && n > 1e11) {
     // TRUST actual_timestamp is a UK civil clock stored as a UTC epoch.
     // Formatting it in Europe/London adds a second hour during BST.
-    const parts = new Intl.DateTimeFormat("en-GB", {
-      timeZone: "UTC",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-      hour12: false,
-    }).formatToParts(new Date(n));
-    const hh = parts.find((p) => p.type === "hour")?.value;
-    const mm = parts.find((p) => p.type === "minute")?.value;
-    if (hh != null && mm != null) {
-      const hour = hh === "24" ? "00" : hh.padStart(2, "0");
-      return `${hour}:${mm.padStart(2, "0")}`;
-    }
+    return formatHhmm(new Date(n), "UTC");
   }
   const s = String(value).replace(/\D/g, "");
   if (s.length === 13 || s.length === 10) return hhmm(Number(s.length === 10 ? Number(s) * 1000 : s));

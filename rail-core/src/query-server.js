@@ -13,7 +13,7 @@ import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
 import { ensureDayImported, ridNeedsHsp, ridsNeedHsp, startBoardHspFill } from "./ensure-history-day.js";
-import { consistDocument, lookupConsist, normalizePtacVehicles, unitIdsFromConsistRow } from "./ptac-apply.js";
+import { consistDocument, endOfDayMilesForUnit, lookupConsist, normalizePtacVehicles, unitIdsFromConsistRow } from "./ptac-apply.js";
 import {
   associationsForRid,
   combinedDestinationName,
@@ -48,6 +48,16 @@ function namedTiplocs() {
   return namedTiplocCache.rows;
 }
 
+function catalogCrs(tpl) {
+  const t = String(tpl || "").toUpperCase();
+  if (!t) return null;
+  const row =
+    catalog.prepare(`SELECT crs FROM corpus WHERE tiploc = ?`).get(t) ||
+    catalog.prepare(`SELECT crs FROM tiploc WHERE tiploc = ?`).get(t);
+  const crs = String(row?.crs || "").trim().toUpperCase();
+  return crs.length === 3 ? crs : null;
+}
+
 function stationName(crs, tpl) {
   let official = null;
   if (tpl) {
@@ -73,6 +83,34 @@ function stationName(crs, tpl) {
     if (row?.name) official = row.name;
   }
   return formatTiplocName(tpl, official, official ? [] : namedTiplocs());
+}
+
+function normalizeCallName(crs, tpl) {
+  return String(stationName(crs, tpl) || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Drop ORM densify ghosts that sit next to the same named station / Town Centre twin. */
+function dropOrmNearDuplicates(calls) {
+  return calls.filter((c, i) => {
+    if (String(c.actual_source || "") !== "orm") return true;
+    if (!Number(c.is_passing)) return true;
+    const n = normalizeCallName(c.crs, c.tiploc);
+    if (!n) return true;
+    const townCentre = / town centre$/.test(n);
+    const stem = townCentre ? n.replace(/ town centre$/, "").trim() : n;
+    for (const j of [i - 1, i + 1, i - 2, i + 2]) {
+      if (j < 0 || j >= calls.length || j === i) continue;
+      const other = calls[j];
+      const on = normalizeCallName(other.crs, other.tiploc);
+      if (!on) continue;
+      if (on === n && String(other.tiploc) !== String(c.tiploc)) return false;
+      if (townCentre && (on === stem || on.startsWith(`${stem} `))) return false;
+    }
+    return true;
+  });
 }
 
 function londonNow() {
@@ -672,9 +710,11 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     consist,
   );
   persistInferred(db, resolvedRid, []);
-  const calls = maskCallsAsOf(
-    trimCallsToDestination(sortCallsByJourneyTime(dropCifTailAfterPublicTerminus(rawCalls)), svc),
-    at,
+  const calls = dropOrmNearDuplicates(
+    maskCallsAsOf(
+      trimCallsToDestination(sortCallsByJourneyTime(dropCifTailAfterPublicTerminus(rawCalls)), svc),
+      at,
+    ),
   );
   const units = Array.isArray(consist?.allocations)
     ? [...new Set(consist.allocations.flatMap((a) => (a.resourceGroups || []).map((g) => g.unitId).filter(Boolean)))]
@@ -682,7 +722,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
   const toMiles = (m) =>
     m == null || !Number.isFinite(Number(m)) ? null : Math.round((Number(m) / 1609.344) * 100) / 100;
   const callingPoints = calls.map((c) => ({
-      crs: c.crs,
+      crs: (c.crs && String(c.crs).trim().length === 3 ? String(c.crs).toUpperCase() : null) || catalogCrs(c.tiploc),
       tiploc: c.tiploc,
       seq: c.seq,
       isPassing: isWorkingPass(c),
@@ -880,11 +920,15 @@ async function unitDetail(unitId, dateRaw) {
   const ymd = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw || "") ? dateRaw : londonCalendarYmd();
   const services = [];
   let lastSeenRid = null;
+  const inner = parseUnitCatalogJson(cat?.json);
   const consistRows = catalog
-    .prepare(`SELECT uid, ssd, headcode, unit_ids FROM consists WHERE unit_ids LIKE ? ORDER BY ssd DESC LIMIT 40`)
+    .prepare(`SELECT uid, ssd, headcode, unit_ids, json FROM consists WHERE unit_ids LIKE ? ORDER BY ssd DESC LIMIT 80`)
     .all(`%${id}%`);
+  const endOfDayMileageByDate = { ...(inner.mileageByDate || inner.endOfDayMileageByDate || {}) };
   for (const row of consistRows) {
     if (!unitIdsFromConsistRow(row).includes(id)) continue;
+    const miles = endOfDayMilesForUnit(row.json, id);
+    if (miles != null && row.ssd) endOfDayMileageByDate[row.ssd] = miles;
     const db = openDay(row.ssd);
     if (!db) continue;
     const svc = db.prepare(`SELECT rid, headcode, origin_name, destination_name, origin_crs, destination_crs FROM services WHERE UPPER(IFNULL(uid,'')) = ? LIMIT 1`).get(String(row.uid).toUpperCase());
@@ -904,7 +948,6 @@ async function unitDetail(unitId, dateRaw) {
     });
   }
   if (!cat && !services.length) return null;
-  const inner = parseUnitCatalogJson(cat?.json);
   let vehiclesRaw = inner.vehicles || inner.Vehicles || [];
   if (typeof inner.vehicles_json === "string") {
     try {
@@ -923,7 +966,15 @@ async function unitDetail(unitId, dateRaw) {
     fleetId: catalogFleetId(cat || { unit_id: id, class: inner.fleetId, json: cat?.json }),
     vehicles: normalizePtacVehicles(vehiclesRaw),
     lastSeenRid,
-    lastEndOfDayMiles: inner.last_end_of_day_miles ?? inner.lastEndOfDayMiles ?? null,
+    lastEndOfDayMiles:
+      inner.last_end_of_day_miles ??
+      inner.lastEndOfDayMiles ??
+      Object.keys(endOfDayMileageByDate)
+        .sort()
+        .map((d) => endOfDayMileageByDate[d])
+        .at(-1) ??
+      null,
+    endOfDayMileageByDate,
     updatedAt: cat?.updated_at ? new Date(cat.updated_at).toISOString() : new Date().toISOString(),
     latestService,
     services,

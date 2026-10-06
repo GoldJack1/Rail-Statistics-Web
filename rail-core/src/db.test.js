@@ -3,8 +3,24 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { adoptUidOntoRid, liveKind, openDayDb, operatingDayYmd, pruneCifUidStubRids, pruneFutureDayRids, upsertCall, upsertService } from "./db.js";
+import { adoptUidOntoRid, hhmm, hhmmLondon, liveKind, openDayDb, operatingDayYmd, pruneCifUidStubRids, pruneFutureDayRids, upsertCall, upsertService } from "./db.js";
 import { applyParsed, parseDarwinPayload, parseDarwinPportXml } from "./darwin-xml.js";
+
+test("hhmm TRUST epochs keep the UK civil clock stuffed in UTC", () => {
+  assert.equal(hhmm("1627"), "16:27");
+  assert.equal(hhmm(Date.parse("2026-01-15T12:00:00Z")), "12:00");
+  assert.equal(hhmm(Date.parse("2026-06-15T12:00:00Z")), "12:00");
+});
+
+test("hhmmLondon follows BST/GMT including clock changes", () => {
+  assert.equal(hhmmLondon(Date.parse("2026-01-15T12:00:00Z")), "12:00");
+  assert.equal(hhmmLondon(Date.parse("2026-06-15T12:00:00Z")), "13:00");
+  assert.equal(hhmmLondon(Date.parse("2026-03-29T00:30:00Z")), "00:30");
+  assert.equal(hhmmLondon(Date.parse("2026-03-29T01:00:00Z")), "02:00");
+  assert.equal(hhmmLondon(Date.parse("2026-03-29T01:30:00Z")), "02:30");
+  assert.equal(hhmmLondon(Date.parse("2026-10-25T00:30:00Z")), "01:30");
+  assert.equal(hhmmLondon(Date.parse("2026-10-25T01:30:00Z")), "01:30");
+});
 
 test("operating day rolls at 02:00 UK conceptually (returns yyyy-mm-dd)", () => {
   assert.match(operatingDayYmd(new Date("2026-09-30T12:00:00Z")), /^\d{4}-\d{2}-\d{2}$/);

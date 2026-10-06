@@ -569,27 +569,11 @@ export function ServiceStopList({
   const reportedFull = historical
     ? null
     : inferProgressIndex(orderedStops, nowMins) ?? reportedIndex(orderedStops, location?.last?.tiploc)
+  // Detailed keeps every path tipoc (including unreported ones as "No report").
+  // Simple view drops working passes.
   const visible = orderedStops
     .map((stop, index) => ({ stop, index }))
     .filter(({ stop }) => showPasses || slotKind(stop.slot) !== 'pass')
-    .filter(({ stop, index }) => {
-      // Hide unreported path tipocs once progress has moved past (RTT-style).
-      if (!showPasses || historical) return true
-      const kind = slotKind(stop.slot)
-      if (kind !== 'pass') return true
-      const passedBeyond = reportedFull != null && index < reportedFull
-      const status = buildStopStatus(
-        stop,
-        kind,
-        null,
-        primaryTime(stop, kind).value,
-        historical,
-        null,
-        null,
-        passedBeyond,
-      )
-      return status.verb !== 'No report'
-    })
 
   if (visible.length === 0) {
     return <p className="unit-muted">No calling points on this service.</p>
