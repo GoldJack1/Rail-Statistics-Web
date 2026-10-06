@@ -232,25 +232,38 @@ export function platformText(value) {
   return s;
 }
 
+function formatHhmm(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    hour12: false,
+  }).formatToParts(date);
+  const hh = parts.find((p) => p.type === "hour")?.value;
+  const mm = parts.find((p) => p.type === "minute")?.value;
+  if (hh == null || mm == null) return null;
+  const hour = hh === "24" ? "00" : hh.padStart(2, "0");
+  return `${hour}:${mm.padStart(2, "0")}`;
+}
+
+/** Real UTC instants (Date.now(), TD received_at). Follows BST/GMT, including clock changes. */
+export function hhmmLondon(value) {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return null;
+  const ms = n > 0 && n < 1e11 ? n * 1000 : n;
+  if (ms <= 1e11) return null;
+  return formatHhmm(new Date(ms), "Europe/London");
+}
+
 export function hhmm(value) {
   if (!value) return null;
   const n = Number(value);
   if (Number.isFinite(n) && n > 1e11) {
     // TRUST actual_timestamp is a UK civil clock stored as a UTC epoch.
     // Formatting it in Europe/London adds a second hour during BST.
-    const parts = new Intl.DateTimeFormat("en-GB", {
-      timeZone: "UTC",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-      hour12: false,
-    }).formatToParts(new Date(n));
-    const hh = parts.find((p) => p.type === "hour")?.value;
-    const mm = parts.find((p) => p.type === "minute")?.value;
-    if (hh != null && mm != null) {
-      const hour = hh === "24" ? "00" : hh.padStart(2, "0");
-      return `${hour}:${mm.padStart(2, "0")}`;
-    }
+    return formatHhmm(new Date(n), "UTC");
   }
   const s = String(value).replace(/\D/g, "");
   if (s.length === 13 || s.length === 10) return hhmm(Number(s.length === 10 ? Number(s) * 1000 : s));
@@ -388,7 +401,16 @@ export function upsertCall(db, row, opts = {}) {
             WHEN @ata IS NOT NULL OR @atd IS NOT NULL OR @atp IS NOT NULL
               OR @eta IS NOT NULL OR @etd IS NOT NULL OR @etp IS NOT NULL
             THEN @live_kind ELSE live_kind END,
-          actual_source=${fill ? "COALESCE(actual_source, @actual_source)" : "COALESCE(@actual_source, actual_source)"},
+          actual_source=${
+            fill
+              ? `CASE
+            WHEN @actual_source IS NOT NULL
+              AND (@ata IS NOT NULL OR @atd IS NOT NULL OR @atp IS NOT NULL
+                OR @eta IS NOT NULL OR @etd IS NOT NULL OR @etp IS NOT NULL)
+            THEN @actual_source
+            ELSE COALESCE(actual_source, @actual_source) END`
+              : "COALESCE(@actual_source, actual_source)"
+          },
           updated_at=@updated_at
          WHERE rid=@rid AND tiploc=@tiploc`
       ).run({
@@ -478,9 +500,37 @@ export function adoptUidOntoRid(db, uid, rid) {
   if (!uid || !rid) return;
   const darwinRid = /^\d{15}$/.test(String(rid));
   if (!darwinRid) return;
-  const others = db.prepare(`SELECT rid FROM services WHERE uid = ? AND rid != ?`).all(uid, rid);
+  const others = db.prepare(`SELECT * FROM services WHERE uid = ? AND rid != ?`).all(uid, rid);
   for (const o of others) {
     if (/^\d{15}$/.test(String(o.rid))) continue;
+    // Copy CIF identity onto the Darwin stub before dropping the CIF RID —
+    // otherwise overnight CS portions keep null toc/headcode after adoption.
+    db.prepare(
+      `UPDATE services SET
+         train_id = COALESCE(NULLIF(train_id,''), ?),
+         toc = COALESCE(NULLIF(toc,''), ?),
+         operator_name = COALESCE(NULLIF(operator_name,''), ?),
+         category = COALESCE(NULLIF(category,''), ?),
+         headcode = COALESCE(NULLIF(headcode,''), ?),
+         origin_crs = COALESCE(NULLIF(origin_crs,''), ?),
+         origin_name = COALESCE(NULLIF(origin_name,''), ?),
+         destination_crs = COALESCE(NULLIF(destination_crs,''), ?),
+         destination_name = COALESCE(NULLIF(destination_name,''), ?),
+         service_type = COALESCE(NULLIF(service_type,''), ?)
+       WHERE rid = ?`,
+    ).run(
+      o.train_id || null,
+      o.toc || null,
+      o.operator_name || null,
+      o.category || null,
+      o.headcode || o.train_id || null,
+      o.origin_crs || null,
+      o.origin_name || null,
+      o.destination_crs || null,
+      o.destination_name || null,
+      o.service_type || null,
+      rid,
+    );
     const calls = db.prepare(`SELECT * FROM calls WHERE rid = ?`).all(o.rid);
     for (const c of calls) upsertCall(db, { ...c, rid }, { cifMerge: true });
     db.prepare(`DELETE FROM calls WHERE rid = ?`).run(o.rid);

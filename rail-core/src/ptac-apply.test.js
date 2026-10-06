@@ -70,6 +70,28 @@ test("PTAC persist is UID+SSD and does not need a service row", () => {
   cat.close();
 });
 
+test("PTAC EndOfDayMiles is stored per diagram day", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ptac-miles-"));
+  const cat = openCatalog(dir);
+  applyPtacUnit(cat, {
+    unit_id: "185111",
+    uid: "G24937",
+    operating_day: "2026-09-30",
+    json: { allocations: [{ resourceGroups: [{ unitId: "185111", endOfDayMiles: 40122 }] }] },
+  });
+  applyPtacUnit(cat, {
+    unit_id: "185111",
+    uid: "G24938",
+    operating_day: "2026-10-01",
+    json: { allocations: [{ resourceGroups: [{ unitId: "185111", endOfDayMiles: 40210 }] }] },
+  });
+  const json = JSON.parse(cat.prepare(`SELECT json FROM units WHERE unit_id = ?`).get("185111").json);
+  assert.equal(json.mileageByDate["2026-09-30"], 40122);
+  assert.equal(json.mileageByDate["2026-10-01"], 40210);
+  assert.equal(json.last_end_of_day_miles, 40210);
+  cat.close();
+});
+
 test("two diagrams same unit keep separate consist JSON", () => {
   const dir = mkdtempSync(join(tmpdir(), "ptac-two-"));
   const cat = openCatalog(dir);

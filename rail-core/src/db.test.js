@@ -3,8 +3,24 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { liveKind, openDayDb, operatingDayYmd, pruneCifUidStubRids, pruneFutureDayRids, upsertCall, upsertService } from "./db.js";
+import { adoptUidOntoRid, hhmm, hhmmLondon, liveKind, openDayDb, operatingDayYmd, pruneCifUidStubRids, pruneFutureDayRids, upsertCall, upsertService } from "./db.js";
 import { applyParsed, parseDarwinPayload, parseDarwinPportXml } from "./darwin-xml.js";
+
+test("hhmm TRUST epochs keep the UK civil clock stuffed in UTC", () => {
+  assert.equal(hhmm("1627"), "16:27");
+  assert.equal(hhmm(Date.parse("2026-01-15T12:00:00Z")), "12:00");
+  assert.equal(hhmm(Date.parse("2026-06-15T12:00:00Z")), "12:00");
+});
+
+test("hhmmLondon follows BST/GMT including clock changes", () => {
+  assert.equal(hhmmLondon(Date.parse("2026-01-15T12:00:00Z")), "12:00");
+  assert.equal(hhmmLondon(Date.parse("2026-06-15T12:00:00Z")), "13:00");
+  assert.equal(hhmmLondon(Date.parse("2026-03-29T00:30:00Z")), "00:30");
+  assert.equal(hhmmLondon(Date.parse("2026-03-29T01:00:00Z")), "02:00");
+  assert.equal(hhmmLondon(Date.parse("2026-03-29T01:30:00Z")), "02:30");
+  assert.equal(hhmmLondon(Date.parse("2026-10-25T00:30:00Z")), "01:30");
+  assert.equal(hhmmLondon(Date.parse("2026-10-25T01:30:00Z")), "01:30");
+});
 
 test("operating day rolls at 02:00 UK conceptually (returns yyyy-mm-dd)", () => {
   assert.match(operatingDayYmd(new Date("2026-09-30T12:00:00Z")), /^\d{4}-\d{2}-\d{2}$/);
@@ -71,6 +87,73 @@ test("upsert is change-friendly and keeps Darwin pass actuals", () => {
   assert.equal(row.atp, "10:11");
   assert.equal(row.is_passing, 1);
   assert.equal(row.actual_source, "darwin");
+  db.close();
+});
+
+test("fillOnly overlay upgrades actual_source when filling pass actuals", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rail-core-fill-"));
+  const db = openDayDb(dir, "2026-09-30");
+  upsertCall(db, {
+    rid: "r2",
+    tiploc: "HOLBJCN",
+    crs: null,
+    seq: 1,
+    is_passing: 1,
+    cancelled: 0,
+    platform: null,
+    length_cars: null,
+    formation: null,
+    sta: null,
+    std: null,
+    wta: null,
+    wtd: null,
+    wtp: "15:46",
+    ata: null,
+    atd: null,
+    atp: null,
+    eta: null,
+    etd: null,
+    etp: null,
+    delay_minutes: null,
+    status: null,
+    live_kind: "scheduled",
+    actual_source: "orm",
+    updated_at: 1,
+  });
+  upsertCall(
+    db,
+    {
+      rid: "r2",
+      tiploc: "HOLBJCN",
+      crs: null,
+      seq: 1,
+      is_passing: 1,
+      cancelled: 0,
+      platform: null,
+      length_cars: null,
+      formation: null,
+      sta: null,
+      std: null,
+      wta: null,
+      wtd: null,
+      wtp: "15:46",
+      ata: null,
+      atd: null,
+      atp: "15:47",
+      eta: null,
+      etd: null,
+      etp: null,
+      delay_minutes: null,
+      status: "TD",
+      live_kind: "actual",
+      actual_source: "td",
+      updated_at: 2,
+    },
+    { overlay: true, fillOnly: true },
+  );
+  const row = db.prepare(`SELECT atp, actual_source FROM calls WHERE rid='r2'`).get();
+  assert.equal(row.atp, "15:47");
+  assert.equal(row.actual_source, "td");
   db.close();
 });
 
@@ -634,6 +717,46 @@ test("pruneFutureDayRids drops next-day RIDs from today's file", () => {
   assert.equal(pruned.services, 1);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM services`).get().n, 1);
   assert.equal(db.prepare(`SELECT rid FROM services`).get().rid, "202610037115982");
+  db.close();
+});
+
+test("adoptUidOntoRid copies CIF toc/headcode onto the Darwin stub", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rail-core-"));
+  const db = openDayDb(dir, "2026-10-05");
+  upsertService(db, {
+    rid: "202610056704488",
+    uid: "C04488",
+    toc: null,
+    headcode: null,
+    train_id: null,
+    service_type: "passenger",
+    cancelled: 0,
+    is_charter: 0,
+    updated_at: 1,
+  });
+  upsertService(db, {
+    rid: "20261005C04488",
+    uid: "C04488",
+    toc: "CS",
+    headcode: "1A25",
+    train_id: "1A25",
+    category: "XZ",
+    origin_name: "Edinburgh",
+    destination_name: "Aberdeen",
+    service_type: "passenger",
+    cancelled: 0,
+    is_charter: 0,
+    updated_at: 1,
+  });
+  upsertCall(db, { rid: "20261005C04488", tiploc: "EDINBUR", crs: "EDB", seq: 0, std: "04:28" });
+  upsertCall(db, { rid: "20261005C04488", tiploc: "ABRDEEN", crs: "ABD", seq: 1, sta: "07:50" });
+  adoptUidOntoRid(db, "C04488", "202610056704488");
+  const svc = db.prepare(`SELECT toc, headcode, train_id, destination_name FROM services WHERE rid = ?`).get("202610056704488");
+  assert.equal(svc.toc, "CS");
+  assert.equal(svc.headcode, "1A25");
+  assert.equal(svc.destination_name, "Aberdeen");
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM services WHERE rid = '20261005C04488'`).get().n, 0);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM calls WHERE rid = '202610056704488'`).get().n, 2);
   db.close();
 });
 

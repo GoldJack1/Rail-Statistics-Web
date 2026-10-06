@@ -13,7 +13,7 @@ import { computeServiceLocation } from "./location.js";
 
 test("hhmm accepts HSP hhmm and TRUST epoch ms", () => {
   assert.equal(hhmm("1627"), "16:27");
-  assert.equal(hhmm(1790802300000)?.length, 5);
+  assert.equal(hhmm(1790802300000), "21:05");
 });
 
 test("trustMessages unwraps NROD arrays", () => {

@@ -6,6 +6,7 @@ After=network.target rail-core-ingest.service
 Type=simple
 WorkingDirectory=/home/darwin/rail-core
 EnvironmentFile=/home/darwin/rail-core/.env
+Environment=TZ=Europe/London
 ExecStart=/usr/bin/node src/kafka-darwin.js
 Restart=always
 RestartSec=5
