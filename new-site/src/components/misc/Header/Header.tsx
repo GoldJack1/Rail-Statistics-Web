@@ -4,9 +4,14 @@ import React, { useCallback, useEffect, useId, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useAppHeaderOffset } from '@/hooks/useAppHeaderOffset'
 import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
-import { useDarwinNavPagesVisible } from '@/hooks/useDarwinNavPagesVisible'
+import {
+  useDarwinNavPagesVisible,
+  useDarwinPublicPagesVisible,
+} from '@/hooks/useDarwinNavPagesVisible'
+import { isBetaSite } from '@/utils/localDevFlags'
 import { resolveAppDownloadAction } from '@/utils/appDownload'
 import { BUTBaseButton, BUTHeaderLink, BUTWideButton } from '../../buttons'
+import BetaTag from '../BetaTag/BetaTag'
 import HomeDownloadPlatformModal from '../../models/HomeDownloadPlatformModal/HomeDownloadPlatformModal'
 import {
   MobileHeaderPanel,
@@ -82,6 +87,8 @@ const Header: React.FC = () => {
 
   const isAccountActive = pathname.startsWith('/account') || pathname.startsWith('/leaderboards')
   const showDarwinNav = useDarwinNavPagesVisible()
+  const showDarwinPublic = useDarwinPublicPagesVisible()
+  const betaSite = isBetaSite()
 
   const pageTitle = getHeaderPageTitle(pathname)
 
@@ -90,12 +97,19 @@ const Header: React.FC = () => {
     { to: '/stations', label: 'Stations', active: isStationsActive && !isMapActive },
     { to: '/fares', label: 'Fares', active: isFaresActive },
     { to: '/stations/map', label: 'Maps', active: isMapActive },
-    ...(showDarwinNav
+    ...(showDarwinPublic
       ? [
-          { to: '/departures', label: 'Departures', active: isDeparturesActive },
-          { to: '/units', label: 'Units', active: isUnitsActive },
-          { to: '/admin/api-status', label: 'API Status', active: isApiStatusActive },
+          {
+            to: '/departures',
+            label: 'Departures',
+            active: isDeparturesActive,
+            showBeta: betaSite,
+          },
+          { to: '/units', label: 'Units', active: isUnitsActive, showBeta: betaSite },
         ]
+      : []),
+    ...(showDarwinNav
+      ? [{ to: '/admin/api-status', label: 'API Status', active: isApiStatusActive }]
       : []),
     ...(isAccountSystemEnabled
       ? [{ to: '/account', label: 'Account', active: isAccountActive }]
@@ -150,17 +164,23 @@ const Header: React.FC = () => {
             >
               <div className="logo">
                 <span className="logo-text">Rail Statistics</span>
+                {betaSite ? <BetaTag className="header-logo__beta" /> : null}
               </div>
             </BUTHeaderLink>
-            <MobileHeaderTitle pageTitle={pageTitle} logoNavReplace={logoNavReplace} />
+            <MobileHeaderTitle
+              pageTitle={pageTitle}
+              showBeta={betaSite}
+              logoNavReplace={logoNavReplace}
+            />
           </div>
 
           <div className="header-right">
             <nav className="header-nav header-nav--desktop" aria-label="Main">
               <div className="header-nav-links">
-                {navItems.map(({ to, label, active }) => (
+                {navItems.map(({ to, label, active, showBeta }) => (
                   <BUTHeaderLink key={to} to={to} active={active}>
                     <span className="header-nav-link__label">{label}</span>
+                    {showBeta ? <BetaTag /> : null}
                   </BUTHeaderLink>
                 ))}
               </div>
@@ -185,10 +205,11 @@ const Header: React.FC = () => {
         <MobileHeaderPanel menuOpen={mobileMenuOpen} navId={mobileNavId} onClose={closeMobileMenu}>
           <nav className="header-nav header-nav--mobile" aria-label="Main">
             <ul className="header-mobile-nav-list">
-              {navItems.map(({ to, label, active }) => (
+              {navItems.map(({ to, label, active, showBeta }) => (
                 <li key={to}>
                   <BUTHeaderLink to={to} active={active} onClick={closeMobileMenu}>
                     <span className="header-nav-link__label">{label}</span>
+                    {showBeta ? <BetaTag /> : null}
                   </BUTHeaderLink>
                 </li>
               ))}

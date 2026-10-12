@@ -1,14 +1,14 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useDarwinNavPagesVisible } from '@/hooks/useDarwinNavPagesVisible'
+import { useDarwinPublicPagesVisible } from '@/hooks/useDarwinNavPagesVisible'
 import { startDarwinHotCache } from '@/utils/darwinHotCache'
 
 export default function DarwinHotPrefetch() {
-  const showDarwinNav = useDarwinNavPagesVisible()
+  const showDarwinPublic = useDarwinPublicPagesVisible()
   useEffect(() => {
-    if (!showDarwinNav) return
+    if (!showDarwinPublic) return
     startDarwinHotCache()
-  }, [showDarwinNav])
+  }, [showDarwinPublic])
   return null
 }

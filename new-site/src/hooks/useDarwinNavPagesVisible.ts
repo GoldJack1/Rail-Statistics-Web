@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { isLocalDevLoginBypassEnabled } from '@/utils/localDevFlags'
+import { isBetaSite, isLocalDevLoginBypassEnabled } from '@/utils/localDevFlags'
 
 const AUTH_SESSION_HINT_KEY = 'rs-auth-session-hint'
 
@@ -21,4 +21,10 @@ export function useDarwinNavPagesVisible(): boolean {
 
   if (isLocalDevLoginBypassEnabled()) return true
   return Boolean(user) || sessionHint
+}
+
+/** Departures + Units in the public header: logged-in on live, everyone on the beta site. */
+export function useDarwinPublicPagesVisible(): boolean {
+  const loggedIn = useDarwinNavPagesVisible()
+  return isBetaSite() || loggedIn
 }

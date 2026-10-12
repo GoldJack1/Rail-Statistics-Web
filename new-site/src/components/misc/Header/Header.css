@@ -139,7 +139,8 @@
     min-width: 0;
 }
 
-.header-page-title__beta {
+.header-page-title__beta,
+.header-logo__beta {
     flex-shrink: 0;
     align-self: center;
     transform: translateY(0.06em);
