@@ -14,7 +14,13 @@ npm test
 
 ## Environment
 
-Copy `.env.local.example` → `.env.local` and fill in Firebase + feature flags. See `netlify.env.example` for production (Netlify site env).
+Copy `.env.local.example` → `.env.local` and fill in Firebase + feature flags.
+
+Netlify is **one site**, two builds:
+- Production (`main`) → `https://railstatistics.co.uk` — see `netlify.env.live.example`
+- Branch `beta` → `https://beta.railstatistics.co.uk` — see `netlify.env.beta.example`
+
+Darwin origin and `NEXT_PUBLIC_BETA_SITE` are set per context in `netlify.toml`. Secrets go in the Netlify UI (All scopes).
 
 Required for full functionality:
 
@@ -25,7 +31,13 @@ Required for full functionality:
 
 ## Deploy
 
-Netlify config at monorepo root (`netlify.toml`). Build base: `new-site/`.
+Netlify config at monorepo root (`netlify.toml`). Build base: `new-site/`. One site:
+
+1. Production branch = live (`railstatistics.co.uk`).
+2. Site configuration → Build & deploy → Continuous Deployment → **Branch deploys**:
+   let Netlify deploy the `beta` branch (or “all branches”, then ignore unused ones).
+3. Domain management → add `beta.railstatistics.co.uk` and assign it to branch **`beta`**.
+4. Push `beta`; Netlify builds with `[context.beta.environment]` (api-dev + `NEXT_PUBLIC_BETA_SITE=true`).
 
 Firebase rules/indexes: `firestore.rules`, `storage.rules`, `firestore.indexes.json` (deploy separately via Firebase CLI).
 
