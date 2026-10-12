@@ -37,13 +37,32 @@ async function readXml(path) {
   return readFileSync(path, "utf8");
 }
 
+function isBusy(err) {
+  return Number(err?.errcode) === 5 || /database is locked|SQLITE_BUSY/i.test(String(err?.message || err));
+}
+
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function beginWrite(db) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      return;
+    } catch (err) {
+      if (!isBusy(err) || attempt >= 40) throw err;
+      sleepMs(Math.min(5000, 250 * attempt));
+    }
+  }
+}
+
 const ymd = args[1] || operatingDayYmd();
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
 const xml = await readXml(file);
 const journeys = xml.match(/<(?:ns\d*:)?Journey\b[\s\S]*?<\/(?:ns\d*:)?Journey>/gi) || [];
 console.log(basename(file), "journeys", journeys.length, "day", ymd, replace ? "replace" : "merge");
-const db = openDayDb(DATA_DIR, ymd);
-db.exec("PRAGMA busy_timeout=120000");
+const db = openDayDb(DATA_DIR, ymd, { timeout: 180_000 });
 const catalog = openCatalog(DATA_DIR);
 const nameLookup = (crs, tpl) => {
   if (crs) {
@@ -58,22 +77,39 @@ const nameLookup = (crs, tpl) => {
 };
 const delCalls = db.prepare(`DELETE FROM calls WHERE rid = ?`);
 let n = 0;
-db.exec("BEGIN");
-for (const j of journeys) {
-  const parsed = parseDarwinPportXml(`<Pport>${j}</Pport>`);
-  if (!parsed?.service?.rid) continue;
-  let live = [];
-  if (replace) {
-    live = snapshotCallLive(db, parsed.service.rid);
-    delCalls.run(parsed.service.rid);
+beginWrite(db);
+for (let i = 0; i < journeys.length; ) {
+  const parsed = parseDarwinPportXml(`<Pport>${journeys[i]}</Pport>`);
+  if (!parsed?.service?.rid) {
+    i++;
+    continue;
   }
-  applyParsed(db, parsed);
-  if (replace && live.length) restoreCallLive(db, parsed.service.rid, live);
-  refreshServiceJourney(db, parsed.service.rid, nameLookup);
+  try {
+    let live = [];
+    if (replace) {
+      live = snapshotCallLive(db, parsed.service.rid);
+      delCalls.run(parsed.service.rid);
+    }
+    applyParsed(db, parsed);
+    if (replace && live.length) restoreCallLive(db, parsed.service.rid, live);
+    refreshServiceJourney(db, parsed.service.rid, nameLookup);
+  } catch (err) {
+    if (!isBusy(err)) throw err;
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* already rolled back */
+    }
+    console.warn("sqlite busy at journey", n, "— wait and resume");
+    sleepMs(1500);
+    beginWrite(db);
+    continue;
+  }
+  i++;
   n++;
-  if (n % 2000 === 0) {
+  if (n % 500 === 0) {
     db.exec("COMMIT");
-    db.exec("BEGIN");
+    beginWrite(db);
     console.log("imported", n);
   }
 }

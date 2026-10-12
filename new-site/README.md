@@ -36,7 +36,7 @@ Netlify config at monorepo root (`netlify.toml`). Build base: `new-site/`. One s
 1. Production branch = live (`railstatistics.co.uk`).
 2. Site configuration → Build & deploy → Continuous Deployment → **Branch deploys**:
    let Netlify deploy the `beta` branch (or “all branches”, then ignore unused ones).
-3. Domain management → add `beta.railstatistics.co.uk` and assign it to branch **`beta`**.
+3. Domain management → add `beta.railstatistics.co.uk` and set it as a **branch subdomain** for branch **`beta`** (not a production domain alias). If it is only an alias of the live site, `https://beta.railstatistics.co.uk` will serve production; `https://beta--railstatistics.netlify.app` is the real beta deploy.
 4. Push `beta`; Netlify builds with `[context.beta.environment]` (api-dev + `NEXT_PUBLIC_BETA_SITE=true`).
 
 Firebase rules/indexes: `firestore.rules`, `storage.rules`, `firestore.indexes.json` (deploy separately via Firebase CLI).

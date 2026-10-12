@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openCatalog, openDayDb, upsertCall, upsertService } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
-import { applyTdFrame, ensureTdTables, replayTdEventsForDay } from "./td-apply.js";
+import { applyTdFrame, ensureTdTables, replayTdEventsForDay, tdClock } from "./td-apply.js";
 
 const TODAY = "2026-10-05";
 const RID = "202610057115988";
@@ -103,6 +103,37 @@ test("TD CA pair mapping fills ORM junction with td actual_source", () => {
   const db = openDayDb(dir, TODAY);
   const row = db.prepare(`SELECT atp, actual_source FROM calls WHERE rid = ? AND tiploc = 'BROADGR'`).get(RID);
   assert.equal(row.actual_source, "td");
+  assert.equal(row.atp, "16:05");
+  db.close();
+});
+
+test("tdClock treats TD epochs as real UTC and HHMMSS as UK civil", () => {
+  assert.equal(tdClock("160530"), "16:05");
+  assert.equal(tdClock(String(Date.parse("2026-06-15T15:05:30Z"))), "16:05");
+  assert.equal(tdClock(String(Date.parse("2026-01-15T16:05:30Z"))), "16:05");
+  assert.equal(tdClock("", Date.parse("2026-06-15T15:05:30Z")), "16:05");
+});
+
+test("TD CA epoch during BST is stored as London wall time", () => {
+  const dir = mkdtempSync(join(tmpdir(), "td-bst-"));
+  seedCorpus(dir);
+  seedService(dir);
+  applyTdFrame(
+    dir,
+    {
+      CA_MSG: {
+        msg_type: "CA",
+        area_id: "T2",
+        from: "401",
+        to: "500",
+        descr: "9E18",
+        time: String(Date.parse("2026-06-15T15:05:30Z")),
+      },
+    },
+    TODAY,
+  );
+  const db = openDayDb(dir, TODAY);
+  const row = db.prepare(`SELECT atp FROM calls WHERE rid = ? AND tiploc = 'BROADGR'`).get(RID);
   assert.equal(row.atp, "16:05");
   db.close();
 });

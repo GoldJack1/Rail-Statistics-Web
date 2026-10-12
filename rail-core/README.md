@@ -30,3 +30,18 @@ HSP never writes pass rows. TRUST `PASS` and Darwin `PP` do.
 ## Feeds
 - In: HSP (history), TRUST STOMP (live movements), optional Darwin Kafka / PPTimetable
 - Out of scope for this local path: Caddy, VPS systemd
+
+## VPS prod + staging query
+
+One ingest and one `DATA_DIR`. Staging is a second query process only:
+
+- prod: `rail-core-query` `:4001` → `api-raildata.railstatistics.co.uk`
+- staging: `/home/darwin/rail-core-dev` + `rail-core-query-dev` `:4002` → `api-dev.railstatistics.co.uk`
+- `QUERY_READ_ONLY=1` on staging (no `ensureDayImported` / `persistInferred` / HSP fill writes)
+- systemd `EnvironmentFile=/home/darwin/rail-core-dev/.env` (prod secrets plus `QUERY_PORT=4002`; do not point the staging unit at prod `.env` or it stays on `:4001`)
+
+Promote query code (does **not** restart ingest/kafka/stomp/tt):
+
+```bash
+sudo /home/darwin/rail-core/scripts/promote-query-dev.sh
+```

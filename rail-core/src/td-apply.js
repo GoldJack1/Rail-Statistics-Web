@@ -56,6 +56,18 @@ export function tdMessages(raw) {
   return [];
 }
 
+/**
+ * TD `time` is either UK civil HHMMSS, or a real UTC epoch (ms/seconds).
+ * TRUST movement epochs are a different encoding and must not use this.
+ */
+export function tdClock(time, fallbackMs = null) {
+  const fallback = () => (fallbackMs == null ? null : hhmmLondon(fallbackMs));
+  if (time == null || time === "") return fallback();
+  const s = String(time).trim();
+  if (/^\d{10,13}$/.test(s)) return hhmmLondon(Number(s));
+  return hhmm(s) || fallback();
+}
+
 function unpackTd(msg) {
   if (!msg || typeof msg !== "object") return null;
   for (const [key, body] of Object.entries(msg)) {
@@ -261,7 +273,7 @@ function applyTdToDay(db, message, parsed, { rid, tiploc, stanox, crs, platform,
 
   // CA = berth step, CC = interpose. CB/CT handled elsewhere / ignored for path.
   if (tiploc && (parsed.msgType === "CA" || parsed.msgType === "CC")) {
-    const actual = parsed.time ? hhmm(parsed.time) : hhmmLondon(now);
+    const actual = tdClock(parsed.time, now);
     for (const passRid of ridsForTdPass(db, parsed.headcode, tiploc, forcedRid)) {
       upsertTdPass(db, { rid: passRid, tiploc, crs, platform, actual });
     }
@@ -419,7 +431,7 @@ export function replayTdEventsForDay(dataDir, ymd, opts = {}) {
         }
         const { tiploc, crs, platform } = mapped;
         if (!tiploc) continue;
-        const actual = parsed.time ? hhmm(parsed.time) : hhmmLondon(row.received_at);
+        const actual = tdClock(parsed.time, row.received_at);
         for (const passRid of ridsForTdPass(db, headcode, tiploc)) {
           upsertTdPass(db, { rid: passRid, tiploc, crs, platform, actual });
           applied++;
@@ -438,7 +450,7 @@ export function replayTdEventsForDay(dataDir, ymd, opts = {}) {
       const { tiploc, crs, platform } = mapped;
       if (!tiploc) continue;
 
-      const actual = parsed.time ? hhmm(parsed.time) : hhmmLondon(row.received_at);
+      const actual = tdClock(parsed.time, row.received_at);
       for (const passRid of ridsForTdPass(db, headcode, tiploc, forcedRid)) {
         upsertTdPass(db, { rid: passRid, tiploc, crs, platform, actual });
         applied++;

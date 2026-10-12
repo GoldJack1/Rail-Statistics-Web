@@ -29,6 +29,22 @@ import {
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
 const PORT = Number(process.env.QUERY_PORT ?? 4001);
 const INTERNAL = process.env.INTERNAL_API_KEY ?? "";
+const QUERY_READ_ONLY = /^(1|true|yes)$/i.test(String(process.env.QUERY_READ_ONLY || "").trim());
+
+async function maybeEnsureDayImported(day) {
+  if (QUERY_READ_ONLY) return;
+  await ensureDayImported(day);
+}
+
+function maybePersistInferred(db, rid, rows) {
+  if (QUERY_READ_ONLY) return;
+  persistInferred(db, rid, rows);
+}
+
+function maybeStartBoardHspFill(ymd, rids) {
+  if (QUERY_READ_ONLY) return;
+  startBoardHspFill(ymd, rids);
+}
 const catalog = openCatalog(DATA_DIR);
 
 let namedTiplocCache = { at: 0, rows: [] };
@@ -293,7 +309,7 @@ async function liveDepartures(crs, opts) {
 
   const days = locationBoardDays(ymd);
   for (const d of days) {
-    if (d !== today) await ensureDayImported(d);
+    if (d !== today) await maybeEnsureDayImported(d);
   }
   const historicalDate = ymd < today ? ymd : null;
   let now = londonNow();
@@ -336,7 +352,7 @@ async function liveDepartures(crs, opts) {
     const rids = [...new Set([...(board.departures || []), ...(board.arrivals || [])].map((row) => row.rid).filter(Boolean))];
     const holes = ridsNeedHsp(ymd, rids);
     board.hspPending = holes.length > 0;
-    if (holes.length) startBoardHspFill(ymd, holes);
+    if (holes.length) maybeStartBoardHspFill(ymd, holes);
   } else {
     board.hspPending = false;
   }
@@ -629,7 +645,7 @@ function adjacentServiceDatabases(ymd) {
 async function serviceDetail(ymd, rid, atRaw, hop = 0) {
   const at = parseAtParam(atRaw);
   for (const day of [ymd, addCalendarDays(ymd, -1), addCalendarDays(ymd, 1)]) {
-    if (day && day !== londonCalendarYmd()) await ensureDayImported(day);
+    if (day && day !== londonCalendarYmd()) await maybeEnsureDayImported(day);
   }
   let db = openDay(ymd);
   if (!db) return null;
@@ -709,7 +725,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     journeyTpls,
     consist,
   );
-  persistInferred(db, resolvedRid, []);
+  maybePersistInferred(db, resolvedRid, []);
   const calls = dropOrmNearDuplicates(
     maskCallsAsOf(
       trimCallsToDestination(sortCallsByJourneyTime(dropCifTailAfterPublicTerminus(rawCalls)), svc),
@@ -784,7 +800,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     };
   });
   const hspPending = serviceHspPending(db, ymd, resolvedRid);
-  if (hspPending) startBoardHspFill(ymd, [resolvedRid]);
+  if (hspPending) maybeStartBoardHspFill(ymd, [resolvedRid]);
   const originStop = stops.find((s) => s.slot === "OR") || stops.find((s) => s.crs && s.slot !== "PP");
   const destStop = [...stops].reverse().find((s) => s.slot === "DT") || [...stops].reverse().find((s) => s.crs && s.slot !== "PP");
   const location = computeServiceLocation(calls, { stationName, ymd, now: at ? londonInstant(ymd, at) || new Date() : new Date() });

@@ -1,0 +1,17 @@
+[Unit]
+Description=rail-core query API (staging, read-only, :4002)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/darwin/rail-core-dev
+# Staging .env is prod copy plus QUERY_PORT / QUERY_READ_ONLY / DATA_DIR (see VPS setup).
+# Using prod .env as EnvironmentFile lets QUERY_PORT=4001 win over Environment=.
+EnvironmentFile=/home/darwin/rail-core-dev/.env
+Environment=TZ=Europe/London
+ExecStart=/usr/bin/node src/query-server.js
+Restart=always
+User=darwin
+
+[Install]
+WantedBy=multi-user.target

@@ -11,9 +11,10 @@ export function dayPath(dataDir, ymd) {
   return join(dataDir, `day-${ymd}.sqlite`);
 }
 
-export function openDayDb(dataDir, ymd) {
+export function openDayDb(dataDir, ymd, { timeout = 60_000 } = {}) {
   mkdirSync(dataDir, { recursive: true });
-  const db = new DatabaseSync(dayPath(dataDir, ymd));
+  // DatabaseSync timeout (sqlite3_busy_timeout) is what actually waits; PRAGMA busy_timeout is ignored when timeout is 0.
+  const db = new DatabaseSync(dayPath(dataDir, ymd), { timeout });
   db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=60000;");
   db.exec(SCHEMA);
   db.exec("CREATE INDEX IF NOT EXISTS idx_services_uid ON services (uid);");
@@ -117,7 +118,7 @@ export function walCheckpoint(db) {
 
 export function openCatalog(dataDir) {
   mkdirSync(dataDir, { recursive: true });
-  const db = new DatabaseSync(join(dataDir, "catalog.sqlite"));
+  const db = new DatabaseSync(join(dataDir, "catalog.sqlite"), { timeout: 60_000 });
   db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=60000;");
   db.exec(`
     CREATE TABLE IF NOT EXISTS units (

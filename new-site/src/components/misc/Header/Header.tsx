@@ -99,13 +99,8 @@ const Header: React.FC = () => {
     { to: '/stations/map', label: 'Maps', active: isMapActive },
     ...(showDarwinPublic
       ? [
-          {
-            to: '/departures',
-            label: 'Departures',
-            active: isDeparturesActive,
-            showBeta: betaSite,
-          },
-          { to: '/units', label: 'Units', active: isUnitsActive, showBeta: betaSite },
+          { to: '/departures', label: 'Departures', active: isDeparturesActive },
+          { to: '/units', label: 'Units', active: isUnitsActive },
         ]
       : []),
     ...(showDarwinNav
