@@ -167,6 +167,8 @@ async function proxyDarwin(request: NextRequest, pathSegments: string[]): Promis
     applyDarwinCacheHeaders(responseHeaders, request, pathSegments, upstreamRes.ok)
     const retryAfter = upstreamRes.headers.get('retry-after')
     if (retryAfter) responseHeaders.set('Retry-After', retryAfter)
+    const queryEnv = upstreamRes.headers.get('x-rail-query-env')
+    if (queryEnv) responseHeaders.set('X-Rail-Query-Env', queryEnv)
 
     return new NextResponse(upstreamRes.body as BodyInit | null, {
       status: upstreamRes.status,

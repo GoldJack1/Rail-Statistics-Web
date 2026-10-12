@@ -6,6 +6,7 @@ import { MagnifyingGlass } from '@phosphor-icons/react'
 
 import { BUTWideButton } from '@/components/buttons'
 import BUTDDMList from '@/components/buttons/ddm/BUTDDMList'
+import DarwinQueryEnvBanner from '@/components/darwin/DarwinQueryEnvBanner/DarwinQueryEnvBanner'
 import { PageTopHeader, SidebarDropdownSection, SidebarPanel } from '@/components/misc'
 import TXTINPBUTIconWideButtonSearch from '@/components/textInputButtons/special/TXTINPBUTIconWideButtonSearch'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
@@ -177,6 +178,7 @@ export const UnitsBrowseLayout: React.FC<UnitsBrowseLayoutProps> = ({
   return (
     <UnitsBrowseContext.Provider value={browse}>
     <div className="browse-page units-service-shell">
+      <DarwinQueryEnvBanner />
       <PageTopHeader
         title={title}
         subtitle={subtitle}

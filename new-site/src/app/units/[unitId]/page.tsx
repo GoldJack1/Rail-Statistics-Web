@@ -381,6 +381,7 @@ const UnitLookupPage: React.FC = () => {
 
   return (
     <DarwinDetailsLayout
+      showQueryEnvBanner
       title={title}
       subtitle={subtitle}
       headerClassName={`unit-header unit-header--${status}`}

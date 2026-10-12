@@ -30,6 +30,10 @@ const DATA_DIR = process.env.DATA_DIR ?? "./data";
 const PORT = Number(process.env.QUERY_PORT ?? 4001);
 const INTERNAL = process.env.INTERNAL_API_KEY ?? "";
 const QUERY_READ_ONLY = /^(1|true|yes)$/i.test(String(process.env.QUERY_READ_ONLY || "").trim());
+const QUERY_ENV = String(process.env.QUERY_ENV || (QUERY_READ_ONLY ? "dev" : "live")).trim().toLowerCase() === "dev"
+  ? "dev"
+  : "live";
+const QUERY_ENV_LABEL = QUERY_ENV === "dev" ? "THIS IS THE DEV API" : "THIS IS THE LIVE API";
 
 async function maybeEnsureDayImported(day) {
   if (QUERY_READ_ONLY) return;
@@ -137,6 +141,8 @@ function cors(res) {
   res.setHeader("access-control-allow-origin", "*");
   res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
   res.setHeader("access-control-allow-headers", "Content-Type, X-API-Key");
+  res.setHeader("access-control-expose-headers", "X-Rail-Query-Env");
+  res.setHeader("x-rail-query-env", QUERY_ENV);
 }
 
 function json(res, status, body, extra = {}) {
@@ -1019,7 +1025,14 @@ const server = createServer(async (req, res) => {
 
   try {
     if (url.pathname === "/health" || url.pathname === "/api/health" || url.pathname === "/api/ping") {
-      json(res, 200, { ok: true, role: "query", day: operatingDayYmd(), days: listDayYmds() });
+      json(res, 200, {
+        ok: true,
+        role: "query",
+        queryEnv: QUERY_ENV,
+        queryEnvLabel: QUERY_ENV_LABEL,
+        day: operatingDayYmd(),
+        days: listDayYmds(),
+      });
       return;
     }
     if (url.pathname === "/api/locations" || url.pathname === "/api/station") {
@@ -1144,5 +1157,5 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`rail-core query on 127.0.0.1:${PORT}`);
+  console.log(`rail-core query on 127.0.0.1:${PORT} (${QUERY_ENV_LABEL})`);
 });

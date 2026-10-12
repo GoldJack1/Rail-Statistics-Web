@@ -1,6 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
+import DarwinQueryEnvBanner from '@/components/darwin/DarwinQueryEnvBanner/DarwinQueryEnvBanner'
 import { PageTopHeader } from '@/components/misc'
 import {
   AccountSectionNav,
@@ -23,6 +24,7 @@ export type DarwinDetailsLayoutProps = {
   ariaLabel: string
   children: ReactNode
   minSectionCount?: number
+  showQueryEnvBanner?: boolean
 }
 
 /**
@@ -41,9 +43,11 @@ export function DarwinDetailsLayout({
   ariaLabel,
   children,
   minSectionCount = 5,
+  showQueryEnvBanner = true,
 }: DarwinDetailsLayoutProps) {
   return (
     <div className="container container--station-details">
+      {showQueryEnvBanner ? <DarwinQueryEnvBanner /> : null}
       <PageTopHeader
         className={headerClassName}
         title={title}

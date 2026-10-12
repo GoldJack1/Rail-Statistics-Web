@@ -21,6 +21,7 @@ import TXTINPBUTIconWideButtonSearch from '@/components/textInputButtons/special
 import { StationMessages } from '@/components/darwin/StationMessages'
 import { KnowledgebaseIncidentsBanner } from '@/components/darwin/KnowledgebaseIncidentsBanner'
 import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
+import DarwinQueryEnvBanner from '@/components/darwin/DarwinQueryEnvBanner/DarwinQueryEnvBanner'
 import { railwayOperatingDayIsoFromLondonParts, scheduledTimeInRailwayWindow, normalizeClockHhmm } from '@/utils/railwayOperatingDayUk'
 import { paramAsString } from '@/utils/nextParams'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
@@ -783,6 +784,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
 
   return (
     <div className="browse-page darwin-departures-shell">
+      <DarwinQueryEnvBanner />
       <PageTopHeader
         title={stationLabel}
         subtitle={subtitle}
