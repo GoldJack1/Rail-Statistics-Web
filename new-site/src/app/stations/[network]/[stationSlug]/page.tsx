@@ -120,9 +120,6 @@ function writeStationDetailsTabHash(tab: StationDetailsTab): void {
   window.history.replaceState(window.history.state, '', next)
 }
 
-/** Minimum time the loading skeleton stays visible so fast cache hits do not flash. */
-const MIN_SKELETON_MS = 1500
-
 function StationDetailsPage() {
   const router = useRouter()
   const backPath = getStationDetailsReturnPath(readStationDetailsNavigationState())
@@ -141,7 +138,6 @@ function StationDetailsPage() {
   const [activeTab, setActiveTab] = useState<StationDetailsTab | null>(null)
   const [maxTabContentHeight, setMaxTabContentHeight] = useState(0)
   const [sourceCompareEnabled, setSourceCompareEnabled] = useState(false)
-  const [minSkeletonElapsed, setMinSkeletonElapsed] = useState(false)
   /** GBNR: null while ORR usage lookup is pending; false when no Table 1415 data. */
   const [gbnrUsageAvailable, setGbnrUsageAvailable] = useState<boolean | null>(null)
   const visibleBodyRef = useRef<HTMLDivElement | null>(null)
@@ -168,13 +164,6 @@ function StationDetailsPage() {
   useEffect(() => {
     setGbnrUsageAvailable(null)
   }, [station?.id])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    setMinSkeletonElapsed(false)
-    const timer = window.setTimeout(() => setMinSkeletonElapsed(true), MIN_SKELETON_MS)
-    return () => window.clearTimeout(timer)
-  }, [station?.id, network, stationSlug])
 
   useEffect(() => {
     const sync = () => setSourceCompareEnabled(readKnowledgebaseSourceCompareEnabled())
@@ -396,17 +385,14 @@ function StationDetailsPage() {
     )
   }, [headerDisplayStation, headerIsLightRail, headerTocRaw, headerManagedByToc])
 
-  const kbPending =
-    fieldSchema.showKnowledgebaseTab &&
-    (knowledgebase.status === 'idle' || knowledgebase.status === 'loading')
-  const dataPending = loading || !station || additionalLoading || kbPending
+  const dataPending = loading || !station
   const sectionPending = activeTab === null
-  const showContentSkeleton = !error && (sectionPending || dataPending || !minSkeletonElapsed)
+  const showContentSkeleton = !error && (sectionPending || dataPending)
 
   useEffect(() => {
     // Wait until the hash is applied and tab availability is known — otherwise a thin
     // early schema briefly forces Details and clears the restored section.
-    if (activeTab === null || dataPending || !minSkeletonElapsed) return
+    if (activeTab === null || dataPending) return
     if (activeTab === 'additional' && !showAdditionalTab) selectTab('details')
     if (activeTab === 'service' && !fieldSchema.showServiceTab) selectTab('details')
     if (activeTab === 'usage' && !fieldSchema.showUsageTab) selectTab('details')
@@ -439,7 +425,6 @@ function StationDetailsPage() {
   }, [
     activeTab,
     dataPending,
-    minSkeletonElapsed,
     showAdditionalTab,
     fieldSchema.showServiceTab,
     fieldSchema.showUsageTab,
