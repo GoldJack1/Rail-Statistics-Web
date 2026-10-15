@@ -73,10 +73,11 @@ test("stitch attaches leg/cum metres for corridor CRS mid", () => {
     adj,
     { tipocMeta, geoByTpl, scheduleAdj },
   );
-  assert.equal(inserted, 1);
-  assert.equal(calls[1].tiploc, "COT");
+  assert.equal(inserted, 0);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].tiploc, "B");
   assert.ok(calls[1].leg_m > 0);
-  assert.ok(calls[2].cum_m >= calls[1].cum_m);
+  assert.ok(calls[1].cum_m > 0);
 });
 
 test("metresToMiles", () => {

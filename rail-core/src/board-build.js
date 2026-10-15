@@ -173,8 +173,8 @@ export function classifyServiceType({ trainCat, isPassenger, trainId, originName
   const endpoints = `${originName || ""} ${destinationName || ""}`.toLowerCase();
   if (replacementHints.some((hint) => endpoints.includes(hint))) return "rail-replacement";
   if (cat === "BR" || cat === "BS" || cat.startsWith("B")) return "rail-replacement";
-  if (isPassenger) return "passenger";
   if (["4", "6", "7", "8"].includes(headcodeClass)) return "freight";
+  if (isPassenger) return "passenger";
   if (cat.startsWith("E") || cat.startsWith("F") || cat.startsWith("H") || cat.startsWith("J") || cat.startsWith("M")) {
     return "freight";
   }

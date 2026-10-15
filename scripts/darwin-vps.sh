@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Local helper for the netcup Darwin VPS (rail-core live boards).
-# Uses SSH host alias `netcup-darwin` (see ~/.ssh/config).
+# Local helper for the London Darwin VPS (rail-core live + staging query).
+# Uses SSH host alias `rail-core-lon` (see ~/.ssh/config).
 set -euo pipefail
 
-HOST="${DARWIN_VPS_HOST:-netcup-darwin}"
+HOST="${DARWIN_VPS_HOST:-rail-core-lon}"
 REMOTE_DIR="${RAIL_CORE_DIR:-/home/darwin/rail-core}"
 UNITS="rail-core-query rail-core-ingest rail-core-kafka rail-core-ptac"
 

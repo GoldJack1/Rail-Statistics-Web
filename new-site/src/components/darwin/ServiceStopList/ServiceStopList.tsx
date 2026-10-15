@@ -630,11 +630,27 @@ export function ServiceStopList({
   const reportedFull = historical
     ? null
     : inferProgressIndex(orderedStops, nowMins) ?? reportedIndex(orderedStops, location?.last?.tiploc)
-  // Detailed keeps every path tipoc (including unreported ones as "No report").
-  // Simple view drops working passes.
+  const stopHasActual = (stop: ServiceStop) =>
+    Boolean(trimSeconds(stop.atd || stop.ata || stop.atp)) || isActualLiveKind(stop.liveKind)
+  // Detailed keeps upcoming working passes as Due; drop densify rows the train
+  // has already gone past without a report (those were filling the list with "No report").
   const visible = orderedStops
     .map((stop, index) => ({ stop, index }))
-    .filter(({ stop }) => showPasses || slotKind(stop.slot) !== 'pass')
+    .filter(({ stop, index }) => {
+      const kind = slotKind(stop.slot)
+      if (!showPasses && kind === 'pass') return false
+      if (
+        showPasses &&
+        kind === 'pass' &&
+        !stopHasActual(stop) &&
+        String(stop.actualSource || '') === 'orm' &&
+        reportedFull != null &&
+        index < reportedFull
+      ) {
+        return false
+      }
+      return true
+    })
 
   if (visible.length === 0) {
     return <p className="unit-muted">No calling points on this service.</p>

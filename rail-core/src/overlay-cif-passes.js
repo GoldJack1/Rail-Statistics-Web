@@ -5,6 +5,7 @@
  */
 import { operatingDayYmd } from "./db.js";
 import { applyWorkingsOverlay, loadScheduleWorkings } from "./cif-overlay.js";
+import { stitchOrmPathsForDay } from "./orm-path.js";
 
 const file = process.argv[2];
 const ymd = process.argv[3] || operatingDayYmd();
@@ -17,5 +18,9 @@ if (!file) {
 const workings = await loadScheduleWorkings(file, ymd);
 const out = applyWorkingsOverlay(DATA_DIR, ymd, workings);
 console.log(
-  `overlay-cif-passes ${ymd} services=${out.services} inserted=${out.inserted} workings=${out.workings}`,
+  `overlay-cif-passes ${ymd} services=${out.services} inserted=${out.inserted} cifOnly=${out.cifOnly || 0} workings=${out.workings}`,
 );
+if (String(process.env.TT_ORM_PATH ?? "1").trim() !== "0") {
+  const stitch = stitchOrmPathsForDay(DATA_DIR, ymd, { scheduleFile: file });
+  console.log("overlay-cif-passes orm", stitch);
+}

@@ -1,10 +1,9 @@
 import type { ServiceViewMode } from '@/components/darwin/serviceViewMode'
 import { readServiceViewMode } from '@/components/darwin/serviceViewMode'
 
-export const SERVICE_SECTIONS = ['overview', 'loading', 'formation', 'calling', 'raw'] as const
+export const SERVICE_SECTIONS = ['overview', 'loading', 'formation', 'calling', 'map', 'raw'] as const
 export type ServiceSection = (typeof SERVICE_SECTIONS)[number]
 
-const SERVICE_MODES = ['simple', 'detailed'] as const
 const RETURN_KEY = 'rs.service.return'
 
 export function isServiceSection(value: string | null | undefined): value is ServiceSection {

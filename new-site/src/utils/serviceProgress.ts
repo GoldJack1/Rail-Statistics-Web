@@ -37,6 +37,20 @@ export function nextOpenIndex(stops: ServiceStop[], from: number): number | null
   return null
 }
 
+function isUnreportedOrmPass(stop: ServiceStop): boolean {
+  return isPassSlot(stop.slot) && String(stop.actualSource || '') === 'orm' && !hasActual(stop)
+}
+
+/** Next row that should count for live progress (skip densify ghosts). */
+export function nextProgressIndex(stops: ServiceStop[], from: number): number | null {
+  for (let i = from + 1; i < stops.length; i++) {
+    if (stops[i].cancelledAtStop) continue
+    if (isUnreportedOrmPass(stops[i])) continue
+    return i
+  }
+  return null
+}
+
 /**
  * Last calling-pattern row the train has reached: Darwin actuals, then
  * working pass times that have already elapsed since the last departure.
@@ -51,7 +65,7 @@ export function inferProgressIndex(stops: ServiceStop[], nowMins: number | null)
   if (nowMins == null) return lastActual
   let i = lastActual
   while (true) {
-    const next = nextOpenIndex(stops, i)
+    const next = nextProgressIndex(stops, i)
     if (next == null) return i
     const nxt = stops[next]
     if (hasActual(nxt)) {

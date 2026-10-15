@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copy PTAC SQLite off the VPS before any wipe. Does not copy overlay history.
 set -euo pipefail
-HOST="${DARWIN_VPS_HOST:-netcup-darwin}"
+HOST="${DARWIN_VPS_HOST:-rail-core-lon}"
 REMOTE="${DARWIN_VPS_DIR:-/home/darwin/darwin-local-test}/state/darwin-state.sqlite"
 OUT_DIR="${1:-./backups/ptac}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"

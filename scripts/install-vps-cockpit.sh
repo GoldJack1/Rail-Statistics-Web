@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run ON the VPS as root (after: ssh root@159.195.214.118)
+# Run ON the VPS as root (after: ssh rail-core-lon)
 # Cockpit listens only on 127.0.0.1:9090 — not on the public internet.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -21,5 +21,5 @@ systemctl enable --now cockpit.socket
 ss -tlnp | grep 9090 || true
 ufw status || true
 echo "Cockpit is localhost-only. From your Mac:"
-echo "  ssh -N -L 9090:127.0.0.1:9090 root@159.195.214.118"
+echo "  ssh -N -L 9090:127.0.0.1:9090 rail-core-lon"
 echo "Then open http://127.0.0.1:9090  (log in as darwin, not root)"

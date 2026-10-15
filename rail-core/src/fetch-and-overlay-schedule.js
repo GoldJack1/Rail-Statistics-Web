@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * ~06:30 Europe/London: fetch daily ITPS SCHEDULE, overlay onto Darwin,
- * then optional path enrichment (ORM stitch; legacy densify off by default).
+ * ~06:30 Europe/London: fetch daily ITPS JSON + CIF, overlay WTT onto Darwin
+ * (including CIF-only freight/ECS), then ORM mileage on that spine (no extra stops).
  *
  * TT_GEOM_DENSIFY=1 re-enables legacy geometry densify (off by default).
  * TT_ORM_PATH=0 disables ORM path stitch (on by default when graph present).

@@ -1,5 +1,5 @@
 [Unit]
-Description=rail-core ~06:30 UK ITPS SCHEDULE overlay + graph pass fill
+Description=rail-core ~06:30 UK ITPS JSON+CIF overlay, freight, ORM path
 After=network.target rail-core-tt.service
 
 [Service]

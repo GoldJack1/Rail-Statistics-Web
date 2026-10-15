@@ -9,7 +9,7 @@ import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
 import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
-import { dropUnreportedOrmPasses, overlayTdOnCalls } from "./query-enrich.js";
+import { dropOrmDensifyPasses, overlayTdOnCalls } from "./query-enrich.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
@@ -741,7 +741,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     ),
   );
   if (QUERY_ENV === "dev") {
-    calls = overlayTdOnCalls(db, dropUnreportedOrmPasses(calls), svc.headcode || svc.train_id);
+    calls = overlayTdOnCalls(db, dropOrmDensifyPasses(calls, catalog), svc.headcode || svc.train_id, catalog);
   }
   const units = Array.isArray(consist?.allocations)
     ? [...new Set(consist.allocations.flatMap((a) => (a.resourceGroups || []).map((g) => g.unitId).filter(Boolean)))]

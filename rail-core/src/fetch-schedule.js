@@ -134,7 +134,7 @@ async function fetchJsonFull() {
   return jsonPath;
 }
 
-async function fetchCifFallback() {
+async function fetchCifFallback({ asSupplement = false } = {}) {
   const gzPath = join(SCHED_DIR, "toc-full.CIF.gz");
   const cifPath = join(SCHED_DIR, "toc-full.CIF");
   await download(`${base}.CIF.gz`, gzPath);
@@ -149,13 +149,22 @@ async function fetchCifFallback() {
   } catch (err) {
     console.warn("CIF daily update skipped:", String(err.message || err));
   }
-  writeMeta({
-    source: "cif-weekly+update",
-    path: cifPath,
+  const cifMeta = {
+    cifPath,
     updatePath: existsSync(updatePath) ? updatePath : null,
     updateDay: day,
-    bytes: statSync(cifPath).size,
-  });
+    cifBytes: statSync(cifPath).size,
+  };
+  if (asSupplement) {
+    writeMeta({ ...(readItpsMeta() || {}), ...cifMeta });
+  } else {
+    writeMeta({
+      source: "cif-weekly+update",
+      path: cifPath,
+      bytes: statSync(cifPath).size,
+      ...cifMeta,
+    });
+  }
   console.log("ITPS CIF SCHEDULE ready", cifPath);
   return cifPath;
 }
@@ -177,6 +186,11 @@ export async function fetchItpsSchedule() {
 
   try {
     const path = await fetchJsonFull();
+    try {
+      await fetchCifFallback({ asSupplement: true });
+    } catch (cifErr) {
+      console.warn("ITPS CIF daily supplement failed:", String(cifErr.message || cifErr));
+    }
     return { path, meta: readItpsMeta() };
   } catch (err) {
     console.warn("ITPS JSON fetch failed:", String(err.message || err));

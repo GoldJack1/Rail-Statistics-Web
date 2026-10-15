@@ -26,6 +26,11 @@ function isRawTiplocName(name: string | null | undefined, tpl: string): boolean 
     && trimmedName.toUpperCase() === trimmedTpl.toUpperCase()
 }
 
+const TIPLOC_DISPLAY_NAMES: Record<string, string> = {
+  LINCLNC: 'Lincoln Central',
+  LVRPLCH: 'Liverpool Central',
+}
+
 const PLACE_STEMS: Record<string, string> = {
   ARML: 'Armley',
   APERLY: 'Apperley',
@@ -97,6 +102,8 @@ export function displayStopName(
 ): string {
   const stop = stops[idx]
   if (!stop) return ''
+  const override = TIPLOC_DISPLAY_NAMES[stop.tpl?.toUpperCase()]
+  if (override) return override
   const current = stop.name?.trim()
   if (current && !isRawTiplocName(current, stop.tpl)) return current
   const byTiplocName = fallbackNameLookup?.byTiploc.get(stop.tpl.toUpperCase())

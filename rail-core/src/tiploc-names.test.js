@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatTiplocName } from "./tiploc-names.js";
+import { formatTiplocName, tidyStationName } from "./tiploc-names.js";
 
 const hints = [
   { tiploc: "LEEDS", name: "Leeds" },
@@ -26,4 +26,10 @@ test("formats junction tiplocs", () => {
   assert.equal(formatTiplocName("LEEDSWJ", "Leeds West Junction"), "Leeds West Junction");
   assert.equal(formatTiplocName("LEEDS", "Leeds"), "Leeds");
   assert.equal(formatTiplocName("YORK", "York"), "York");
+});
+
+test("Lincoln Central and NaPTAN rail-station suffix", () => {
+  assert.equal(formatTiplocName("LINCLNC", "Lincoln"), "Lincoln Central");
+  assert.equal(tidyStationName("Lincoln Central Rail Station"), "Lincoln Central");
+  assert.equal(formatTiplocName("LVRPLCH", "Liverpool Cntrl (Northern)"), "Liverpool Central");
 });

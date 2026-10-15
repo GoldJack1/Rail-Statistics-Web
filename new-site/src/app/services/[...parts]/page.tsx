@@ -2,7 +2,8 @@
 
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
 import React, { useEffect, useMemo, useState } from 'react'
-import { ArrowsClockwise, ChartBar, Code, Info, MapPin, Train } from '@phosphor-icons/react'
+import dynamic from 'next/dynamic'
+import { ArrowsClockwise, ChartBar, Code, Info, MapPin, MapTrifold, Train } from '@phosphor-icons/react'
 
 import { useServiceDetail, useServiceDetails } from '@/hooks/useServiceDetail'
 import { useStations } from '@/hooks/useStations'
@@ -38,10 +39,19 @@ import {
 import { buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from '@/utils/splitWorking'
 import '../ServiceDetailPage.css'
 
+const ServiceJourneyMap = dynamic(
+  () => import('@/components/darwin/ServiceJourneyMap/ServiceJourneyMap').then((mod) => mod.ServiceJourneyMap),
+  {
+    ssr: false,
+    loading: () => <p className="edit-hint kb-source-hint">Loading map…</p>,
+  },
+)
+
 const BASE_SERVICE_SECTIONS: AccountSection[] = [
   { id: 'overview', label: 'Overview', icon: Info },
   { id: 'formation', label: 'Formation', icon: Train },
   { id: 'calling', label: 'Calling pattern', icon: MapPin },
+  { id: 'map', label: 'Map', icon: MapTrifold },
   { id: 'raw', label: 'Raw data', icon: Code },
 ]
 
@@ -788,6 +798,12 @@ const ServiceDetailPage: React.FC = () => {
             </section>
         )}
 
+        {data && section === 'map' && (
+          <section className="modal-section" aria-label="Journey map">
+            <StationSectionTitle title="Journey map" icon={MapTrifold} pageHeading />
+            <ServiceJourneyMap service={data} stations={stations} />
+          </section>
+        )}
 
         {data && section === 'raw' && (
           <section className="modal-section">

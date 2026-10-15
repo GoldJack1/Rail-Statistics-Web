@@ -7,9 +7,9 @@
 | VSTP | STOMP `VSTP_ALL` → `/ingest/vstp` (same-day STP WTT onto Darwin UID) |
 | TD | STOMP `TD_ALL_SIG_AREA` → `/ingest/td` (berth by headcode; SMART→STANOX→CORPUS TIPLOC when mapped) |
 | SMART | NROD `SupportingFileAuthenticate?type=SMART` → catalog `smart_steps` (after CORPUS) |
-| ITPS SCHEDULE | **~06:30 Europe/London** NROD daily **JSON** full; CIF weekly+update fallback. Overlay WTT spine, then **ORM path stitch** + along-track mileage |
+| ITPS SCHEDULE | **~06:30 Europe/London** NROD daily **JSON** full plus CIF weekly+update. Overlay WTT spine and CIF-only freight/ECS, then **ORM path stitch** + along-track mileage |
 | TIPLOC geo | `tt/ref/tiplocs-merged.csv` (+ NaPTAN gap-fill) → catalog `tiploc_geo` |
-| ORM path | catalog `orm_edges` (schedule tipoc pairs + geo kNN); stitches junction tipocs between known spine tipocs only |
+| ORM path | catalog `orm_edges` for **along-path mileage** between CIF/TRUST/TD tipocs — not extra calling-at rows |
 | PTAC | Kafka → `/ingest/unit` → catalog `consists` keyed **UID + SSD** |
 | PPTimetable | 04:00 **Europe/London** `DARWINTTFILES/PPTimetable` |
 | RDM NLC / CORPUS | after v8 import succeeds |

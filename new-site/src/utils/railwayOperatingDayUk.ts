@@ -63,6 +63,19 @@ export function railwayDayMinutesFromHhmm(hhmm: string): number | null {
   return clock < UK_RAILWAY_DAY_START_MINUTES ? clock + 24 * 60 : clock
 }
 
+/** Railway-day seconds from HH:MM[:SS], wrapping times before 02:00 onto the next calendar day. */
+export function railwayDaySecondsFromClock(raw: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?/.exec(String(raw || '').trim())
+  if (!match) return null
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  const second = Number(match[3] || 0)
+  if (hour > 23 || minute > 59 || second > 59) return null
+  let secs = hour * 3600 + minute * 60 + second
+  if (hour * 60 + minute < UK_RAILWAY_DAY_START_MINUTES) secs += 24 * 3600
+  return secs
+}
+
 export function scheduledTimeInCalendarWindow(
   scheduledTime: string,
   windowStartHhmm: string,

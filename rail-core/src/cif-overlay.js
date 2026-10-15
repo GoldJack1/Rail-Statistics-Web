@@ -1,7 +1,8 @@
 /**
  * Shared Darwin ← CIF/ITPS/VSTP working-timetable overlay.
  */
-import { createReadStream, openSync, readSync, closeSync } from "node:fs";
+import { createReadStream, existsSync, openSync, readSync, closeSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { createGunzip } from "node:zlib";
 import {
@@ -11,14 +12,17 @@ import {
   restoreCallLive,
   snapshotCallLive,
   upsertCall,
+  upsertService,
 } from "./db.js";
 import {
   cifBsRunsOn,
+  cifMatchesDarwinPublicPath,
   cifStpRank,
   cifWeekdayIndex,
   darwinScheduleAnchors,
   mergeDarwinCallsWithCifPasses,
   parseCifBsStock,
+  parseCifBxAtoc,
   parseCifLocation,
 } from "./cif-schedule.js";
 
@@ -32,41 +36,108 @@ export function openCifLines(path) {
   return createInterface({ input, crlfDelay: Infinity });
 }
 
-function rememberWorking(workings, working) {
+function rememberWorking(workings, working, preferLongest = false) {
   if (!working?.uid || !working.locs?.length) return;
   const prev = workings.get(working.uid);
-  if (!prev || working.rank >= prev.rank) workings.set(working.uid, working);
+  if (!prev) {
+    workings.set(working.uid, working);
+    return;
+  }
+  if (preferLongest) {
+    const longer = (working.locs.length || 0) > (prev.locs.length || 0);
+    const same = working.locs.length === prev.locs.length && working.rank >= prev.rank;
+    if (longer || same) workings.set(working.uid, working);
+    return;
+  }
+  if (working.rank >= prev.rank) workings.set(working.uid, working);
 }
 
-export async function loadCifWorkings(file, ymd) {
-  const workings = new Map();
+function bsWorking(line) {
+  const stock = parseCifBsStock(line);
+  return {
+    uid: line.slice(3, 9).trim().toUpperCase(),
+    rank: cifStpRank(line),
+    locs: [],
+    source: "cif",
+    powerType: stock.powerType,
+    timingLoad: stock.timingLoad,
+    trainStatus: line.slice(29, 30).toUpperCase() || null,
+    category: line.slice(30, 32).trim().toUpperCase() || null,
+    headcode: line.slice(32, 36).trim().toUpperCase() || null,
+    runsOnYmd: false,
+    toc: null,
+  };
+}
+
+export function isCifOnlyBoardWorking(working) {
+  if (String(working?.trainStatus || "").toUpperCase() === "F") return true;
+  const d = String(working?.headcode || "").charAt(0);
+  return ["0", "3", "4", "5", "6", "7", "8"].includes(d);
+}
+
+function locsAsDarwin(locs) {
+  return (locs || []).map((loc) => ({
+    tiploc: loc.tiploc,
+    sta: loc.pta,
+    std: loc.ptd,
+    is_passing: loc.passing ? 1 : 0,
+  }));
+}
+
+function pickWorkingLocs(today, longest) {
+  if (!today) return longest || null;
+  if (!longest || (longest.locs?.length || 0) <= (today.locs?.length || 0)) return today;
+  if (cifMatchesDarwinPublicPath(locsAsDarwin(today.locs), longest.locs)) {
+    return { ...today, locs: longest.locs, powerType: today.powerType || longest.powerType, timingLoad: today.timingLoad || longest.timingLoad };
+  }
+  return {
+    ...today,
+    longestLocs: longest.locs,
+    powerType: today.powerType || longest.powerType,
+    timingLoad: today.timingLoad || longest.timingLoad,
+  };
+}
+
+export async function loadCifWorkings(file, ymd, { preferLongest = false, ignoreYmd = false } = {}) {
+  const today = new Map();
+  const longest = new Map();
   let current = null;
-  const flush = () => rememberWorking(workings, current);
+  const flush = () => {
+    if (!current) return;
+    if (current.runsOnYmd) rememberWorking(today, current, false);
+    if (preferLongest || ignoreYmd) rememberWorking(longest, current, true);
+    else rememberWorking(today, current, false);
+  };
   for await (const line of openCifLines(file)) {
     const rec = line.slice(0, 2);
     if (rec === "BS") {
       flush();
       current = null;
-      if (!cifBsRunsOn(line, ymd)) continue;
-      const stock = parseCifBsStock(line);
-      current = {
-        uid: line.slice(3, 9).trim().toUpperCase(),
-        rank: cifStpRank(line),
-        locs: [],
-        source: "cif",
-        powerType: stock.powerType,
-        timingLoad: stock.timingLoad,
-      };
+      const txn = line.slice(2, 3).toUpperCase();
+      const stp = (line[79] || "").toUpperCase();
+      if (txn === "D" || stp === "C") continue;
+      const runs = cifBsRunsOn(line, ymd);
+      if (!ignoreYmd && !runs) continue;
+      current = { ...bsWorking(line), runsOnYmd: runs };
       continue;
     }
     if (!current) continue;
+    if (rec === "BX") {
+      current.toc = parseCifBxAtoc(line) || current.toc;
+      continue;
+    }
     if (rec === "LO" || rec === "LI" || rec === "LT") {
       const loc = parseCifLocation(rec, line);
       if (loc.tiploc) current.locs.push(loc);
     }
   }
   flush();
-  return workings;
+  if (!preferLongest && !ignoreYmd) return today;
+  const out = new Map(today);
+  for (const [uid, longW] of longest) {
+    out.set(uid, pickWorkingLocs(today.get(uid), longW) || longW);
+  }
+  return out;
 }
 
 function jsonStpRank(stp) {
@@ -115,9 +186,45 @@ export async function loadJsonWorkings(file, ymd) {
   return workings;
 }
 
+export function siblingCifPath(jsonFile) {
+  const dir = dirname(jsonFile);
+  const stem = basename(jsonFile).replace(/\.json(\.gz)?$/i, "");
+  for (const name of [`${stem}.CIF.gz`, `${stem}.CIF`, "toc-full.CIF.gz", "toc-full.CIF"]) {
+    const p = join(dir, name);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** Prefer the longer CIF WTT spine; keep JSON power type / timing load when present. */
+export function mergeJsonAndCifWorkings(jsonMap, cifMap) {
+  const out = new Map(jsonMap);
+  for (const [uid, cif] of cifMap) {
+    const j = out.get(uid);
+    const cifLen = cif?.locs?.length || 0;
+    const jsonLen = j?.locs?.length || 0;
+    if (!j || cifLen > jsonLen) {
+      out.set(uid, {
+        ...cif,
+        powerType: j?.powerType || cif.powerType || null,
+        timingLoad: j?.timingLoad || cif.timingLoad || null,
+        rank: Math.max(j?.rank || 0, cif.rank || 0),
+        runsOnYmd: Boolean(j || cif.runsOnYmd),
+      });
+    }
+  }
+  return out;
+}
+
 export async function loadScheduleWorkings(file, ymd) {
-  if (/\.json$/i.test(file)) return loadJsonWorkings(file, ymd);
-  return loadCifWorkings(file, ymd);
+  if (/\.json$/i.test(file)) {
+    const json = await loadJsonWorkings(file, ymd);
+    const cifFile = siblingCifPath(file);
+    if (!cifFile) return json;
+    const cif = await loadCifWorkings(cifFile, ymd, { preferLongest: true, ignoreYmd: true });
+    return mergeJsonAndCifWorkings(json, cif);
+  }
+  return loadCifWorkings(file, ymd, { preferLongest: true, ignoreYmd: true });
 }
 
 function hhmmFromSchedule(raw) {
@@ -228,18 +335,19 @@ export function applyWorkingsOverlay(dataDir, ymd, workings, { crsForTpl, statio
   for (const svc of darwinSvcs) {
     const working = workings.get(String(svc.uid).toUpperCase());
     if (!working?.locs.length) continue;
-    const locs = working.locs.map((loc) => ({
-      ...loc,
-      crs: loc.crs || resolveCrs(loc.tiploc),
-    }));
+    const withCrs = (locs) =>
+      (locs || []).map((loc) => ({
+        ...loc,
+        crs: loc.crs || resolveCrs(loc.tiploc),
+      }));
+    const locs = withCrs(working.locs);
     const darwinCalls = locStmt.all(svc.rid);
     // Overlay from passenger/live anchors so prior graph-fill detours are not kept.
-    const merged = mergeDarwinCallsWithCifPasses(darwinScheduleAnchors(darwinCalls), locs);
+    let merged = mergeDarwinCallsWithCifPasses(darwinScheduleAnchors(darwinCalls), locs);
+    if (working.longestLocs?.length) {
+      merged = mergeDarwinCallsWithCifPasses(merged, withCrs(working.longestLocs));
+    }
     const extra = merged.filter((c) => c.cifPass);
-    const sameLen = merged.length === darwinCalls.length;
-    const sameTpl =
-      sameLen && merged.every((c, i) => String(c.tiploc).toUpperCase() === String(darwinCalls[i].tiploc).toUpperCase());
-    if (!extra.length && sameTpl) continue;
     db.exec("BEGIN IMMEDIATE");
     try {
       const live = snapshotCallLive(db, svc.rid);
@@ -298,6 +406,93 @@ export function applyWorkingsOverlay(dataDir, ymd, workings, { crsForTpl, statio
     services++;
     inserted += extra.length;
   }
+
+  const existingUids = new Set(darwinSvcs.map((s) => String(s.uid).toUpperCase()));
+  const compact = String(ymd || "").replace(/-/g, "");
+  let cifOnly = 0;
+  if (/^\d{8}$/.test(compact)) {
+    const hasRid = db.prepare(`SELECT rid FROM services WHERE rid = ? OR uid = ? COLLATE NOCASE LIMIT 1`);
+    for (const [uid, working] of workings) {
+      if (existingUids.has(uid) || !working?.runsOnYmd || !isCifOnlyBoardWorking(working) || !working.locs?.length) {
+        continue;
+      }
+      const rid = `${compact}${uid}`;
+      if (hasRid.get(rid, uid)?.rid) continue;
+      const head = String(working.headcode || "").charAt(0);
+      const freight = working.trainStatus === "F" || ["4", "6", "7", "8"].includes(head);
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        upsertService(db, {
+          rid,
+          uid,
+          train_id: working.headcode || null,
+          rs_id: null,
+          toc: working.toc || null,
+          operator_name: working.toc || null,
+          origin_crs: null,
+          origin_name: null,
+          destination_crs: null,
+          destination_name: null,
+          via: null,
+          service_type: freight ? "freight" : "passenger",
+          cancelled: 0,
+          cancel_reason: null,
+          delay_reason: null,
+          is_charter: 0,
+          category: working.category || null,
+          headcode: working.headcode || null,
+          formation: null,
+          power_type: working.powerType || null,
+          timing_load: working.timingLoad || null,
+          updated_at: Date.now(),
+        });
+        working.locs.forEach((loc, seq) => {
+          const passing = Boolean(loc.passing) || Boolean(loc.wtp && !loc.wta && !loc.wtd && !loc.pta && !loc.ptd);
+          upsertCall(db, {
+            rid,
+            tiploc: loc.tiploc,
+            crs: loc.crs || resolveCrs(loc.tiploc),
+            seq,
+            is_passing: passing ? 1 : 0,
+            cancelled: 0,
+            platform: loc.platform ?? null,
+            length_cars: null,
+            formation: null,
+            sta: loc.pta ?? null,
+            std: loc.ptd ?? null,
+            wta: loc.wta ?? null,
+            wtd: loc.wtd ?? null,
+            wtp: passing ? loc.wtp || loc.wtd || null : loc.wtp ?? null,
+            path: loc.path ?? null,
+            line: loc.line ?? null,
+            ata: null,
+            atd: null,
+            atp: null,
+            eta: null,
+            etd: null,
+            etp: null,
+            delay_minutes: null,
+            status: null,
+            live_kind: "scheduled",
+            actual_source: "cif",
+            updated_at: Date.now(),
+          });
+        });
+        refreshServiceJourney(db, rid, resolveName);
+        db.exec("COMMIT");
+        cifOnly++;
+        inserted += working.locs.length;
+      } catch (err) {
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+          /* ignore */
+        }
+        throw err;
+      }
+    }
+  }
+
   db.exec("BEGIN IMMEDIATE");
   try {
     db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('itps_overlay_at', ?)`).run(
@@ -314,7 +509,7 @@ export function applyWorkingsOverlay(dataDir, ymd, workings, { crsForTpl, statio
   }
   db.close();
   catalog.close();
-  return { services, inserted, workings: workings.size };
+  return { services, inserted, cifOnly, workings: workings.size };
 }
 
 export function overlayOneWorking(dataDir, ymd, working) {

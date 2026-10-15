@@ -47,11 +47,19 @@ export function parseCifBxAtoc(line) {
   return /^[A-Z0-9]{2}$/.test(toc) ? toc : null;
 }
 
-/** CIF BS power type (47–49) and timing load (50–53), 1-based. */
+/** CIF BS power type (47–49), timing load (50–53), speed (54–57), 1-based. */
 export function parseCifBsStock(line) {
   if (!line || line.slice(0, 2) !== "BS") return { powerType: null, timingLoad: null };
-  const powerType = line.slice(46, 49).trim().toUpperCase() || null;
-  const timingLoad = line.slice(49, 53).trim().toUpperCase() || null;
+  const rawPower = line.slice(46, 49).trim().toUpperCase();
+  const rawLoad = line.slice(49, 53).trim().toUpperCase();
+  const speed = line.slice(53, 57).trim().toUpperCase();
+  const knownPower = /^(EMU|DMU|DEM|HST|ED|E|D)$/;
+  let powerType = rawPower && rawPower !== "000" ? rawPower : null;
+  let timingLoad = rawLoad || null;
+  if (!powerType && knownPower.test(rawLoad)) {
+    powerType = rawLoad;
+    timingLoad = /^\d+$/.test(speed) ? speed : null;
+  }
   return { powerType, timingLoad };
 }
 
@@ -215,6 +223,8 @@ export function darwinScheduleAnchors(calls) {
     const std = c?.std && String(c.std).slice(0, 5) !== "00:00";
     if (sta || std) return true;
     if (!Number(c?.is_passing)) return true;
+    const crs = String(c?.crs || "").trim().toUpperCase();
+    if (crs.length === 3 && !crs.startsWith("X")) return true;
     return false;
   });
   return anchors.length >= 2 ? anchors : rows;
@@ -244,6 +254,21 @@ export function cifMatchesDarwinPublicPath(darwinCalls, cifLocs) {
   return true;
 }
 
+function stampWorkingFromCif(d, loc) {
+  if (!d) return cifPassRow(loc);
+  if (!loc) return d;
+  const wtp = loc.wtp != null ? loc.wtp : loc.wta || loc.wtd ? null : (d.wtp ?? null);
+  return {
+    ...d,
+    wta: loc.wta ?? d.wta ?? null,
+    wtd: loc.wtd ?? d.wtd ?? null,
+    wtp,
+    path: loc.path ?? d.path ?? null,
+    line: loc.line ?? d.line ?? null,
+    platform: d.platform || loc.platform || null,
+  };
+}
+
 function mergeFullCifWtt(darwin, cif) {
   const byTpl = new Map();
   for (const c of darwin) byTpl.set(cifTpl(c), c);
@@ -253,16 +278,7 @@ function mergeFullCifWtt(darwin, cif) {
     const tpl = cifTpl(loc);
     const d = byTpl.get(tpl);
     if (d) {
-      // Keep Darwin live/public fields; prefer ITPS/CIF working times (fixes stale densify clocks).
-      // When CIF has a stop arrival/departure, drop a leftover Darwin pass time.
-      const wtp =
-        loc.wtp != null ? loc.wtp : loc.wta || loc.wtd ? null : (d.wtp ?? null);
-      out.push({
-        ...d,
-        wta: loc.wta ?? d.wta ?? null,
-        wtd: loc.wtd ?? d.wtd ?? null,
-        wtp,
-      });
+      out.push(stampWorkingFromCif(d, loc));
       used.add(tpl);
     } else {
       out.push(cifPassRow(loc));
@@ -293,18 +309,20 @@ function mergeCifBetweenDarwinAnchors(darwin, cif) {
   const out = [];
   let cifFrom = 0;
   for (let i = 0; i < darwin.length; i++) {
-    out.push(darwin[i]);
+    const iaHere = findCifTpl(cif, darwin[i].tiploc, 0);
+    out.push(iaHere >= 0 ? stampWorkingFromCif(darwin[i], cif[iaHere]) : darwin[i]);
     if (i === darwin.length - 1) break;
     const ia = findCifTpl(cif, darwin[i].tiploc, cifFrom);
     if (ia < 0) continue;
     const ib = findCifTpl(cif, darwin[i + 1].tiploc, ia + 1);
     if (ib < 0) continue;
     const extras = cif.slice(ia + 1, ib);
-    const mismatch = extras.some((loc) => cifLocIsPublic(loc) && !darwinSet.has(cifTpl(loc)));
-    if (mismatch) continue;
     for (const loc of extras) {
       const tpl = cifTpl(loc);
       if (darwinSet.has(tpl)) continue;
+      // Do not invent a Darwin-omitted public stop (Huddersfield diversion),
+      // but still insert working passes in the same span (Huyton / Rainhill).
+      if (cifLocIsPublic(loc)) continue;
       darwinSet.add(tpl);
       out.push(cifPassRow(loc));
     }

@@ -45,6 +45,7 @@ test("delay minutes wrap overnight", () => {
 test("classify passenger vs freight", () => {
   assert.equal(classifyServiceType({ trainCat: "XX", isPassenger: true, trainId: "1A01" }), "passenger");
   assert.equal(classifyServiceType({ trainCat: "EE", isPassenger: false, trainId: "6A01" }), "freight");
+  assert.equal(classifyServiceType({ trainCat: "XX", isPassenger: true, trainId: "6E45" }), "freight");
 });
 
 test("collapses next-day Darwin twin next to today's live row", () => {

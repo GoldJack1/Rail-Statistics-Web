@@ -3,12 +3,36 @@
  * overlay TD berth times onto matching spine tipocs without writing sqlite.
  */
 import { tdClock } from "./td-apply.js";
+import { resolveSmartTiploc } from "./import-smart.js";
+import { isNonPassengerLocation } from "./geometry-densify.js";
 
-export function dropUnreportedOrmPasses(calls) {
+function corpusMeta(catalog, tiploc) {
+  if (!catalog || !tiploc) return { name: "", crs: "" };
+  try {
+    const row = catalog
+      .prepare(`SELECT name, crs FROM corpus WHERE tiploc = ? COLLATE NOCASE`)
+      .get(String(tiploc).toUpperCase());
+    return { name: row?.name || "", crs: row?.crs || "" };
+  } catch {
+    return { name: "", crs: "" };
+  }
+}
+
+/** Keep ORM mids that are 3-letter passenger stations (RTT pass-throughs). Drop yards/jns. */
+export function dropOrmDensifyPasses(calls, catalog) {
   return (calls || []).filter((c) => {
     if (String(c.actual_source || "") !== "orm") return true;
-    return Boolean(c.ata || c.atd || c.atp);
+    const tpl = String(c.tiploc || "").toUpperCase();
+    const meta = corpusMeta(catalog, tpl);
+    const crs = String(c.crs || meta.crs || "").trim().toUpperCase();
+    if (crs.length !== 3 || crs.startsWith("X")) return false;
+    if (isNonPassengerLocation(tpl, { name: meta.name, crs })) return false;
+    return true;
   });
+}
+
+export function dropUnreportedOrmPasses(calls, catalog) {
+  return dropOrmDensifyPasses(calls, catalog);
 }
 
 function latestTdByTiploc(db, headcode) {
@@ -32,6 +56,21 @@ function latestTdByTiploc(db, headcode) {
   return byTpl;
 }
 
+function tdEventsForHeadcode(db, headcode) {
+  if (!headcode || !db) return [];
+  try {
+    return db
+      .prepare(
+        `SELECT tiploc, area_id, berth, from_berth, json, received_at FROM td_events
+         WHERE headcode = ? COLLATE NOCASE
+         ORDER BY received_at`,
+      )
+      .all(String(headcode).toUpperCase());
+  } catch {
+    return [];
+  }
+}
+
 function actualFromTdEvent(row) {
   let parsed = null;
   try {
@@ -43,8 +82,22 @@ function actualFromTdEvent(row) {
   return tdClock(body?.time || body?.report_time, row.received_at);
 }
 
-export function overlayTdOnCalls(db, calls, headcode) {
+export function overlayTdOnCalls(db, calls, headcode, catalog = null) {
   const byTpl = latestTdByTiploc(db, headcode);
+  if (catalog) {
+    const hints = new Set(
+      (calls || []).map((c) => String(c.tiploc || "").toUpperCase()).filter(Boolean),
+    );
+    for (const row of tdEventsForHeadcode(db, headcode)) {
+      if (row.tiploc) continue;
+      const mapped = resolveSmartTiploc(catalog, row.area_id, row.berth, row.from_berth, {
+        hintTiplocs: hints,
+      });
+      const tpl = mapped?.tiploc ? String(mapped.tiploc).toUpperCase() : "";
+      if (!tpl || byTpl.has(tpl)) continue;
+      byTpl.set(tpl, row);
+    }
+  }
   if (!byTpl.size) return calls || [];
   return (calls || []).map((c) => {
     if (c.ata || c.atd || c.atp) return c;

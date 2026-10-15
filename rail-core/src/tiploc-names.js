@@ -1,5 +1,19 @@
 /** Human names for TIPLOCs when Darwin locname is missing or is the raw code. */
 
+/** CORPUS often drops “Central”; NaPTAN/NRE keep it. */
+const TIPLOC_DISPLAY_NAMES = {
+  LINCLNC: "Lincoln Central",
+  LVRPLCH: "Liverpool Central",
+};
+
+export function tidyStationName(name) {
+  let s = String(name || "").trim();
+  if (!s) return s;
+  s = s.replace(/\s+Rail Stations?$/i, "").replace(/\s+Railway Station$/i, "");
+  s = s.replace(/\bCntrl\b/gi, "Central");
+  return s;
+}
+
 const SUFFIXES = [
   [/WESTJN$/, " West Junction"],
   [/EASTJN$/, " East Junction"],
@@ -83,7 +97,8 @@ function placeFromStem(rest) {
 
 export function formatTiplocName(tpl, officialName, catalogHints = []) {
   const key = String(tpl || "").trim().toUpperCase();
-  const official = officialName && String(officialName).trim();
+  if (TIPLOC_DISPLAY_NAMES[key]) return TIPLOC_DISPLAY_NAMES[key];
+  const official = tidyStationName(officialName && String(officialName).trim());
   if (official && official.toUpperCase() !== key) return official;
   if (official && official !== key) return official;
   if (!key) return null;

@@ -7,7 +7,7 @@ Do not put passwords in this file.
 SSH (Mac)
 ---------
 
-ssh root@159.195.214.118
+ssh rail-core-lon
 
 Then on the box you can run darwin-vps … (see below). Type exit to leave.
 
@@ -16,11 +16,11 @@ Cockpit GUI (already installed)
 -------------------------------
 
 Cockpit listens only on the VPS at 127.0.0.1:9090. It is not meant to be
-opened as https://159.195.214.118:9090/
+opened as https://173.208.50.199:9090/
 
 1. On the Mac, leave this Terminal window open:
 
-ssh -N -L 9090:127.0.0.1:9090 root@159.195.214.118
+ssh -N -L 9090:127.0.0.1:9090 rail-core-lon
 
 2. Browser: http://127.0.0.1:9090
 
@@ -59,8 +59,8 @@ darwin-vps start
 darwin-vps stop
 darwin-vps reboot
 
-The Mac ./scripts/darwin-vps.sh helper needed an extra SSH key that was
-removed, so those Mac one-liners do not work. Use SSH + darwin-vps, or Cockpit.
+From the Mac, ./scripts/darwin-vps.sh uses SSH host rail-core-lon
+(~/.ssh/newdarwin → 173.208.50.199). Or ssh in and run darwin-vps on the box.
 
 
 Overnight (timetables)

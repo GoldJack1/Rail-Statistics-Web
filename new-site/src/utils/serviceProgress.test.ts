@@ -54,6 +54,16 @@ describe('inferProgressIndex', () => {
   it('does not invent an arrival at York', () => {
     expect(inferProgressIndex(leedsYork, 12 * 60 + 40)).toBe(5)
   })
+
+  it('does not treat unreported ORM densify passes as progress', () => {
+    const withOrm = [
+      leedsYork[0],
+      stop('GHOST', 'Yard', 'PP', { wtp: '12:04', actualSource: 'orm' }),
+      ...leedsYork.slice(1),
+    ]
+    expect(inferProgressIndex(withOrm, 12 * 60 + 5)).toBe(0)
+    expect(inferProgressIndex(withOrm, 12 * 60 + 7)).toBe(2)
+  })
 })
 
 describe('betweenStationsLabel', () => {

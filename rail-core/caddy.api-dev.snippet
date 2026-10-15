@@ -10,6 +10,6 @@ api-dev.railstatistics.co.uk {
 			read_timeout 20s
 		}
 	}
-	header Access-Control-Allow-Origin *
-	header Access-Control-Allow-Methods "GET, OPTIONS"
+	# CORS comes from query-server only — duplicating Access-Control-Allow-Origin
+	# here makes browsers reject the response (banner/health fetch fails).
 }

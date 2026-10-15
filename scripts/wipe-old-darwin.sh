@@ -2,7 +2,7 @@
 # Stop old darwin units and remove overlay app tree ONLY after PTAC backup exists.
 # Does not delete Caddy, OS, or secret files you copy first.
 set -euo pipefail
-HOST="${DARWIN_VPS_HOST:-netcup-darwin}"
+HOST="${DARWIN_VPS_HOST:-rail-core-lon}"
 BACKUP_OK="${1:-./backups/ptac/BACKUP_OK}"
 REMOTE_OLD="${DARWIN_VPS_DIR:-/home/darwin/darwin-local-test}"
 REMOTE_NEW="${RAIL_CORE_DIR:-/home/darwin/rail-core}"

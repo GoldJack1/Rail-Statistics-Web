@@ -4,6 +4,7 @@ import {
   cifBsRunsOn,
   cifImportDayYmds,
   cifWeekdayIndex,
+  darwinScheduleAnchors,
   mergeDarwinCallsWithCifPasses,
   parseCifBxAtoc,
   parseCifBsStock,
@@ -93,6 +94,17 @@ test("CIF BS stock fields", () => {
   assert.equal(stock.timingLoad, "321");
 });
 
+test("CIF BS stock treats 000 + EMU800 as Azuma power/timing", () => {
+  const chars = "BS".padEnd(90, " ").split("");
+  const put = (from, text) => {
+    for (let i = 0; i < text.length; i++) chars[from + i] = text[i];
+  };
+  put(46, "000 EMU800 125");
+  const stock = parseCifBsStock(chars.join(""));
+  assert.equal(stock.powerType, "EMU");
+  assert.equal(stock.timingLoad, "800");
+});
+
 test("LI public times and platform", () => {
   let line = "LI".padEnd(80, " ");
   line = `LI${"WKFLDWG "}`.padEnd(80, " ");
@@ -151,6 +163,23 @@ test("full CIF merge prefers ITPS working times over stale Darwin wtp", () => {
   const merged = mergeDarwinCallsWithCifPasses(darwin, cif);
   assert.equal(merged.find((c) => c.tiploc === "STHBANK")?.wtp, "16:04");
   assert.equal(merged.find((c) => c.tiploc === "STHBANK")?.atp, "16:02");
+  assert.equal(merged.find((c) => c.tiploc === "REDCARC")?.wtd, "15:56");
+});
+
+test("CIF between-anchor merge stamps path/line onto Darwin stops", () => {
+  const darwin = [
+    { tiploc: "LEEDS", seq: 0, std: "10:00", is_passing: 0 },
+    { tiploc: "DWBY", seq: 1, sta: "10:10", is_passing: 0 },
+  ];
+  const cif = [
+    { tiploc: "LEEDS", wtd: "10:00", line: "F" },
+    { tiploc: "HOLBJCN", passing: true, wtp: "10:01", path: "SL" },
+    { tiploc: "DWBY", wta: "10:10", path: "A" },
+  ];
+  const merged = mergeDarwinCallsWithCifPasses(darwin, cif);
+  assert.equal(merged.find((c) => c.tiploc === "LEEDS")?.line, "F");
+  assert.equal(merged.find((c) => c.tiploc === "DWBY")?.path, "A");
+  assert.equal(merged.find((c) => c.tiploc === "HOLBJCN")?.wtp, "10:01");
 });
 
 test("CIF does not reinsert a public stop Darwin omitted (Huddersfield diversion)", () => {
@@ -172,4 +201,33 @@ test("CIF does not reinsert a public stop Darwin omitted (Huddersfield diversion
   const tpls = mergeDarwinCallsWithCifPasses(darwin, cif).map((c) => c.tiploc);
   assert.deepEqual(tpls, ["LEEDS", "LEEDSWJ", "HOLBJCN", "WHRDJN", "MRLY", "DWBY"]);
   assert.equal(tpls.includes("HDRSFLD"), false);
+});
+
+test("CIF between-anchor still inserts passes when a public extra is skipped", () => {
+  const darwin = [
+    { tiploc: "NWTNLW", seq: 0, std: "16:10", is_passing: 0 },
+    { tiploc: "LVRPLSH", seq: 1, sta: "16:40", is_passing: 0 },
+  ];
+  const cif = [
+    { tiploc: "NWTNLW", ptd: "16:10", wtd: "16:10" },
+    { tiploc: "HUYTON", passing: true, wtp: "16:20" },
+    { tiploc: "LEGR", pta: "16:15", ptd: "16:16" },
+    { tiploc: "EDGH", passing: true, wtp: "16:28" },
+    { tiploc: "LVRPLSH", pta: "16:40", wta: "16:40" },
+  ];
+  const tpls = mergeDarwinCallsWithCifPasses(darwin, cif).map((c) => c.tiploc);
+  assert.deepEqual(tpls, ["NWTNLW", "HUYTON", "EDGH", "LVRPLSH"]);
+});
+
+test("Darwin anchors keep 3-letter CRS pass stations", () => {
+  const calls = [
+    { tiploc: "YORK", sta: "14:00", is_passing: 0, crs: "YRK" },
+    { tiploc: "EGRFRTH", is_passing: 1, crs: "EGF", actual_source: "orm" },
+    { tiploc: "HOLBJCN", is_passing: 1, crs: null },
+    { tiploc: "LEEDS", sta: "14:30", is_passing: 0, crs: "LDS" },
+  ];
+  assert.deepEqual(
+    darwinScheduleAnchors(calls).map((c) => c.tiploc),
+    ["YORK", "EGRFRTH", "LEEDS"],
+  );
 });

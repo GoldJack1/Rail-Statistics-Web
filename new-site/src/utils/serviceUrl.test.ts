@@ -25,4 +25,11 @@ describe('service URLs', () => {
       '/services/G01161/2026-10-02/calling/detailed',
     )
   })
+
+  it('accepts the map section', () => {
+    expect(parseServicePath(['G15900', '2026-10-15', 'map', 'detailed']).section).toBe('map')
+    expect(serviceHref({ id: 'G15900', date: '2026-10-15', section: 'map', mode: 'detailed' })).toBe(
+      '/services/G15900/2026-10-15/map/detailed',
+    )
+  })
 })

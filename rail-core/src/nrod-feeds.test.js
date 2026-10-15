@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDayDb, upsertService } from "./db.js";
-import { scheduleJsonLocation, workingFromScheduleJson } from "./cif-overlay.js";
+import { isCifOnlyBoardWorking, mergeJsonAndCifWorkings, scheduleJsonLocation, workingFromScheduleJson } from "./cif-overlay.js";
 import { applyTdFrame, tdForHeadcode, tdMessages } from "./td-apply.js";
 import { vstpMessages } from "./vstp-apply.js";
 
@@ -18,6 +18,43 @@ test("SCHEDULE JSON location maps pass/public times", () => {
   assert.equal(loc.tiploc, "HOLBJCN");
   assert.equal(loc.wtp, "15:46");
   assert.equal(loc.passing, true);
+});
+
+test("CIF-only board workings are freight and ECS classes", () => {
+  assert.equal(isCifOnlyBoardWorking({ trainStatus: "F", headcode: "1Z99" }), true);
+  assert.equal(isCifOnlyBoardWorking({ trainStatus: "P", headcode: "6E45" }), true);
+  assert.equal(isCifOnlyBoardWorking({ trainStatus: "P", headcode: "9M13" }), false);
+});
+
+test("CIF working with more locations replaces sparse JSON", () => {
+  const json = new Map([
+    [
+      "G15900",
+      {
+        uid: "G15900",
+        rank: 1,
+        locs: [{ tiploc: "NWCSTLE" }, { tiploc: "DRHM" }],
+        powerType: "EMU",
+        timingLoad: "800",
+      },
+    ],
+  ]);
+  const cif = new Map([
+    [
+      "G15900",
+      {
+        uid: "G15900",
+        rank: 1,
+        locs: [{ tiploc: "NWCSTLE" }, { tiploc: "KEBGSJN" }, { tiploc: "DRHM" }],
+        powerType: "000",
+        timingLoad: "EMU",
+      },
+    ],
+  ]);
+  const merged = mergeJsonAndCifWorkings(json, cif);
+  assert.equal(merged.get("G15900").locs.length, 3);
+  assert.equal(merged.get("G15900").powerType, "EMU");
+  assert.equal(merged.get("G15900").timingLoad, "800");
 });
 
 test("VSTP schedule unwraps into a working", () => {

@@ -28,9 +28,7 @@ import {
   loadTiplocMeta,
 } from "./geometry-densify.js";
 import {
-  callClock,
   ensureTiplocGraphTable,
-  interpolateHm,
   loadAdjFromCatalog,
 } from "./tiploc-graph.js";
 
@@ -496,40 +494,8 @@ export function stitchCallsWithOrmPath(calls, adj, opts = {}) {
       geoIndex,
       scheduleAdj,
     });
-    const t0 = callClock(spine[i - 1]);
-    const t1 = callClock(cur);
-
-    if (hit?.mids?.length) {
-      const segMetres = hit.metres;
-      const stepM = hit.mids.length + 1;
-      // Distribute path metres across mid legs + final leg proportionally by hop count.
-      const perHop = segMetres / stepM;
-      for (let j = 0; j < hit.mids.length; j++) {
-        const tpl = hit.mids[j];
-        cum += perHop;
-        out.push({
-          tiploc: tpl,
-          crs: null,
-          is_passing: 1,
-          cancelled: 0,
-          platform: null,
-          sta: null,
-          std: null,
-          wta: null,
-          wtd: null,
-          wtp: interpolateHm(t0, t1, j, hit.mids.length),
-          live_kind: "scheduled",
-          actual_source: "orm",
-          ormPass: true,
-          leg_m: perHop,
-          cum_m: cum,
-        });
-        inserted++;
-      }
-      cum += perHop;
-      cur.leg_m = perHop;
-      cur.cum_m = cum;
-    } else if (hit && Number.isFinite(hit.metres)) {
+    // Mileage only — do not insert graph mids as calling-at rows (RTT is CIF + TRUST/TD).
+    if (hit && Number.isFinite(hit.metres)) {
       cum += hit.metres;
       cur.leg_m = hit.metres;
       cur.cum_m = cum;

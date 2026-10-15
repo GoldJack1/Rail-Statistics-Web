@@ -18,6 +18,7 @@ import { StationDetailsSubsection } from './StationDetailsSubsection'
 import { StationPendingChangesBanner } from './StationPendingChangesBanner'
 import { StationDetailsFieldGridSkeleton } from './StationDetailsSkeleton'
 import StationKnowledgebaseAlertBanner from './StationKnowledgebaseAlertBanner'
+import CarlisleFactCard from './CarlisleFactCard'
 import NetworkMessageAlertBanner from '@/components/stations/NetworkMessageAlertBanner'
 import { useNetworkMessages } from '@/hooks/useNetworkMessages'
 import { StationUsageAreaChart } from './StationUsageAreaChart'
@@ -556,6 +557,7 @@ const StationDetailsView: React.FC<StationDetailsViewProps> = ({
               )}
             </div>
           </StationDetailsSubsection>
+          <CarlisleFactCard crs={station.crsCode} />
 
           {(
             fieldSchema.showLinesServed ||
