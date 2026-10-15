@@ -23,6 +23,8 @@ type RailCoreCall = {
   coachLoading?: ServiceStop['coachLoading']
   legMiles?: number | null
   cumMiles?: number | null
+  path?: string | null
+  line?: string | null
 }
 
 function liveFromCall(c: RailCoreCall): { liveTime: string | null; liveKind: ServiceStop['liveKind'] } {
@@ -239,6 +241,8 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
         actualSource: c.actualSource ?? null,
         legMiles: typeof c.legMiles === 'number' ? c.legMiles : null,
         cumMiles: typeof c.cumMiles === 'number' ? c.cumMiles : null,
+        path: c.path ?? null,
+        line: c.line ?? null,
       }
     })
     return {
@@ -248,7 +252,12 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
       ssd: '',
       toc: String(b.toc || ''),
       tocName: b.tocName ? String(b.tocName) : b.operatorName ? String(b.operatorName) : null,
-      trainCat: null,
+      trainCat: b.trainCat ? String(b.trainCat) : null,
+      trainClass: b.trainClass ? String(b.trainClass) : null,
+      powerType: b.powerType ? String(b.powerType) : null,
+      timingLoad: b.timingLoad ? String(b.timingLoad) : null,
+      diagramNo: b.diagramNo ? String(b.diagramNo) : null,
+      diagramDate: b.diagramDate ? String(b.diagramDate) : null,
       isPassenger: String(b.serviceType || 'passenger') === 'passenger',
       origin: String(b.originCrs || ''),
       originName: b.originName ? String(b.originName) : null,

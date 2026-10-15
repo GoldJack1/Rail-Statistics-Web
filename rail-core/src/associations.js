@@ -696,11 +696,12 @@ export function publicDivideAssociations(associations, toc = null, journeyTpls =
   return [];
 }
 
-export function filterDisplayAssociations(associations, toc = null, journeyTpls = [], consist = null) {
+export function filterDisplayAssociations(associations, toc = null, journeyTpls = [], consist = null, opts = {}) {
+  const includeNonPassenger = Boolean(opts.includeNonPassenger);
   const mine = consist ? unitEnds(consist) : null;
   const keepMain = new Set(publicDivideAssociations(associations, toc, journeyTpls).map((a) => `${a.otherRid}|${a.tiploc}`));
   return (associations || []).filter((a) => {
-    if (!isPassengerHeadcode(a.otherTrainId)) return false;
+    if (!includeNonPassenger && !isPassengerHeadcode(a.otherTrainId)) return false;
     if (a.category === "VV" && mine) {
       const tpl = String(a.tiploc || "").toUpperCase();
       if (tpl && !originUnitContinuesPast(mine, tpl)) return false;

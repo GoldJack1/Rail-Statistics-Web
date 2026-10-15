@@ -446,3 +446,25 @@ test("display associations drop ECS and freight headcodes", () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0].otherTrainId, "1C64");
 });
+
+test("display associations can keep ECS and freight NP links", () => {
+  const rows = filterDisplayAssociations(
+    [
+      {
+        category: "NP",
+        role: "main",
+        otherRid: "N63312",
+        otherTrainId: "5P83",
+        tiploc: "MIA",
+        isCancelled: false,
+        isDeleted: false,
+      },
+    ],
+    null,
+    [],
+    null,
+    { includeNonPassenger: true },
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].otherTrainId, "5P83");
+});

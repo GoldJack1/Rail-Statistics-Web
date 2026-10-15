@@ -376,9 +376,9 @@ describe('previousNextWorkings', () => {
     expect(nextWorkingSentence(next[0])).toBe('This train then runs as 1P85 from Saltburn to Middlesbrough')
   })
 
-  it('drops ECS next portions', () => {
+  it('keeps ECS next portions', () => {
     const { previous, next } = previousNextWorkings([np('main', '5P85')])
     expect(previous).toEqual([])
-    expect(next).toEqual([])
+    expect(next[0]?.trainId).toBe('5P85')
   })
 })

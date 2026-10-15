@@ -248,7 +248,7 @@ export function previousNextWorkings(
   const previous: PortionWorking[] = []
   const next: PortionWorking[] = []
   for (const a of associations || []) {
-    if (a.category !== 'NP' || a.isDeleted || !isPassengerHeadcode(a.otherTrainId)) continue
+    if (a.category !== 'NP' || a.isDeleted) continue
     const partner = byId.get(a.otherRid) || byId.get(String(a.otherUid || '').toUpperCase())
     const ends = partnerEnds(partner)
     const trainId = a.otherTrainId || partner?.trainId || ''

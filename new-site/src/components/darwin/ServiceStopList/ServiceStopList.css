@@ -177,6 +177,14 @@
   color: var(--text-secondary);
 }
 
+.svc-stops-table .svc-stops-table__clock {
+  width: 1%;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  text-align: right;
+}
+
 .svc-stops-table .svc-stops-table__status {
   width: 1%;
   min-width: 0;

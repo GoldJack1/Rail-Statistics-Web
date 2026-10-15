@@ -273,6 +273,10 @@ export interface ServiceStop {
   legMiles?: number | null;
   /** Cumulative along-track miles from journey origin. */
   cumMiles?: number | null;
+  /** CIF/ITPS route path code. */
+  path?: string | null;
+  /** CIF/ITPS line code. */
+  line?: string | null;
 }
 
 export interface FormationCoach {
@@ -330,6 +334,11 @@ export interface ServiceDetail {
   toc: string;
   tocName: string | null;
   trainCat: string | null;
+  trainClass?: string | null;
+  powerType?: string | null;
+  timingLoad?: string | null;
+  diagramNo?: string | null;
+  diagramDate?: string | null;
   isPassenger: boolean;
   origin: string;
   originName: string | null;

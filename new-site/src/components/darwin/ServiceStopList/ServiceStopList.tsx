@@ -14,6 +14,7 @@ import type { ServiceViewMode } from '@/components/darwin/serviceViewMode'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
 import { betweenStationsLabel, inferProgressIndex } from '@/utils/serviceProgress'
 import { railwayDayMinutesFromHhmm } from '@/utils/railwayOperatingDayUk'
+import { isBetaSite } from '@/utils/localDevFlags'
 import '@/components/cards/StationsTableView/StationsTableView.css'
 import './ServiceStopList.css'
 
@@ -38,7 +39,11 @@ export function slotKind(slot: string): StopKind {
 }
 
 function trimSeconds(t: string | null | undefined): string {
-  return t ? t.slice(0, 5) : ''
+  if (!t) return ''
+  const s = String(t).trim()
+  const m = /^(\d{1,2}:\d{2})(½|:30)?/.exec(s)
+  if (!m) return s.slice(0, 5)
+  return m[2] === ':30' || m[2] === '½' ? `${m[1]}½` : m[1]
 }
 
 function platformSourceLabel(src: string | null | undefined): string | null {
@@ -318,6 +323,7 @@ function ServiceStopRow({
   )
   const code = (stop.tpl || stop.crs || '').toUpperCase()
   const detailed = viewMode === 'detailed'
+  const rttColumns = detailed && isBetaSite()
 
   const openDepartures = () => {
     if (!code) return
@@ -333,7 +339,17 @@ function ServiceStopRow({
     router.push(`/departures/${encodeURIComponent(code)}?${next.toString()}`)
   }
 
-  const colCount = detailed ? 6 : 4
+  const gbttArr = kind === 'pass' ? '' : (pArr || '')
+  const gbttDep = kind === 'pass' || kind === 'destination' ? '' : (pDep || '')
+  const wttArr = kind === 'pass' ? '' : (wArr || '')
+  const wttDep = kind === 'pass' ? (wPass || '') : kind === 'destination' ? '' : (wDep || wPass || '')
+  const rtArr = kind === 'pass' ? '' : trimSeconds(stop.ata || (kind === 'destination' ? stop.liveTime : null) || '')
+  const rtDep = kind === 'pass'
+    ? trimSeconds(stop.atp || stop.liveTime || '')
+    : kind === 'destination'
+      ? ''
+      : trimSeconds(stop.atd || (kind === 'origin' || kind === 'stop' ? stop.liveTime : null) || '')
+  const colCount = rttColumns ? 13 : detailed ? 6 : 4
 
   return (
     <>
@@ -379,6 +395,38 @@ function ServiceStopRow({
             <span className="svc-mono">{platformValue}</span>
           </span>
         </td>
+        {rttColumns ? (
+          <>
+            <td className="svc-stops-table__clock svc-mono">{gbttArr || ''}</td>
+            <td className="svc-stops-table__clock svc-mono">{gbttDep || ''}</td>
+            <td className="svc-stops-table__clock svc-mono">{wttArr || ''}</td>
+            <td className="svc-stops-table__clock svc-mono">{wttDep || ''}</td>
+            <td className="svc-stops-table__clock svc-mono">{rtArr || (kind !== 'pass' && kind !== 'origin' && status.verb === 'No report' ? '' : '')}</td>
+            <td className={`svc-stops-table__status${status.note || status.eta ? ' svc-stops-table__status--note' : ''}`}>
+              {status.verb === 'No report' && !rtDep && !rtArr ? (
+                <span className="svc-stops-table__status-main">No report</span>
+              ) : status.time ? (
+                <>
+                  {status.verb ? (
+                    <span className="svc-stops-table__status-main">
+                      {status.verb}
+                      {rtDep || rtArr ? null : <span className="svc-stops-table__status-at"> at</span>}
+                    </span>
+                  ) : null}
+                  {' '}
+                  <span className="svc-stops-table__status-meta">
+                    {rtDep || rtArr || status.time}
+                    {status.delay ? <span className="svc-stops-table__status-delay">{status.delay}</span> : null}
+                  </span>
+                </>
+              ) : (
+                <span className="svc-stops-table__status-main">{status.verb}</span>
+              )}
+            </td>
+            <td className="svc-stops-table__clock svc-mono">{stop.path || ''}</td>
+            <td className="svc-stops-table__clock svc-mono">{stop.line || ''}</td>
+          </>
+        ) : (
         <td className={`svc-stops-table__status${status.note || status.eta ? ' svc-stops-table__status--note' : ''}`}>
           {status.time ? (
             <>
@@ -416,6 +464,7 @@ function ServiceStopRow({
             <span className="svc-stops-table__status-main">{status.verb}</span>
           )}
         </td>
+        )}
         {detailed && (
           <td className="svc-stops-table__expand-cell">
             <button
@@ -641,7 +690,20 @@ export function ServiceStopList({
                 <span className="stations-table__sort-button">Station</span>
               </th>
               <th className="svc-stops-table__plat" scope="col"><span className="stations-table__sort-button">Plt</span></th>
-              <th className="svc-stops-table__status" scope="col"><span className="stations-table__sort-button">Status</span></th>
+              {viewMode === 'detailed' && isBetaSite() ? (
+                <>
+                  <th className="svc-stops-table__clock" scope="col"><span className="stations-table__sort-button">GBTT arr</span></th>
+                  <th className="svc-stops-table__clock" scope="col"><span className="stations-table__sort-button">GBTT dep</span></th>
+                  <th className="svc-stops-table__clock" scope="col"><span className="stations-table__sort-button">WTT arr</span></th>
+                  <th className="svc-stops-table__clock" scope="col"><span className="stations-table__sort-button">WTT dep</span></th>
+                  <th className="svc-stops-table__clock" scope="col"><span className="stations-table__sort-button">RT arr</span></th>
+                  <th className="svc-stops-table__status" scope="col"><span className="stations-table__sort-button">Realtime</span></th>
+                  <th className="svc-stops-table__clock" scope="col"><span className="stations-table__sort-button">Path</span></th>
+                  <th className="svc-stops-table__clock" scope="col"><span className="stations-table__sort-button">Line</span></th>
+                </>
+              ) : (
+                <th className="svc-stops-table__status" scope="col"><span className="stations-table__sort-button">Status</span></th>
+              )}
               {viewMode === 'detailed' && (
                 <th scope="col" className="svc-stops-table__expand-head">
                   <span className="visually-hidden">Details</span>
@@ -686,7 +748,7 @@ export function ServiceStopList({
                         : `Associated${head}`
                   return (
                     <tr key={`${a.category}-${a.otherRid}`} className="svc-stop-assoc">
-                      <td colSpan={viewMode === 'detailed' ? 6 : 4}>
+                      <td colSpan={viewMode === 'detailed' && isBetaSite() ? 13 : viewMode === 'detailed' ? 6 : 4}>
                         <a className="svc-stop-assoc-link" href={href}>
                           {text}
                         </a>

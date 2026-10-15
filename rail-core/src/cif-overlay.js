@@ -18,6 +18,7 @@ import {
   cifWeekdayIndex,
   darwinScheduleAnchors,
   mergeDarwinCallsWithCifPasses,
+  parseCifBsStock,
   parseCifLocation,
 } from "./cif-schedule.js";
 
@@ -47,11 +48,14 @@ export async function loadCifWorkings(file, ymd) {
       flush();
       current = null;
       if (!cifBsRunsOn(line, ymd)) continue;
+      const stock = parseCifBsStock(line);
       current = {
         uid: line.slice(3, 9).trim().toUpperCase(),
         rank: cifStpRank(line),
         locs: [],
         source: "cif",
+        powerType: stock.powerType,
+        timingLoad: stock.timingLoad,
       };
       continue;
     }
@@ -117,9 +121,12 @@ export async function loadScheduleWorkings(file, ymd) {
 }
 
 function hhmmFromSchedule(raw) {
-  const s = String(raw || "").replace(/\D/g, "");
-  if (s.length < 4) return null;
-  return `${s.slice(0, 2)}:${s.slice(2, 4)}`;
+  const m = String(raw || "")
+    .toUpperCase()
+    .match(/(\d{4})(H)?/);
+  if (!m) return null;
+  const hm = `${m[1].slice(0, 2)}:${m[1].slice(2, 4)}`;
+  return m[2] === "H" ? `${hm}½` : hm;
 }
 
 /** Convert one SCHEDULE/VSTP JSON location into the shape mergeDarwinCallsWithCifPasses expects. */
@@ -143,6 +150,8 @@ export function scheduleJsonLocation(loc) {
     pta,
     ptd,
     platform: loc.platform ? String(loc.platform).trim() : null,
+    line: loc.line ? String(loc.line).trim().toUpperCase() : null,
+    path: loc.path ? String(loc.path).trim().toUpperCase() : null,
     passing,
   };
 }
@@ -164,7 +173,16 @@ export function workingFromScheduleJson(schedule, { rank = 3, source = "vstp" } 
     }
   }
   if (!locs.length) return null;
-  return { uid, rank, locs, source, headcode: list[0]?.signalling_id || schedule.signalling_id || null };
+  const seg = list[0] || {};
+  return {
+    uid,
+    rank,
+    locs,
+    source,
+    headcode: seg.signalling_id || schedule.signalling_id || null,
+    powerType: String(seg.CIF_power_type || schedule.CIF_power_type || "").trim().toUpperCase() || null,
+    timingLoad: String(seg.CIF_timing_load || schedule.CIF_timing_load || "").trim().toUpperCase() || null,
+  };
 }
 
 export function applyWorkingsOverlay(dataDir, ymd, workings, { crsForTpl, stationName } = {}) {
@@ -243,6 +261,8 @@ export function applyWorkingsOverlay(dataDir, ymd, workings, { crsForTpl, statio
               wta: row.wta,
               wtd: row.wtd,
               wtp: row.wtp,
+              path: row.path ?? null,
+              line: row.line ?? null,
               ata: null,
               atd: null,
               atp: null,
@@ -261,6 +281,11 @@ export function applyWorkingsOverlay(dataDir, ymd, workings, { crsForTpl, statio
       }
       if (live.length) restoreCallLive(db, svc.rid, live);
       refreshServiceJourney(db, svc.rid, resolveName);
+      if (working.powerType || working.timingLoad) {
+        db.prepare(
+          `UPDATE services SET power_type=COALESCE(power_type, ?), timing_load=COALESCE(timing_load, ?) WHERE rid=?`,
+        ).run(working.powerType || null, working.timingLoad || null, svc.rid);
+      }
       db.exec("COMMIT");
     } catch (err) {
       try {

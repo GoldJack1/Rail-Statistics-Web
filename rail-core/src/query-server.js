@@ -8,7 +8,8 @@ import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
 import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
-import { isPassengerHeadcode } from "./headcode.js";
+import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
+import { dropUnreportedOrmPasses, overlayTdOnCalls } from "./query-enrich.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
@@ -730,14 +731,18 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     svc.toc,
     journeyTpls,
     consist,
+    { includeNonPassenger: QUERY_ENV === "dev" },
   );
   maybePersistInferred(db, resolvedRid, []);
-  const calls = dropOrmNearDuplicates(
+  let calls = dropOrmNearDuplicates(
     maskCallsAsOf(
       trimCallsToDestination(sortCallsByJourneyTime(dropCifTailAfterPublicTerminus(rawCalls)), svc),
       at,
     ),
   );
+  if (QUERY_ENV === "dev") {
+    calls = overlayTdOnCalls(db, dropUnreportedOrmPasses(calls), svc.headcode || svc.train_id);
+  }
   const units = Array.isArray(consist?.allocations)
     ? [...new Set(consist.allocations.flatMap((a) => (a.resourceGroups || []).map((g) => g.unitId).filter(Boolean)))]
     : [];
@@ -762,6 +767,8 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
       etp: c.etp,
       liveKind: c.live_kind,
       actualSource: c.actual_source,
+      path: c.path || null,
+      line: c.line || null,
       legM: c.leg_m ?? null,
       cumM: c.cum_m ?? null,
       legMiles: toMiles(c.leg_m),
@@ -801,6 +808,8 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
       loadingPercentage: c.loading_percentage ?? null,
       coachLoading: parseCoachLoading(c.coach_loading),
       actualSource: c.actualSource,
+      path: c.path,
+      line: c.line,
       legMiles: c.legMiles,
       cumMiles: c.cumMiles,
     };
@@ -820,10 +829,31 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
         tiplocName: stationName(null, td.tiploc) || null,
       };
     }
+    if (td?.areaId && (td.berth || td.fromBerth)) {
+      try {
+        const step = catalog
+          .prepare(
+            `SELECT from_line AS fromLine, to_line AS toLine, route, platform
+             FROM smart_steps
+             WHERE td_area = ? AND (to_berth = ? OR from_berth = ?)
+             LIMIT 1`,
+          )
+          .get(String(td.areaId).toUpperCase(), String(td.berth || "").toUpperCase(), String(td.fromBerth || td.berth || "").toUpperCase());
+        if (step) td = { ...td, ...step };
+      } catch {
+        /* SMART optional */
+      }
+    }
   } catch {
     td = null;
   }
   const ownDest = destStop?.name || stationName(destStop?.crs, destStop?.tpl) || svc.destination_name;
+  const diagramNo = Array.isArray(consist?.allocations)
+    ? consist.allocations.map((a) => a.diagramNo).find(Boolean) || null
+    : null;
+  const diagramDate = consist?.diagramDate || (Array.isArray(consist?.allocations)
+    ? consist.allocations.map((a) => a.diagramDate).find(Boolean) || null
+    : null);
   return {
     rid: svc.rid,
     uid: svc.uid,
@@ -832,6 +862,11 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     toc: svc.toc,
     tocName: tocDisplayName(svc.toc) || svc.operator_name,
     trainCat: svc.category,
+    trainClass: trainClassDigit(svc.headcode || svc.train_id),
+    powerType: svc.power_type || null,
+    timingLoad: svc.timing_load || null,
+    diagramNo,
+    diagramDate,
     isPassenger: svc.service_type !== "freight",
     origin: originStop?.crs || (originStop ? "" : svc.origin_crs) || "",
     originName: originStop?.name || stationName(originStop?.crs, originStop?.tpl) || svc.origin_name,

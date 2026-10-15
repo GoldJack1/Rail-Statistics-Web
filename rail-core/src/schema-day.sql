@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS services (
   is_charter INTEGER NOT NULL DEFAULT 0,
   category TEXT,
   headcode TEXT,
+  power_type TEXT,
+  timing_load TEXT,
   updated_at INTEGER NOT NULL
 );
 
@@ -51,6 +53,8 @@ CREATE TABLE IF NOT EXISTS calls (
   actual_source TEXT,
   leg_m REAL,
   cum_m REAL,
+  path TEXT,
+  line TEXT,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (rid, seq)
 );

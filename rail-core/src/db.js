@@ -25,6 +25,8 @@ export function openDayDb(dataDir, ymd, { timeout = 60_000 } = {}) {
   ensureServiceFormationColumn(db);
   ensureCallLoadingColumns(db);
   ensureCallMileageColumns(db);
+  ensureCallRouteColumns(db);
+  ensureServiceStockColumns(db);
   ensureAssociationsTable(db);
   ensureTdTables(db);
   return db;
@@ -95,6 +97,18 @@ function ensureCallMileageColumns(db) {
   const cols = new Set(db.prepare(`PRAGMA table_info(calls)`).all().map((c) => c.name));
   if (!cols.has("leg_m")) db.exec(`ALTER TABLE calls ADD COLUMN leg_m REAL`);
   if (!cols.has("cum_m")) db.exec(`ALTER TABLE calls ADD COLUMN cum_m REAL`);
+}
+
+function ensureCallRouteColumns(db) {
+  const cols = new Set(db.prepare(`PRAGMA table_info(calls)`).all().map((c) => c.name));
+  if (!cols.has("path")) db.exec(`ALTER TABLE calls ADD COLUMN path TEXT`);
+  if (!cols.has("line")) db.exec(`ALTER TABLE calls ADD COLUMN line TEXT`);
+}
+
+function ensureServiceStockColumns(db) {
+  const cols = new Set(db.prepare(`PRAGMA table_info(services)`).all().map((c) => c.name));
+  if (!cols.has("power_type")) db.exec(`ALTER TABLE services ADD COLUMN power_type TEXT`);
+  if (!cols.has("timing_load")) db.exec(`ALTER TABLE services ADD COLUMN timing_load TEXT`);
 }
 
 function ensureServiceFormationColumn(db) {
@@ -284,10 +298,10 @@ export function upsertService(db, row, opts = {}) {
   db.prepare(
     `INSERT INTO services (rid, uid, train_id, rs_id, toc, operator_name, origin_crs, origin_name,
       destination_crs, destination_name, via, service_type, cancelled, cancel_reason, delay_reason,
-      is_charter, category, headcode, formation, updated_at)
+      is_charter, category, headcode, formation, power_type, timing_load, updated_at)
      VALUES (@rid, @uid, @train_id, @rs_id, @toc, @operator_name, @origin_crs, @origin_name,
       @destination_crs, @destination_name, @via, @service_type, @cancelled, @cancel_reason, @delay_reason,
-      @is_charter, @category, @headcode, @formation, @updated_at)
+      @is_charter, @category, @headcode, @formation, @power_type, @timing_load, @updated_at)
      ON CONFLICT(rid) DO UPDATE SET
       uid=COALESCE(NULLIF(excluded.uid,''), services.uid),
       train_id=COALESCE(NULLIF(excluded.train_id,''), services.train_id),
@@ -305,8 +319,10 @@ export function upsertService(db, row, opts = {}) {
       category=COALESCE(excluded.category, services.category),
       headcode=COALESCE(NULLIF(excluded.headcode,''), services.headcode),
       formation=COALESCE(excluded.formation, services.formation),
+      power_type=COALESCE(excluded.power_type, services.power_type),
+      timing_load=COALESCE(excluded.timing_load, services.timing_load),
       updated_at=excluded.updated_at`
-  ).run({ ...row, formation: row.formation ?? null });
+  ).run({ ...row, formation: row.formation ?? null, power_type: row.power_type ?? null, timing_load: row.timing_load ?? null });
 }
 
 export function upsertCall(db, row, opts = {}) {
@@ -359,6 +375,8 @@ export function upsertCall(db, row, opts = {}) {
     actual_source: row.actual_source ?? null,
     leg_m: row.leg_m ?? null,
     cum_m: row.cum_m ?? null,
+    path: row.path ?? null,
+    line: row.line ?? null,
     updated_at: row.updated_at ?? Date.now(),
   };
   if (existing) {
@@ -368,7 +386,8 @@ export function upsertCall(db, row, opts = {}) {
           crs=COALESCE(crs, @crs),
           wta=COALESCE(wta, @wta), wtd=COALESCE(wtd, @wtd), wtp=COALESCE(wtp, @wtp),
           sta=COALESCE(sta, @sta), std=COALESCE(std, @std),
-          platform=COALESCE(platform, @platform)
+          platform=COALESCE(platform, @platform),
+          path=COALESCE(path, @path), line=COALESCE(line, @line)
          WHERE rid=@rid AND tiploc=@tiploc`,
       ).run({
         rid: payload.rid,
@@ -380,6 +399,8 @@ export function upsertCall(db, row, opts = {}) {
         sta: payload.sta,
         std: payload.std,
         platform: payload.platform,
+        path: payload.path,
+        line: payload.line,
       });
       return;
     }
@@ -451,6 +472,7 @@ export function upsertCall(db, row, opts = {}) {
         delay_minutes=@delay_minutes, status=@status, live_kind=@live_kind,
         actual_source=COALESCE(@actual_source, actual_source),
         leg_m=COALESCE(@leg_m, leg_m), cum_m=COALESCE(@cum_m, cum_m),
+        path=COALESCE(@path, path), line=COALESCE(@line, line),
         updated_at=@updated_at
        WHERE rid=@rid AND tiploc=@tiploc`
     ).run({
@@ -481,6 +503,8 @@ export function upsertCall(db, row, opts = {}) {
       actual_source: payload.actual_source,
       leg_m: payload.leg_m,
       cum_m: payload.cum_m,
+      path: payload.path,
+      line: payload.line,
       updated_at: payload.updated_at,
     });
     return;
@@ -489,11 +513,11 @@ export function upsertCall(db, row, opts = {}) {
     `INSERT INTO calls (rid, tiploc, crs, seq, is_passing, cancelled, platform, length_cars, formation,
       loading_percentage, coach_loading,
       sta, std, wta, wtd, wtp, ata, atd, atp, eta, etd, etp, delay_minutes, status, live_kind, actual_source,
-      leg_m, cum_m, updated_at)
+      leg_m, cum_m, path, line, updated_at)
      VALUES (@rid, @tiploc, @crs, @seq, @is_passing, @cancelled, @platform, @length_cars, @formation,
       @loading_percentage, @coach_loading,
       @sta, @std, @wta, @wtd, @wtp, @ata, @atd, @atp, @eta, @etd, @etp, @delay_minutes, @status, @live_kind, @actual_source,
-      @leg_m, @cum_m, @updated_at)`
+      @leg_m, @cum_m, @path, @line, @updated_at)`
   ).run(payload);
 }
 

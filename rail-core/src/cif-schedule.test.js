@@ -6,7 +6,9 @@ import {
   cifWeekdayIndex,
   mergeDarwinCallsWithCifPasses,
   parseCifBxAtoc,
+  parseCifBsStock,
   parseCifLocation,
+  parseCifTime,
 } from "./cif-schedule.js";
 
 function bs({ days = "0000100", stp = "P", txn = "N" } = {}) {
@@ -57,6 +59,38 @@ test("CIF public 0000 is not a passenger time", () => {
   assert.equal(loc.pta, null);
   assert.equal(loc.ptd, null);
   assert.equal(loc.passing, true);
+});
+
+test("CIF working times keep half-minutes", () => {
+  assert.equal(parseCifTime("1302H"), "13:02½");
+  assert.equal(parseCifTime("1302"), "13:02");
+});
+
+test("LI path and line and half-minute pass", () => {
+  const chars = "LI".padEnd(80, " ").split("");
+  const put = (from, text) => {
+    for (let i = 0; i < text.length; i++) chars[from + i] = text[i];
+  };
+  put(2, "LOWFLLJ ");
+  put(20, "1302H");
+  put(36, "UM ");
+  put(39, "UF ");
+  const loc = parseCifLocation("LI", chars.join(""));
+  assert.equal(loc.wtp, "13:02½");
+  assert.equal(loc.line, "UM");
+  assert.equal(loc.path, "UF");
+});
+
+test("CIF BS stock fields", () => {
+  const chars = "BS".padEnd(80, " ").split("");
+  const put = (from, text) => {
+    for (let i = 0; i < text.length; i++) chars[from + i] = text[i];
+  };
+  put(46, "EMU");
+  put(49, "321 ");
+  const stock = parseCifBsStock(chars.join(""));
+  assert.equal(stock.powerType, "EMU");
+  assert.equal(stock.timingLoad, "321");
 });
 
 test("LI public times and platform", () => {

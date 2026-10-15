@@ -595,7 +595,10 @@ const ServiceDetailPage: React.FC = () => {
                     data.stops[data.stops.length - 1]?.crs,
                   )}
                 />
-                <StationDetailField label="Headcode" value={data.trainId} />
+                <StationDetailField
+                  label="Headcode"
+                  value={data.trainClass ? `${data.trainId} · class ${data.trainClass}` : data.trainId}
+                />
                 <StationDetailField label="Origin" value={data.originName || data.origin} />
                 <StationDetailField label="Destination" value={destinationLabel || data.destinationName || data.destination} />
               </div>
@@ -615,8 +618,20 @@ const ServiceDetailPage: React.FC = () => {
                   />
                   <StationDetailField
                     label="Type"
-                    value={`${data.isPassenger ? 'Passenger' : 'Non-passenger'}${data.trainCat ? ` · ${data.trainCat}` : ''}`}
+                    value={`${data.isPassenger ? 'Passenger' : 'Non-passenger'}${data.trainClass ? ` · class ${data.trainClass}` : ''}${data.trainCat ? ` · ${data.trainCat}` : ''}`}
                   />
+                  {data.diagramNo || data.diagramDate ? (
+                    <StationDetailField
+                      label="Diagram"
+                      value={[data.diagramNo, data.diagramDate].filter(Boolean).join(' · ')}
+                    />
+                  ) : null}
+                  {data.powerType || data.timingLoad ? (
+                    <StationDetailField
+                      label="Traction"
+                      value={[data.powerType, data.timingLoad].filter(Boolean).join(' / ')}
+                    />
+                  ) : null}
                 </div>
               </SidebarDropdownSection>
             )}

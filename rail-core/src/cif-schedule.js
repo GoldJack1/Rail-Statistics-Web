@@ -26,9 +26,11 @@ export function cifImportDayYmds(startYmd, ahead, skipYmd) {
 }
 
 export function parseCifTime(raw) {
-  const t = String(raw || "").replace(/\s/g, "");
+  const t = String(raw || "").replace(/\s/g, "").toUpperCase();
   if (t.length < 4 || !/^\d{4}/.test(t)) return null;
-  return `${t.slice(0, 2)}:${t.slice(2, 4)}`;
+  const hm = `${t.slice(0, 2)}:${t.slice(2, 4)}`;
+  if (t.length >= 5 && t[4] === "H") return `${hm}½`;
+  return hm;
 }
 
 /** Public CIF 0000 is padding, not a midnight passenger time. */
@@ -45,9 +47,24 @@ export function parseCifBxAtoc(line) {
   return /^[A-Z0-9]{2}$/.test(toc) ? toc : null;
 }
 
+/** CIF BS power type (47–49) and timing load (50–53), 1-based. */
+export function parseCifBsStock(line) {
+  if (!line || line.slice(0, 2) !== "BS") return { powerType: null, timingLoad: null };
+  const powerType = line.slice(46, 49).trim().toUpperCase() || null;
+  const timingLoad = line.slice(49, 53).trim().toUpperCase() || null;
+  return { powerType, timingLoad };
+}
+
+function cifField(line, from, to) {
+  return String(line || "")
+    .slice(from, to)
+    .trim()
+    .toUpperCase() || null;
+}
+
 /**
- * LO / LI / LT calling-point times and platform (CIF End User spec).
- * Public times are 4 characters; working times are 5 (H=half-minute ignored).
+ * LO / LI / LT calling-point times, platform, line and path (CIF End User spec).
+ * Public times are 4 characters; working times are 5 (H = half-minute).
  */
 export function parseCifLocation(rec, line) {
   const tiploc = String(line || "")
@@ -64,7 +81,9 @@ export function parseCifLocation(rec, line) {
       wtp: null,
       pta: null,
       ptd,
-      platform: line.slice(19, 22).trim() || null,
+      platform: cifField(line, 19, 22),
+      line: cifField(line, 22, 25),
+      path: null,
       passing: false,
     };
   }
@@ -78,7 +97,9 @@ export function parseCifLocation(rec, line) {
       wtp: null,
       pta,
       ptd: null,
-      platform: line.slice(19, 22).trim() || null,
+      platform: cifField(line, 19, 22),
+      line: null,
+      path: cifField(line, 22, 25),
       passing: false,
     };
   }
@@ -96,7 +117,9 @@ export function parseCifLocation(rec, line) {
     wtp,
     pta,
     ptd,
-    platform: line.slice(33, 36).trim() || null,
+    platform: cifField(line, 33, 36),
+    line: cifField(line, 36, 39),
+    path: cifField(line, 39, 42),
     passing,
   };
 }
@@ -155,6 +178,8 @@ function cifPassRow(loc) {
     is_passing: passing ? 1 : 0,
     cancelled: 0,
     platform: loc.platform ?? null,
+    line: loc.line ?? null,
+    path: loc.path ?? null,
     sta: loc.pta ?? null,
     std: loc.ptd ?? null,
     wta: loc.wta ?? null,

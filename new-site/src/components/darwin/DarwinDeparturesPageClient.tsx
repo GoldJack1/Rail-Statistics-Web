@@ -31,6 +31,7 @@ import { prefetchDarwinService } from '@/hooks/useServiceDetail'
 import { goToServicePath } from '@/utils/serviceUrl'
 import { boardDestinationLabel } from '@/utils/splitWorking'
 import { formatLmTocName } from '@/utils/formatLmTocName'
+import { isBetaSite } from '@/utils/localDevFlags'
 import '@/styles/browsePageLayout.css'
 import '@/app/departures/DarwinDeparturesPage.css'
 
@@ -443,7 +444,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     date: historyDate || undefined,
     at: historyTime || undefined,
     historicalDayBoard: datedBoard && !historyTime,
-    cisMode: viewMode === 'simple',
+    cisMode: isBetaSite() ? false : viewMode === 'simple',
     initialSnapshot: hasStationSelected ? initialSnapshot : null,
   })
   const boardReady = !hasStationSelected || (status !== 'idle' && status !== 'loading')
