@@ -106,8 +106,16 @@ function mapStillMounted(map: L.Map | null, container: HTMLElement | null): map 
   return map.getContainer() === container
 }
 
-function validLatLngs(points: LatLngTuple[]): L.LatLngTuple[] {
-  return points.filter((p) => Array.isArray(p) && p.length >= 2 && isValidStationCoordinate(p[0], p[1]))
+function validLatLngs(points: Array<LatLngTuple | L.LatLngTuple>): LatLngTuple[] {
+  const out: LatLngTuple[] = []
+  for (const p of points) {
+    if (!Array.isArray(p) || p.length < 2) continue
+    const lat = p[0]
+    const lng = p[1]
+    if (!isValidStationCoordinate(lat, lng)) continue
+    out.push([lat, lng])
+  }
+  return out
 }
 
 function fitJourneyBounds(map: L.Map, points: LatLngTuple[]) {
