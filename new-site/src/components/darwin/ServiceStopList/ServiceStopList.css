@@ -593,6 +593,39 @@
   grid-column: 1 / -1;
 }
 
+.svc-stops-table .svc-stop-rtt {
+  grid-column: 1 / -1;
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 var(--space-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.svc-stops-table .svc-stop-rtt th,
+.svc-stops-table .svc-stop-rtt td {
+  padding: 6px 10px;
+  text-align: center;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  white-space: nowrap;
+}
+
+.svc-stops-table .svc-stop-rtt thead tr:first-child th {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.svc-stops-table .svc-stop-rtt thead tr:last-child th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.svc-stops-table .svc-stop-rtt tbody td {
+  font-size: var(--text-sm);
+}
+
 .svc-stops-table .visually-hidden {
   position: absolute;
   width: 1px;
