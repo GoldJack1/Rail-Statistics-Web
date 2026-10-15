@@ -1,9 +1,11 @@
 import { Agent, fetch as undiciFetch } from 'undici'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireDarwinAdmin } from '@/app/api/darwin/_lib/requireDarwinAdmin'
-import { isLocalDarwinOrigin, resolveDarwinApiOrigin } from '@/utils/darwinApiOrigin'
+import { isLocalDarwinOrigin, resolveDarwinApiOrigin, resolveDarwinLiveApiOrigin } from '@/utils/darwinApiOrigin'
+import { isBetaSite } from '@/utils/localDevFlags'
+import { DARWIN_QUERY_ENV_COOKIE, parseDarwinQueryEnv } from '@/utils/darwinQueryEnvPreference'
 
-/** Reuse TLS to the VPS across warm Netlify isolates (Ohio→Germany was ~8s per live board). */
+/** Reuse TLS to the London VPS across warm Netlify isolates. */
 const darwinUpstreamAgent = new Agent({
   keepAliveTimeout: 30_000,
   keepAliveMaxTimeout: 60_000,
@@ -27,7 +29,10 @@ function londonYmdNow(): string {
   }).format(new Date())
 }
 
-function resolveUpstreamOrigin(_request: NextRequest, _pathSegments: string[]): string {
+function resolveUpstreamOrigin(request: NextRequest, _pathSegments: string[]): string {
+  if (isBetaSite() && parseDarwinQueryEnv(request.cookies.get(DARWIN_QUERY_ENV_COOKIE)?.value) === 'live') {
+    return resolveDarwinLiveApiOrigin()
+  }
   return resolveDarwinApiOrigin()
 }
 

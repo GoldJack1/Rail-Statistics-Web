@@ -1,6 +1,17 @@
+import { cookies } from 'next/headers'
 import type { DeparturesSnapshot } from '@/types/darwin'
-import { resolveDarwinApiOrigin } from '@/utils/darwinApiOrigin'
+import { resolveDarwinApiOrigin, resolveDarwinLiveApiOrigin } from '@/utils/darwinApiOrigin'
+import { isBetaSite } from '@/utils/localDevFlags'
+import { DARWIN_QUERY_ENV_COOKIE, parseDarwinQueryEnv } from '@/utils/darwinQueryEnvPreference'
 import { normalizeDeparturesSnapshot } from '@/utils/normalizeRailCore'
+
+async function originForSnapshot(): Promise<string> {
+  if (isBetaSite()) {
+    const pref = parseDarwinQueryEnv((await cookies()).get(DARWIN_QUERY_ENV_COOKIE)?.value)
+    if (pref === 'live') return resolveDarwinLiveApiOrigin()
+  }
+  return resolveDarwinApiOrigin()
+}
 
 export async function loadDeparturesSnapshot(opts: {
   code: string
@@ -11,7 +22,7 @@ export async function loadDeparturesSnapshot(opts: {
 }): Promise<DeparturesSnapshot | null> {
   const code = opts.code.trim().toUpperCase()
   if (!code) return null
-  const url = new URL(`/api/departures/${encodeURIComponent(code)}`, resolveDarwinApiOrigin())
+  const url = new URL(`/api/departures/${encodeURIComponent(code)}`, await originForSnapshot())
   url.searchParams.set('hours', String(opts.hours))
   if (opts.date) url.searchParams.set('date', opts.date)
   if (opts.at) url.searchParams.set('at', opts.at)

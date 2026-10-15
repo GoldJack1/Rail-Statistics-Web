@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fetchDarwin, resolveDarwinBrowserUrl } from './darwinReadyFetch'
+import { DARWIN_QUERY_ENV_COOKIE } from './darwinQueryEnvPreference'
 
 describe('resolveDarwinBrowserUrl', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
   })
 
   it('keeps relative proxy URLs on localhost', () => {
@@ -34,6 +36,20 @@ describe('resolveDarwinBrowserUrl', () => {
     )
     expect(resolveDarwinBrowserUrl('/api/darwin/history/dates')).toBe(
       'https://api-raildata.railstatistics.co.uk/api/history/dates',
+    )
+  })
+
+  it('on the beta site, uses api-dev unless the live cookie is set', () => {
+    vi.stubEnv('NEXT_PUBLIC_BETA_SITE', 'true')
+    vi.stubEnv('NEXT_PUBLIC_DARWIN_BROWSER_ORIGIN', 'https://api-dev.railstatistics.co.uk')
+    vi.stubGlobal('window', { location: { hostname: 'beta.railstatistics.co.uk' } })
+    vi.stubGlobal('document', { cookie: '' })
+    expect(resolveDarwinBrowserUrl('/api/darwin/health')).toBe(
+      'https://api-dev.railstatistics.co.uk/api/health',
+    )
+    vi.stubGlobal('document', { cookie: `${DARWIN_QUERY_ENV_COOKIE}=live` })
+    expect(resolveDarwinBrowserUrl('/api/darwin/health')).toBe(
+      'https://api-raildata.railstatistics.co.uk/api/health',
     )
   })
 })

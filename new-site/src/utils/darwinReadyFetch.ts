@@ -1,3 +1,10 @@
+import { isBetaSite } from '@/utils/localDevFlags'
+import {
+  PUBLIC_DARWIN_DEV_ORIGIN,
+  PUBLIC_DARWIN_LIVE_ORIGIN,
+  readDarwinQueryEnvPreference,
+} from '@/utils/darwinQueryEnvPreference'
+
 /**
  * Darwin daemon may return 503 { error: 'starting' } while caches restore after restart.
  * This wrapper waits with backoff instead of hammering the VM or surfacing a hard error.
@@ -50,8 +57,15 @@ export function resolveDarwinBrowserUrl(input: string): string {
   if (!input.startsWith('/api/darwin')) return input
   if (input.startsWith('/api/darwin/admin')) return input
   if (!shouldUseDirectDarwinHost()) return input
-  const origin = (process.env.NEXT_PUBLIC_DARWIN_BROWSER_ORIGIN || PUBLIC_DARWIN_ORIGIN).replace(/\/$/, '')
+  const origin = resolveDarwinBrowserOrigin().replace(/\/$/, '')
   return origin + input.replace(/^\/api\/darwin(?=\/|$)/, '/api')
+}
+
+function resolveDarwinBrowserOrigin(): string {
+  const fromEnv = (process.env.NEXT_PUBLIC_DARWIN_BROWSER_ORIGIN || PUBLIC_DARWIN_ORIGIN).replace(/\/$/, '')
+  if (!isBetaSite()) return fromEnv
+  if (readDarwinQueryEnvPreference() === 'live') return PUBLIC_DARWIN_LIVE_ORIGIN
+  return fromEnv || PUBLIC_DARWIN_DEV_ORIGIN
 }
 
 /**

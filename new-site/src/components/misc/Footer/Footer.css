@@ -138,6 +138,17 @@
   text-decoration: underline;
 }
 
+.site-footer-primary-end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-shrink: 0;
+}
+
+.site-footer-api-toggle {
+  margin-right: 0;
+}
+
 .site-footer-theme-toggle {
   margin: 0;
   padding: 0;
@@ -231,7 +242,7 @@
     display: grid;
     grid-template-columns: 1fr auto;
     grid-template-areas:
-      'brand theme'
+      'brand end'
       'links links';
     align-items: center;
     column-gap: var(--space-md);
@@ -249,9 +260,10 @@
     justify-content: flex-start;
   }
 
-  .site-footer-theme-toggle {
-    grid-area: theme;
+  .site-footer-primary-end {
+    grid-area: end;
     justify-self: end;
+    margin-left: 0;
   }
 
   .site-footer-links {

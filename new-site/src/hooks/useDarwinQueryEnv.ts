@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
+import type { DarwinQueryEnv } from '@/utils/darwinQueryEnvPreference'
 
-export type DarwinQueryEnv = 'live' | 'dev'
+export type { DarwinQueryEnv }
 
 export function darwinQueryEnvLabel(env: DarwinQueryEnv): string {
   return env === 'dev' ? 'THIS IS THE DEV API' : 'THIS IS THE LIVE API'

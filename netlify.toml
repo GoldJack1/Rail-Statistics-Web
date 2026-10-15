@@ -37,6 +37,7 @@
   NEXT_PUBLIC_BETA_SITE = "true"
   NEXT_PUBLIC_SITE_URL = "https://beta.railstatistics.co.uk"
   DARWIN_API_ORIGIN = "https://api-dev.railstatistics.co.uk"
+  DARWIN_API_ORIGIN_LIVE = "https://api-raildata.railstatistics.co.uk"
   NEXT_PUBLIC_DARWIN_BROWSER_ORIGIN = "https://api-dev.railstatistics.co.uk"
 
 [[plugins]]

@@ -9,6 +9,7 @@ import { useIsStationEditor } from '../../../hooks/useIsStationEditor'
 import { useTheme } from '../../../hooks/useTheme'
 import { isAccountSystemEnabled } from '@/lib/accountSystemConfig'
 import { isLocalDevLoginBypassEnabled } from '@/utils/localDevFlags'
+import { useBetaDarwinApiToggle } from '@/hooks/useBetaDarwinApiToggle'
 import {
   useDarwinNavPagesVisible,
   useDarwinPublicPagesVisible,
@@ -35,6 +36,7 @@ const Footer: React.FC = () => {
   const adminModeActive = useStationAdminMode()
   const showDarwinNav = useDarwinNavPagesVisible()
   const showDarwinPublic = useDarwinPublicPagesVisible()
+  const betaApi = useBetaDarwinApiToggle()
   const loginTapRef = useRef({ count: 0, lastAt: 0 })
   const syncAdminSearchParam =
     pathname === '/stations' ||
@@ -133,6 +135,18 @@ const Footer: React.FC = () => {
               EULA
             </BUTFooterLink>
           </div>
+          <div className="site-footer-primary-end">
+            {betaApi.show && betaApi.ready ? (
+              <div className="site-footer-admin-toggle site-footer-api-toggle">
+                <span className="site-footer-admin-toggle__label">Beta API</span>
+                <TOGToggleVisited
+                  checked={betaApi.env === 'dev'}
+                  onChange={betaApi.setUseBetaApi}
+                  ariaLabel="Use beta Darwin API"
+                  className="site-footer-admin-toggle__control"
+                />
+              </div>
+            ) : null}
           <BUTFooterLink onActivate={toggleTheme} className="site-footer-theme-toggle" ariaLabel="Toggle theme">
             <span className="site-footer-theme-toggle__icon site-footer-theme-toggle__icon--sun" aria-hidden>
               <Sun className="site-footer-theme-toggle__glyph site-footer-theme-toggle__glyph--bold" size={16} weight="bold" />
@@ -143,6 +157,7 @@ const Footer: React.FC = () => {
               <Moon className="site-footer-theme-toggle__glyph site-footer-theme-toggle__glyph--fill" size={16} weight="fill" />
             </span>
           </BUTFooterLink>
+          </div>
         </div>
         {isEditor ? (
           <div className="site-footer-secondary-row">

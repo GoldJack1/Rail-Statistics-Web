@@ -2,12 +2,7 @@ import dns from 'node:dns'
 
 dns.setDefaultResultOrder('ipv4first')
 
-export function resolveDarwinApiOrigin(): string {
-  const fromEnv = (process.env.DARWIN_API_ORIGIN || '').trim()
-  let origin = fromEnv
-    || (process.env.NODE_ENV !== 'production'
-      ? 'http://127.0.0.1:4001'
-      : 'https://api-raildata.railstatistics.co.uk')
+function normalizeOrigin(origin: string): string {
   origin = origin.replace(/\/$/, '')
   try {
     const url = new URL(origin)
@@ -19,6 +14,20 @@ export function resolveDarwinApiOrigin(): string {
     /* keep as-is */
   }
   return origin
+}
+
+export function resolveDarwinApiOrigin(): string {
+  const fromEnv = (process.env.DARWIN_API_ORIGIN || '').trim()
+  const origin = fromEnv
+    || (process.env.NODE_ENV !== 'production'
+      ? 'http://127.0.0.1:4001'
+      : 'https://api-raildata.railstatistics.co.uk')
+  return normalizeOrigin(origin)
+}
+
+export function resolveDarwinLiveApiOrigin(): string {
+  const fromEnv = (process.env.DARWIN_API_ORIGIN_LIVE || '').trim()
+  return normalizeOrigin(fromEnv || 'https://api-raildata.railstatistics.co.uk')
 }
 
 export function isLocalDarwinOrigin(origin: string): boolean {
