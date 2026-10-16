@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { applyLiveToInferred, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, overlayTdOnCalls, reportsForService } from "./query-enrich.js";
+import { applyLiveToInferred, carryRunningLateness, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, overlayTdOnCalls, reportsForService } from "./query-enrich.js";
 import { openDayDb } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
 import { mkdtempSync } from "node:fs";
@@ -49,6 +49,25 @@ test("reportsForService ignores another train on the same headcode and a point o
     coords,
   );
   assert.deepEqual(out.map((row) => row.tiploc), ["UPRMILL"]);
+});
+
+test("carryRunningLateness holds the last real delay and stays in order", () => {
+  const out = carryRunningLateness([
+    { tiploc: "SLAITHW", is_passing: 1, wtp: "19:53", atp: "20:00", actual_source: "td" },
+    { tiploc: "SPWDJN", is_passing: 1, atp: "20:06", actual_source: "inferred" },
+    { tiploc: "HUDDERS", is_passing: 0, wta: "19:58", wtd: "20:01", ata: "20:05", atd: "20:06", actual_source: "trust" },
+    { tiploc: "HOLBJCN", is_passing: 1, wtp: "20:19", actual_source: "inferred" },
+    { tiploc: "LEEDS", is_passing: 0, wta: "20:22", wtd: "20:27", eta: "20:22", etd: "20:27" },
+    { tiploc: "NCL", is_passing: 0, wta: "21:26", eta: "21:31" },
+  ]);
+  assert.equal(out[0].atp, "20:00");
+  assert.equal(out[1].atp, null);
+  assert.equal(out[1].etp, "20:05");
+  assert.equal(out[2].atd, "20:06");
+  assert.equal(out[3].etp, "20:24");
+  assert.equal(out[4].etd, "20:32");
+  assert.equal(out[4].eta, "20:27");
+  assert.equal(out[5].eta, "21:31");
 });
 
 test("dropUnreportedOrmPasses keeps stations and named junctions, and drops yards", () => {

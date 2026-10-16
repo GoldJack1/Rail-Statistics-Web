@@ -315,6 +315,115 @@ export function applyLiveToInferred(db, calls, trainId, catalog = null) {
   return rows;
 }
 
+function shownMinute(call) {
+  return hmToMin(call?.atd || call?.ata || call?.etd || call?.atp || call?.etp || call?.eta);
+}
+
+function isRealActual(call) {
+  if (String(call?.actual_source || "") === "inferred") return false;
+  return Boolean(call?.atd || call?.ata || call?.atp);
+}
+
+function runningLateness(call) {
+  const pairs = [
+    [call.atd, call.wtd || call.ptd],
+    [call.ata, call.wta || call.pta],
+    [call.atp, call.wtp || call.wtd || call.wta],
+  ];
+  for (const [live, booked] of pairs) {
+    const l = hmToMin(live);
+    const b = hmToMin(booked);
+    if (l == null || b == null) continue;
+    return unwrapMinute(l, b) - b;
+  }
+  return null;
+}
+
+function softerThan(call, late) {
+  const booked = hmToMin(call.wtd || call.ptd || call.wta || call.pta || call.wtp);
+  const shown = shownMinute(call);
+  if (booked == null) return false;
+  if (shown == null) return true;
+  return unwrapMinute(shown, booked) - booked < late;
+}
+
+function writeCarried(call, late) {
+  let wrote = false;
+  for (const [key, booked] of [
+    ["etd", call.wtd || call.ptd],
+    ["eta", call.wta || call.pta],
+    ["etp", call.wtp],
+  ]) {
+    const base = hmToMin(booked);
+    if (base == null) continue;
+    call[key] = minToHm(base + late);
+    wrote = true;
+  }
+  if (!wrote) return;
+  if (String(call.actual_source || "") === "inferred") {
+    call.atp = null;
+    call.ata = null;
+    call.atd = null;
+  }
+  call.live_kind = "est";
+}
+
+function setShownMinute(call, minute) {
+  const clock = minToHm(minute);
+  if (call.etd) call.etd = clock;
+  else if (call.eta && !call.wtd && !call.ptd) call.eta = clock;
+  else if (call.etp || call.wtp || String(call.actual_source || "") === "inferred") {
+    call.etp = clock;
+    if (String(call.actual_source || "") === "inferred") call.atp = null;
+  } else call.etp = clock;
+  call.live_kind = call.live_kind === "actual" || call.live_kind === "actual-arr" ? "est" : call.live_kind || "est";
+}
+
+/**
+ * A later public call often still carries the booked time, so a train that is
+ * late snaps back to right time and the next estimate can be earlier than the
+ * one before it. Hold the last real lateness, and keep an estimate inside the
+ * reports on either side.
+ */
+export function carryRunningLateness(calls) {
+  const rows = (calls || []).map((c) => ({ ...c }));
+  let late = null;
+  for (const call of rows) {
+    if (!isRealActual(call)) {
+      if (late != null && softerThan(call, late)) writeCarried(call, late);
+      continue;
+    }
+    const found = runningLateness(call);
+    if (found != null) late = found;
+  }
+  const origin = rows.map(shownMinute).find((minute) => minute != null);
+  if (origin == null) return rows;
+  let prev = null;
+  for (let i = 0; i < rows.length; i++) {
+    const call = rows[i];
+    const minute = shownMinute(call);
+    if (minute == null) continue;
+    const shown = unwrapMinute(minute, origin);
+    if (isRealActual(call)) {
+      if (prev == null || shown >= prev) prev = shown;
+      continue;
+    }
+    let next = null;
+    for (let j = i + 1; j < rows.length; j++) {
+      if (!isRealActual(rows[j])) continue;
+      const ahead = shownMinute(rows[j]);
+      if (ahead != null) next = unwrapMinute(ahead, origin);
+      break;
+    }
+    let placed = shown;
+    if (prev != null && placed < prev) placed = prev;
+    if (next != null && placed >= next) placed = Math.max(prev ?? next - 1, next - 1);
+    if (placed !== shown) setShownMinute(call, placed);
+    prev = placed;
+  }
+  return rows;
+}
+
 function tdByTiploc(db, headcode, catalog, calls) {
   const byTpl = latestTdByTiploc(db, headcode);
   if (!catalog) return byTpl;

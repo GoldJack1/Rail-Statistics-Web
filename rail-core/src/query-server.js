@@ -9,7 +9,7 @@ import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
 import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
-import { applyLiveToInferred, collectReportedPasses, dropOrmDensifyPasses, insertReportedPasses, overlayTdOnCalls, reportsForService, tiplocCoords } from "./query-enrich.js";
+import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropOrmDensifyPasses, insertReportedPasses, overlayTdOnCalls, reportsForService, tiplocCoords } from "./query-enrich.js";
 import { insertGtclPasses, loadGtclGraph } from "./gtcl-path.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
@@ -751,6 +751,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     const track = loadGtclGraph(process.env.GTCL_GRAPH || `${DATA_DIR}/gtcl-graph.sqlite`);
     if (track) calls = insertGtclPasses(calls, track, catalog, svc.timing_load, process.env.TLK_DB || `${DATA_DIR}/tlk.sqlite`);
     calls = applyLiveToInferred(db, calls, svc.train_id, catalog);
+    calls = carryRunningLateness(calls);
   }
   const units = Array.isArray(consist?.allocations)
     ? [...new Set(consist.allocations.flatMap((a) => (a.resourceGroups || []).map((g) => g.unitId).filter(Boolean)))]
