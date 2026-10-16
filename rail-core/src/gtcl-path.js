@@ -149,32 +149,31 @@ function locations(catalog) {
   return locCache;
 }
 
-function nearestNode(graph, e, n, toward) {
-  let best = null;
-  let bestScore = Infinity;
+function snapCandidates(graph, e, n, toward) {
+  const found = [];
+  const seen = new Set();
   const x0 = Math.floor(e / CELL);
   const y0 = Math.floor(n / CELL);
   for (let dx = -1; dx <= 1; dx++) {
     for (let dy = -1; dy <= 1; dy++) {
-      const key = `${x0 + dx},${y0 + dy}`;
-      for (const edge of graph.cell.get(key) || []) {
+      for (const edge of graph.cell.get(`${x0 + dx},${y0 + dy}`) || []) {
         for (const [x, y] of [
           [edge.ax, edge.ay],
           [edge.bx, edge.by],
         ]) {
+          const key = `${x},${y}`;
+          if (seen.has(key)) continue;
           const d = (x - e) ** 2 + (y - n) ** 2;
           if (d > SNAP_M * SNAP_M) continue;
+          seen.add(key);
           const onward = toward ? Math.hypot(x - toward.e, y - toward.n) : 0;
-          const score = onward * 1000 + d;
-          if (score < bestScore) {
-            bestScore = score;
-            best = `${x},${y}`;
-          }
+          found.push({ key, score: onward * 1000 + d });
         }
       }
     }
   }
-  return best;
+  found.sort((a, b) => a.score - b.score);
+  return found.slice(0, 6);
 }
 
 function ensureCells(graph) {
@@ -283,14 +282,24 @@ function pointSegDist(px, py, ax, ay, bx, by) {
 
 function midsBetween(graph, locIndex, rail, a, b, used, tlk) {
   ensureCells(graph);
-  const from = nearestNode(graph, a.e, a.n, b);
-  const to = nearestNode(graph, b.e, b.n, a);
-  if (!from || !to) return [];
-  const edges = route(graph, from, to);
-  if (!edges?.length) return [];
+  const fromCands = snapCandidates(graph, a.e, a.n, b);
+  const toCands = snapCandidates(graph, b.e, b.n, a);
   const straight = Math.hypot(a.e - b.e, a.n - b.n);
-  const walked = edges.reduce((sum, edge) => sum + edge.len, 0);
-  if (walked > straight * 1.8 + 400) return [];
+  let edges = null;
+  // The node nearest the far end can be a dead-end spur. Keep trying snaps
+  // until one of them actually connects.
+  for (const from of fromCands) {
+    for (const to of toCands) {
+      const walkedEdges = route(graph, from.key, to.key);
+      if (!walkedEdges?.length) continue;
+      const walked = walkedEdges.reduce((sum, edge) => sum + edge.len, 0);
+      if (walked > straight * 1.8 + 400) continue;
+      edges = walkedEdges;
+      break;
+    }
+    if (edges) break;
+  }
+  if (!edges?.length) return [];
   let chain = 0;
   const found = [];
   const seen = new Set();
