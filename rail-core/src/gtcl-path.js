@@ -271,6 +271,33 @@ function route(graph, fromKey, toKey, maxLen = Infinity) {
   return edges;
 }
 
+function placeWords(name) {
+  return new Set(
+    String(name || "")
+      .toLowerCase()
+      .split(/[^a-z]+/)
+      .filter((w) => w.length > 4 && !/junction|north|south|east|west|loop|crossover/.test(w)),
+  );
+}
+
+function samePlaceName(a, b) {
+  const words = placeWords(a);
+  for (const w of placeWords(b)) if (words.has(w)) return true;
+  return false;
+}
+
+/** East junction is reached after the station when the train is going east. */
+function stationBeforeJunction(anchor, mid, next) {
+  if (!anchor || !mid || !next) return false;
+  if (Math.hypot(anchor.e - mid.e, anchor.n - mid.n) > 200) return false;
+  if (!samePlaceName(anchor.name, mid.name)) return false;
+  if (/junction|\bjn\b/i.test(mid.name || "")) return false;
+  const side = /\beast\b/i.test(anchor.name || "") ? "east" : /\bwest\b/i.test(anchor.name || "") ? "west" : null;
+  if (!side || !/junction|\bjn\b/i.test(anchor.name || "")) return false;
+  const goingEast = next.e >= anchor.e;
+  return (side === "east" && goingEast) || (side === "west" && !goingEast);
+}
+
 function pointSegDist(px, py, ax, ay, bx, by) {
   const dx = bx - ax;
   const dy = by - ay;
@@ -326,18 +353,7 @@ function midsBetween(graph, locIndex, rail, a, b, used, tlk) {
     chain += edge.len;
   }
   found.sort((p, q) => p.at - q.at);
-  const placeWords = (name) =>
-    new Set(
-      String(name || "")
-        .toLowerCase()
-        .split(/[^a-z]+/)
-        .filter((w) => w.length > 4 && !/junction|north|south|east|west|loop|crossover/.test(w)),
-    );
-  const samePlace = (a, b) => {
-    const words = placeWords(a.loc.name);
-    for (const w of placeWords(b.loc.name)) if (words.has(w)) return true;
-    return false;
-  };
+  const samePlace = (a, b) => samePlaceName(a.loc.name, b.loc.name);
   const kept = [];
   for (const point of found) {
     const prev = kept[kept.length - 1];
@@ -388,7 +404,7 @@ export function insertGtclPasses(calls, graph, catalog, timingLoad, tlkFile) {
       // Booked clocks are shifted for lateness later. A gap that only has
       // live times already includes that lateness, so store the pass directly.
       const live = wtp ? null : clockAt(live0 || t0, live1 || t1, mid.fraction);
-      out.push({
+      const row = {
         tiploc: mid.loc.tiploc,
         crs: mid.loc.crs.length === 3 ? mid.loc.crs : null,
         name: mid.loc.name,
@@ -399,8 +415,48 @@ export function insertGtclPasses(calls, graph, catalog, timingLoad, tlkFile) {
         live_kind: live ? "actual" : "est",
         actual_source: "inferred",
         platform: null,
-      });
+      };
+      if (stationBeforeJunction(a, mid.loc, b)) out.splice(out.length - 1, 0, row);
+      else out.push(row);
     }
   }
   return out;
+}
+
+/** Replace schedule-spine mileage with the distance along the finished list. */
+export function assignTrackMiles(calls, graph, catalog) {
+  const rows = (calls || []).map((c) => ({ ...c }));
+  if (!rows.length || !catalog) return rows;
+  const byTpl = new Map(locations(catalog).locs.map((l) => [l.tiploc, l]));
+  if (graph) ensureCells(graph);
+  let cum = 0;
+  rows[0].leg_m = null;
+  rows[0].cum_m = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const a = byTpl.get(String(rows[i - 1].tiploc || "").toUpperCase());
+    const b = byTpl.get(String(rows[i].tiploc || "").toUpperCase());
+    let metres = null;
+    if (a && b) {
+      const straight = Math.hypot(a.e - b.e, a.n - b.n);
+      if (graph) {
+        const maxLen = straight * 1.8 + 400;
+        const fromCands = snapCandidates(graph, a.e, a.n, b).slice(0, 3);
+        const toCands = snapCandidates(graph, b.e, b.n, a).slice(0, 3);
+        for (const from of fromCands) {
+          for (const to of toCands) {
+            const walked = route(graph, from.key, to.key, maxLen);
+            if (!walked?.length) continue;
+            metres = walked.reduce((sum, edge) => sum + edge.len, 0);
+            break;
+          }
+          if (metres != null) break;
+        }
+      }
+      if (metres == null) metres = straight;
+    }
+    rows[i].leg_m = metres;
+    cum += metres || 0;
+    rows[i].cum_m = metres == null ? rows[i - 1].cum_m : cum;
+  }
+  return rows;
 }
