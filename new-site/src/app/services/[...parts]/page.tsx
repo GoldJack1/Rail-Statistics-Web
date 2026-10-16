@@ -782,6 +782,7 @@ const ServiceDetailPage: React.FC = () => {
                 delayReason={data.delayReason?.reason}
                 alertText={data.alerts?.[0]?.text}
                 location={data.location}
+                preserveOrder
                 associations={(data.associations || []).filter((a) => a.category !== 'NP')}
                 associationHref={(a) =>
                   serviceHref({

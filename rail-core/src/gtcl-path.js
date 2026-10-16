@@ -370,17 +370,23 @@ export function insertGtclPasses(calls, graph, catalog, timingLoad, tlkFile) {
     if (!a || !b) continue;
     const t0 = callClock(calls[i]);
     const t1 = callClock(calls[i + 1]);
+    const live0 = calls[i].atp || calls[i].atd || calls[i].ata || calls[i].etp || calls[i].etd || calls[i].eta;
+    const live1 = calls[i + 1].atp || calls[i + 1].atd || calls[i + 1].ata || calls[i + 1].etp || calls[i + 1].etd || calls[i + 1].eta;
     for (const mid of midsBetween(graph, locIndex, rail, a, b, used, tlk)) {
       used.add(mid.loc.tiploc);
       const wtp = clockAt(t0, t1, mid.fraction);
+      // Booked clocks are shifted for lateness later. A gap that only has
+      // live times already includes that lateness, so store the pass directly.
+      const live = wtp ? null : clockAt(live0 || t0, live1 || t1, mid.fraction);
       out.push({
         tiploc: mid.loc.tiploc,
         crs: mid.loc.crs.length === 3 ? mid.loc.crs : null,
         name: mid.loc.name,
         is_passing: 1,
         wtp,
+        atp: live,
         etp: wtp,
-        live_kind: "est",
+        live_kind: live ? "actual" : "est",
         actual_source: "inferred",
         platform: null,
       });
