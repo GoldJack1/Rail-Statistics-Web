@@ -13,6 +13,7 @@ import { buildStopNameLookup, displayStopName, sortStopsByJourneyTime } from '@/
 import type { ServiceViewMode } from '@/components/darwin/serviceViewMode'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
 import { betweenStationsLabel, inferProgressIndex } from '@/utils/serviceProgress'
+import { formatQuarterClock } from '@/utils/quarterClock'
 import { railwayDayMinutesFromHhmm } from '@/utils/railwayOperatingDayUk'
 import { isBetaSite } from '@/utils/localDevFlags'
 import '@/components/cards/StationsTableView/StationsTableView.css'
@@ -41,9 +42,25 @@ export function slotKind(slot: string): StopKind {
 function trimSeconds(t: string | null | undefined): string {
   if (!t) return ''
   const s = String(t).trim()
+  const precise = /^(\d{1,2}:\d{2}):(\d{2})$/.exec(s)
+  if (precise) return precise[1]
   const m = /^(\d{1,2}:\d{2})(½|:30)?/.exec(s)
   if (!m) return s.slice(0, 5)
   return m[2] === ':30' || m[2] === '½' ? `${m[1]}½` : m[1]
+}
+
+/** Keep HH:MM:SS and working-timetable halves for the detailed formatter. */
+function preserveClock(t: string | null | undefined): string {
+  if (!t) return ''
+  const s = String(t).trim()
+  const precise = /^(\d{1,2}:\d{2}:\d{2})/.exec(s)
+  if (precise) return precise[1]
+  return trimSeconds(s)
+}
+
+function shownClock(value: string | null | undefined, detailed: boolean): string {
+  if (!value) return ''
+  return detailed ? formatQuarterClock(value) : trimSeconds(value)
 }
 
 function platformSourceLabel(src: string | null | undefined): string | null {
@@ -134,7 +151,8 @@ export function buildStopStatus(
 ): StopStatus {
   if (stop.cancelledAtStop) return { verb: 'Cancelled', time: '', delay: '', tone: 'cancelled' }
 
-  const live = trimSeconds(stop.liveTime)
+  const liveExact = preserveClock(stop.liveTime)
+  const live = trimSeconds(liveExact)
   const hasActual = stop.liveKind === 'actual' || stop.liveKind === 'actual-arr' || Boolean(trimSeconds(stop.atd || stop.ata || stop.atp))
   const hasEst =
     stop.liveKind === 'est' ||
@@ -170,11 +188,11 @@ export function buildStopStatus(
       delay: '',
       tone: deltaMinutes != null && deltaMinutes >= 1 ? delayMinutesTone(deltaMinutes) : 'delay-16',
       note: reason || undefined,
-      eta: live || null,
+      eta: liveExact || null,
     }
   }
 
-  const eventTime = live || bookedTime
+  const eventTime = liveExact || bookedTime
 
   if (!eventTime) {
     return { verb: historical ? '—' : 'Expected', time: '', delay: '', tone: 'ontime' }
@@ -338,16 +356,18 @@ function ServiceStopRow({
     router.push(`/departures/${encodeURIComponent(code)}?${next.toString()}`)
   }
 
-  const gbttArr = kind === 'pass' ? '' : (pArr || '')
-  const gbttDep = kind === 'pass' || kind === 'destination' ? '' : (pDep || '')
-  const wttArr = kind === 'pass' ? '' : (wArr || '')
-  const wttDep = kind === 'pass' ? (wPass || '') : kind === 'destination' ? '' : (wDep || wPass || '')
-  const rtArr = kind === 'pass' ? '' : trimSeconds(stop.ata || (kind === 'destination' ? stop.liveTime : null) || '')
+  const gbttArr = kind === 'pass' ? '' : shownClock(pArr, detailed)
+  const gbttDep = kind === 'pass' || kind === 'destination' ? '' : shownClock(pDep, detailed)
+  const wttArr = kind === 'pass' ? '' : shownClock(wArr, detailed)
+  const wttDep = kind === 'pass' ? shownClock(wPass, detailed) : kind === 'destination' ? '' : shownClock(wDep || wPass, detailed)
+  const rtArr = kind === 'pass' ? '' : shownClock(stop.ata || (kind === 'destination' ? stop.liveTime : null), detailed)
   const rtDep = kind === 'pass'
-    ? trimSeconds(stop.atp || stop.liveTime || '')
+    ? shownClock(stop.atp || stop.liveTime, detailed)
     : kind === 'destination'
       ? ''
-      : trimSeconds(stop.atd || (kind === 'origin' || kind === 'stop' ? stop.liveTime : null) || '')
+      : shownClock(stop.atd || (kind === 'origin' || kind === 'stop' ? stop.liveTime : null), detailed)
+  const statusTime = shownClock(status.time, detailed)
+  const statusEta = status.eta ? shownClock(status.eta, detailed) : status.eta
   const colCount = detailed ? 6 : 4
   const dash = (value: string) => value || '—'
 
@@ -396,7 +416,7 @@ function ServiceStopRow({
           </span>
         </td>
         <td className={`svc-stops-table__status${status.note || status.eta ? ' svc-stops-table__status--note' : ''}`}>
-          {status.time ? (
+          {statusTime ? (
             <>
               {status.verb ? (
                 <span className="svc-stops-table__status-main">
@@ -406,24 +426,24 @@ function ServiceStopRow({
               ) : null}
               {' '}
               <span className="svc-stops-table__status-meta">
-                {status.time}
+                {statusTime}
                 {status.delay ? <span className="svc-stops-table__status-delay">{status.delay}</span> : null}
               </span>
             </>
-          ) : status.note || status.eta ? (
+          ) : status.note || statusEta ? (
             <span
               className="svc-stops-table__status-line"
-              title={[status.verb, status.note, status.eta ? `Expected at ${status.eta}` : ''].filter(Boolean).join(' | ')}
+              title={[status.verb, status.note, statusEta ? `Expected at ${statusEta}` : ''].filter(Boolean).join(' | ')}
             >
               <span className="svc-stops-table__status-main">{status.verb}</span>
               <span className="svc-stops-table__status-sep" aria-hidden="true">|</span>
               <span className="svc-stops-table__status-note">
                 {status.note ? <span>{status.note}</span> : null}
-                {status.note && status.eta ? <span aria-hidden="true"> · </span> : null}
-                {status.eta ? (
+                {status.note && statusEta ? <span aria-hidden="true"> · </span> : null}
+                {statusEta ? (
                   <>
-                    <span className="svc-eta-full">Expected at {status.eta}</span>
-                    <span className="svc-eta-short">exp {status.eta}</span>
+                    <span className="svc-eta-full">Expected at {statusEta}</span>
+                    <span className="svc-eta-short">exp {statusEta}</span>
                   </>
                 ) : null}
               </span>

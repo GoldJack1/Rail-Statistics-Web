@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
 
 test("orders a same-evening run from first time to last", () => {
   const rows = [
@@ -148,4 +148,9 @@ test("recovers public dep when Darwin copied the actual onto std", () => {
     atd: "16:59",
   });
   assert.equal(recovered.std, "17:15");
+});
+
+test("a working dwell with no public time is a pass", () => {
+  assert.equal(isWorkingPass({ tiploc: "CHFN", crs: "CHF", wta: "16:56", wtd: "16:57" }), true);
+  assert.equal(isWorkingPass({ tiploc: "YORK", crs: "YRK", sta: "17:08", std: "17:11", wta: "17:08", wtd: "17:11" }), false);
 });

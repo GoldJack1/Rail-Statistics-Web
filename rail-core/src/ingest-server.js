@@ -181,7 +181,23 @@ function ingestDarwin(raw) {
   return { ok: true, skipped: false, rid };
 }
 
+function clientGone(err) {
+  const code = err?.code;
+  return (
+    code === "ECONNRESET" ||
+    code === "EPIPE" ||
+    code === "ERR_STREAM_PREMATURE_CLOSE" ||
+    err?.message === "aborted"
+  );
+}
+
 const server = createServer(async (req, res) => {
+  req.on("error", (err) => {
+    if (!clientGone(err)) console.error("ingest request error", err);
+  });
+  res.on("error", (err) => {
+    if (!clientGone(err)) console.error("ingest response error", err);
+  });
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
@@ -193,9 +209,20 @@ const server = createServer(async (req, res) => {
     res.end();
     return;
   }
-  const chunks = [];
-  for await (const c of req) chunks.push(c);
-  const raw = Buffer.concat(chunks).toString("utf8");
+  let raw = "";
+  try {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    raw = Buffer.concat(chunks).toString("utf8");
+  } catch (err) {
+    if (clientGone(err) || res.writableEnded) return;
+    if (!res.headersSent) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(err) }));
+    }
+    return;
+  }
+  if (res.writableEnded) return;
 
   try {
     if (url.pathname === "/ingest/darwin") {

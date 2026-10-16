@@ -238,7 +238,7 @@ export interface ServiceStop {
   wtd: string | null;
   /** Working passing time. */
   wtp: string | null;
-  /** Recorded Darwin/HSP/TRUST times (pass points keep Darwin atp). */
+  /** Recorded Darwin/HSP/TRUST times. TD actuals may include seconds (HH:MM:SS). */
   ata?: string | null;
   atd?: string | null;
   atp?: string | null;

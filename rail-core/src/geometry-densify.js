@@ -28,8 +28,8 @@ export const DEFAULT_MAX_OFFSET_TIGHT_M = 200;
 export const DEFAULT_MAX_OFFSET_CRS_ONLY_M = 500;
 export const DEFAULT_SLACK_M = 250;
 export const DEFAULT_MIN_PROGRESS_M = 80;
-/** Progress floor for validated / near-endpoint inserts (Mirfield, Sowerby). */
-export const DEFAULT_MIN_PROGRESS_NEAR_M = 20;
+/** Progress floor for validated / near-endpoint inserts (Mirfield ~24 m, Sowerby). */
+export const DEFAULT_MIN_PROGRESS_NEAR_M = 15;
 /** Progress floor for tight non-CRS tier. */
 export const DEFAULT_MIN_PROGRESS_TIGHT_M = 25;
 export const DEFAULT_MIN_SPACING_M = 120;

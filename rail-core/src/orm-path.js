@@ -27,6 +27,7 @@ import {
   isNonPassengerLocation,
   loadTiplocMeta,
 } from "./geometry-densify.js";
+import { callClock, interpolateHm } from "./tiploc-graph.js";
 import {
   ensureTiplocGraphTable,
   loadAdjFromCatalog,
@@ -37,8 +38,8 @@ export const DEFAULT_MAX_EDGE_M = 4500;
 export const DEFAULT_KNN = 6;
 /** Corridor fill between consecutive spine tipocs (Holbeck / Cottingley / Batley). */
 export const DEFAULT_CORRIDOR_OFFSET_M = 650;
-/** Allow near-endpoint CRS/junctions (Mirfield ~24 m past Mirfield East). */
-export const DEFAULT_CORRIDOR_MIN_PROG_M = 20;
+/** Near-endpoint floor. Mirfield is about 24 m from Mirfield East, so 15 m keeps it. */
+export const DEFAULT_CORRIDOR_MIN_PROG_M = 15;
 export const DEFAULT_CORRIDOR_SPACING_M = 400;
 export const DEFAULT_CORRIDOR_MAX_MIDS = 3;
 export const DEFAULT_CORRIDOR_MIN_GAP_M = 1000;
@@ -227,6 +228,19 @@ function isJunctionName(meta = {}) {
   return /\bjn\b|junction/i.test(String(meta.name || ""));
 }
 
+function samePlaceName(a, b) {
+  const words = (name) =>
+    new Set(
+      String(name || "")
+        .toLowerCase()
+        .split(/[^a-z]+/)
+        .filter((word) => word.length > 4 && !/junction|north|south|east|west/.test(word)),
+    );
+  const left = words(a);
+  for (const word of words(b)) if (left.has(word)) return true;
+  return false;
+}
+
 /**
  * Tipocs on the spatial corridor between consecutive known spine tipocs.
  * Junctions on-chord are always eligible. CRS stations need a schedule edge
@@ -284,24 +298,37 @@ export function corridorGeometryMids(
     // Reject tipocs that lie beyond an endpoint (Sowerby past Milner Royd on Greetland→Milner).
     if (at > ab + 40 || tb > ab + 40) continue;
     if (at + tb > ab * 1.25) continue;
-    // CRS hugging B belongs on the next gap (Sowerby ~40 m past Milner Royd).
-    // Mid-gap CRS like Cottingley (t≈0.6) must stay.
+    // A station within 15 m of an endpoint is the endpoint. Mirfield at ~24 m stays.
     if (crs && !crs.toUpperCase().startsWith("X") && !junction) {
-      if (tb < 120) continue;
-      if (at < 120 && !schedOutFrom(aTpl, pt.tiploc)) continue;
+      if (tb < DEFAULT_CORRIDOR_MIN_PROG_M) continue;
+      if (at < DEFAULT_CORRIDOR_MIN_PROG_M && !schedOutFrom(aTpl, pt.tiploc)) continue;
     }
-    hits.push({ tiploc: pt.tiploc, t, at, offsetM, junction: Boolean(junction || !crs) });
+    hits.push({
+      tiploc: pt.tiploc,
+      name: String(meta.name || ""),
+      t,
+      at,
+      offsetM,
+      junction: Boolean(junction || !crs),
+    });
   }
   // Prefer junctions, then lower offset.
   hits.sort((x, y) => Number(y.junction) - Number(x.junction) || x.t - y.t || x.offsetM - y.offsetM);
 
   const picked = [];
   let lastAt = -DEFAULT_CORRIDOR_SPACING_M;
+  let lastName = "";
   const ordered = [...hits].sort((x, y) => x.t - y.t || x.offsetM - y.offsetM);
   for (const h of ordered) {
-    if (h.at - lastAt < DEFAULT_CORRIDOR_SPACING_M) continue;
+    const gap = h.at - lastAt;
+    const twin = gap < DEFAULT_CORRIDOR_SPACING_M && samePlaceName(lastName, h.name);
+    // Same place within 15 m is a duplicate. A different name, or the same
+    // name further out (Mirfield station past Mirfield East), stays.
+    if (twin && gap < DEFAULT_CORRIDOR_MIN_PROG_M) continue;
+    if (!twin && gap < DEFAULT_CORRIDOR_SPACING_M && lastAt >= 0) continue;
     picked.push(h.tiploc);
     lastAt = h.at;
+    lastName = h.name;
     if (picked.length >= DEFAULT_CORRIDOR_MAX_MIDS) break;
   }
   return picked;
@@ -506,6 +533,76 @@ export function stitchCallsWithOrmPath(calls, adj, opts = {}) {
     out.push(cur);
   }
 
+  return { calls: out.map((c, seq) => ({ ...c, seq })), inserted };
+}
+
+/**
+ * Beta calling pattern: keep booked spine rows and insert corridor junctions
+ * between them. Times are estimates split across the booked gap, not WTT.
+ */
+export function insertInferredJunctions(calls, opts = {}) {
+  const spine = (calls || []).filter((c) => c?.tiploc);
+  if (spine.length < 2 || !opts.geoByTpl) return spine;
+  const present = new Set(spine.map((c) => String(c.tiploc).toUpperCase()));
+  const out = [];
+  let inserted = 0;
+  for (let i = 0; i < spine.length; i++) {
+    if (i > 0) {
+      const prev = spine[i - 1];
+      const cur = spine[i];
+      const hit = ormIntermediatePath(opts.adj || new Map(), prev.tiploc, cur.tiploc, opts);
+      const mids = (hit?.mids || []).filter((tpl) => {
+        const key = String(tpl).toUpperCase();
+        if (present.has(key)) return false;
+        const meta = opts.tipocMeta?.get(key) || {};
+        const name = String(meta.name || "");
+        if (/\b(shunt|spur|reception|recp|conc|signal|siding|depot|e\.?m\.?u|l\.?\s*t\.?|lul|underground|metro)\b/i.test(name)) return false;
+        const trackFeature = /\b(loop|crossover|xovers|l\.?c\.?|apco|g\.?s\.?p|ground frame)\b/i.test(name);
+        if (isNonPassengerLocation(key, meta) && !trackFeature) return false;
+        const crs = String(meta.crs || "").trim();
+        const junction = /\bjn\b|junction/i.test(name);
+        if (!junction && !trackFeature && crs.length !== 3) return false;
+        if (!junction && opts.geoByTpl) {
+          const a = opts.geoByTpl.get(String(prev.tiploc).toUpperCase());
+          const b = opts.geoByTpl.get(String(cur.tiploc).toUpperCase());
+          const p = opts.geoByTpl.get(key);
+          const limit = trackFeature ? 500 : 400;
+          if (a && b && p && distToSegmentM(p, a, b).offsetM > limit) return false;
+        }
+        return true;
+      }).slice(0, 8);
+      const t0 = callClock(prev);
+      const t1 = callClock(cur);
+      mids.forEach((tpl, j) => {
+        const wtp = interpolateHm(t0, t1, j, mids.length);
+        const key = String(tpl).toUpperCase();
+        present.add(key);
+        const meta = opts.tipocMeta?.get(key);
+        out.push({
+          tiploc: key,
+          crs: meta?.crs || null,
+          is_passing: 1,
+          cancelled: 0,
+          platform: null,
+          sta: null,
+          std: null,
+          wta: null,
+          wtd: null,
+          wtp,
+          etp: wtp,
+          ata: null,
+          atd: null,
+          atp: null,
+          eta: null,
+          etd: null,
+          live_kind: "est",
+          actual_source: "inferred",
+        });
+        inserted++;
+      });
+    }
+    out.push(spine[i]);
+  }
   return { calls: out.map((c, seq) => ({ ...c, seq })), inserted };
 }
 

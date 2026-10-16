@@ -15,12 +15,15 @@ export function openDayDb(dataDir, ymd, { timeout = 60_000 } = {}) {
   mkdirSync(dataDir, { recursive: true });
   // DatabaseSync timeout (sqlite3_busy_timeout) is what actually waits; PRAGMA busy_timeout is ignored when timeout is 0.
   const db = new DatabaseSync(dayPath(dataDir, ymd), { timeout });
-  db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=60000;");
+  db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=60000; PRAGMA journal_size_limit=67108864;");
   db.exec(SCHEMA);
   db.exec("CREATE INDEX IF NOT EXISTS idx_services_uid ON services (uid);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_services_uid_nocase ON services (uid COLLATE NOCASE);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_units_rid ON units (rid);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_calls_tiploc_std ON calls (tiploc, std);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_services_headcode ON services (headcode);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_services_headcode_nocase ON services (headcode COLLATE NOCASE);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_services_toc_nocase ON services (toc COLLATE NOCASE);");
   ensureUnitJoinColumns(db);
   ensureServiceFormationColumn(db);
   ensureCallLoadingColumns(db);
@@ -247,11 +250,12 @@ export function platformText(value) {
   return s;
 }
 
-function formatHhmm(date, timeZone) {
+function formatClock(date, timeZone, withSeconds) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone,
     hour: "2-digit",
     minute: "2-digit",
+    second: withSeconds ? "2-digit" : undefined,
     hourCycle: "h23",
     hour12: false,
   }).formatToParts(date);
@@ -259,7 +263,19 @@ function formatHhmm(date, timeZone) {
   const mm = parts.find((p) => p.type === "minute")?.value;
   if (hh == null || mm == null) return null;
   const hour = hh === "24" ? "00" : hh.padStart(2, "0");
-  return `${hour}:${mm.padStart(2, "0")}`;
+  const clock = `${hour}:${mm.padStart(2, "0")}`;
+  if (!withSeconds) return clock;
+  const ss = parts.find((p) => p.type === "second")?.value;
+  if (ss == null || ss === "00") return clock;
+  return `${clock}:${ss.padStart(2, "0")}`;
+}
+
+function formatHhmm(date, timeZone) {
+  return formatClock(date, timeZone, false);
+}
+
+function formatHhmmss(date, timeZone) {
+  return formatClock(date, timeZone, true);
 }
 
 /** Real UTC instants (Date.now(), TD received_at). Follows BST/GMT, including clock changes. */
@@ -285,6 +301,30 @@ export function hhmm(value) {
   const t = s.slice(0, 4);
   if (t.length < 4) return null;
   return `${t.slice(0, 2)}:${t.slice(2, 4)}`;
+}
+
+/** Same civil clock as hhmm, keeping non-zero seconds (TD HHMMSS). On-the-minute stays HH:MM. */
+export function hhmmss(value) {
+  if (!value) return null;
+  const n = Number(value);
+  if (Number.isFinite(n) && n > 1e11) return formatHhmmss(new Date(n), "UTC");
+  const s = String(value).replace(/\D/g, "");
+  if (s.length === 13 || s.length === 10) return hhmmss(Number(s.length === 10 ? Number(s) * 1000 : s));
+  if (s.length >= 6) {
+    const clock = `${s.slice(0, 2)}:${s.slice(2, 4)}`;
+    const ss = s.slice(4, 6);
+    return ss === "00" ? clock : `${clock}:${ss}`;
+  }
+  return hhmm(value);
+}
+
+export function hhmmssLondon(value) {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return null;
+  const ms = n > 0 && n < 1e11 ? n * 1000 : n;
+  if (ms <= 1e11) return null;
+  return formatHhmmss(new Date(ms), "Europe/London");
 }
 
 export function liveKind({ ata, atd, atp, eta, etd, etp }) {

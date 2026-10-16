@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   corridorGeometryMids,
+  insertInferredJunctions,
   metresToMiles,
   ormIntermediatePath,
   shortestOrmPath,
@@ -21,6 +22,33 @@ function undirected(pairs) {
   for (const [a, b, m] of pairs) add(a, b, m);
   return adj;
 }
+
+test("inferred junctions keep the booked stops and estimate the mid", () => {
+  const adj = undirected([
+    ["WHRDJN", "HOLBJCN", 800],
+    ["HOLBJCN", "COTNGLY", 2200],
+    ["WHRDJN", "COTNGLY", 5000],
+  ]);
+  const geoByTpl = new Map([
+    ["WHRDJN", { tiploc: "WHRDJN", lat: 53.79193, lon: -1.55945 }],
+    ["HOLBJCN", { tiploc: "HOLBJCN", lat: 53.79147, lon: -1.56836 }],
+    ["COTNGLY", { tiploc: "COTNGLY", lat: 53.76782, lon: -1.58771 }],
+  ]);
+  const tipocMeta = new Map([["HOLBJCN", { crs: "", name: "Holbeck Junction" }]]);
+  const { calls, inserted } = insertInferredJunctions(
+    [
+      { tiploc: "WHRDJN", is_passing: 1, wtp: "10:00" },
+      { tiploc: "COTNGLY", is_passing: 0, wta: "10:10", wtd: "10:12" },
+    ],
+    { adj, geoByTpl, tipocMeta },
+  );
+  assert.equal(inserted, 1);
+  assert.deepEqual(calls.map((c) => c.tiploc), ["WHRDJN", "HOLBJCN", "COTNGLY"]);
+  assert.equal(calls[1].actual_source, "inferred");
+  assert.equal(calls[1].wtp, calls[1].etp);
+  assert.equal(calls[0].wtp, "10:00");
+  assert.equal(calls[2].wta, "10:10");
+});
 
 test("shortest path inserts Holbeck between Whitehall and Cottingley", () => {
   const adj = undirected([

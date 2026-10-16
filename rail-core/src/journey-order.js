@@ -34,11 +34,9 @@ export function isAdvertisedCall(c) {
 }
 
 export function isWorkingPass(c) {
-  if (isAdvertisedCall(c)) return false;
-  if (Number(c?.is_passing)) return true;
-  const sta = publicCallTime(c?.sta, c);
-  const std = publicCallTime(c?.std, c);
-  return Boolean(c?.wtp && !sta && !std);
+  // A passenger stop needs a public time. A working dwell with no public
+  // arrival or departure is a pass, even when the timetable books a few seconds.
+  return !isAdvertisedCall(c);
 }
 
 /** Public GBTT stop, including advertised TIPLOCs that never received a CRS. */

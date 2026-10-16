@@ -3,7 +3,7 @@
  * When SMART+CORPUS map a berth to a TIPLOC and RID is known, upsert a working pass
  * (same live restore pattern as TRUST).
  */
-import { hhmm, hhmmLondon, liveKind, openCatalog, openDayDb, operatingDayYmd, upsertCall } from "./db.js";
+import { hhmm, hhmmLondon, hhmmss, hhmmssLondon, liveKind, openCatalog, openDayDb, operatingDayYmd, upsertCall } from "./db.js";
 import { resolveSmartTiploc } from "./import-smart.js";
 import { nrodCandidateDays, writeDaysForRid } from "./nrod-write-days.js";
 
@@ -66,6 +66,15 @@ export function tdClock(time, fallbackMs = null) {
   const s = String(time).trim();
   if (/^\d{10,13}$/.test(s)) return hhmmLondon(Number(s));
   return hhmm(s) || fallback();
+}
+
+/** TD clock with seconds kept, so detailed view can show quarter-minutes. */
+export function tdClockPrecise(time, fallbackMs = null) {
+  const fallback = () => (fallbackMs == null ? null : hhmmssLondon(fallbackMs));
+  if (time == null || time === "") return fallback();
+  const s = String(time).trim();
+  if (/^\d{10,13}$/.test(s)) return hhmmssLondon(Number(s));
+  return hhmmss(s) || fallback();
 }
 
 function unpackTd(msg) {
@@ -273,7 +282,7 @@ function applyTdToDay(db, message, parsed, { rid, tiploc, stanox, crs, platform,
 
   // CA = berth step, CC = interpose. CB/CT handled elsewhere / ignored for path.
   if (tiploc && (parsed.msgType === "CA" || parsed.msgType === "CC")) {
-    const actual = tdClock(parsed.time, now);
+    const actual = tdClockPrecise(parsed.time, now);
     for (const passRid of ridsForTdPass(db, parsed.headcode, tiploc, forcedRid)) {
       upsertTdPass(db, { rid: passRid, tiploc, crs, platform, actual });
     }
@@ -431,7 +440,7 @@ export function replayTdEventsForDay(dataDir, ymd, opts = {}) {
         }
         const { tiploc, crs, platform } = mapped;
         if (!tiploc) continue;
-        const actual = tdClock(parsed.time, row.received_at);
+        const actual = tdClockPrecise(parsed.time, row.received_at);
         for (const passRid of ridsForTdPass(db, headcode, tiploc)) {
           upsertTdPass(db, { rid: passRid, tiploc, crs, platform, actual });
           applied++;
@@ -450,7 +459,7 @@ export function replayTdEventsForDay(dataDir, ymd, opts = {}) {
       const { tiploc, crs, platform } = mapped;
       if (!tiploc) continue;
 
-      const actual = tdClock(parsed.time, row.received_at);
+      const actual = tdClockPrecise(parsed.time, row.received_at);
       for (const passRid of ridsForTdPass(db, headcode, tiploc, forcedRid)) {
         upsertTdPass(db, { rid: passRid, tiploc, crs, platform, actual });
         applied++;
