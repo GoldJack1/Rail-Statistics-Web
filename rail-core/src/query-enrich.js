@@ -337,6 +337,80 @@ function callMinute(call) {
   return hmToMin(call?.atp || call?.atd || call?.ata || call?.etp || call?.etd || call?.eta || call?.wtp || call?.wtd || call?.wta);
 }
 
+function unwrapMinute(minute, origin) {
+  let delta = minute - origin;
+  if (delta < -12 * 60) delta += 1440;
+  else if (delta > 12 * 60) delta -= 1440;
+  return origin + delta;
+}
+
+function timedCalls(calls) {
+  const seed = (calls || []).map(callMinute).find((minute) => minute != null);
+  if (seed == null) return [];
+  return (calls || [])
+    .map((call, index) => {
+      const minute = callMinute(call);
+      if (minute == null) return null;
+      return {
+        index,
+        minute: unwrapMinute(minute, seed),
+        tiploc: String(call.tiploc || "").toUpperCase(),
+      };
+    })
+    .filter(Boolean);
+}
+
+/** A reported place off to one side of the calls either side of it, in metres. */
+const CHORD_EXTRA_M = 2000;
+
+/**
+ * TRUST and TD rows for this headcode also match other trains that reused it.
+ * Keep a row only when its clock is between this train's calls and, where we
+ * have coordinates, it sits on the straight line between those calls.
+ */
+export function reportsForService(calls, reports, coords = null) {
+  const timed = timedCalls(calls);
+  if (!timed.length) return [];
+  const start = Math.min(...timed.map((row) => row.minute));
+  const end = Math.max(...timed.map((row) => row.minute));
+  const locate = coords instanceof Map ? coords : null;
+  return (reports || []).filter((report) => {
+    if (report.minute == null) return false;
+    const minute = unwrapMinute(report.minute, start);
+    if (minute < start || minute > end) return false;
+    if (!locate) return true;
+    const here = locate.get(String(report.tiploc || "").toUpperCase());
+    if (!here) return true;
+    const prev = [...timed].reverse().find((row) => row.minute <= minute && locate.has(row.tiploc));
+    const next = timed.find((row) => row.index > (prev?.index ?? -1) && row.minute >= minute && locate.has(row.tiploc));
+    if (!prev || !next) return false;
+    const a = locate.get(prev.tiploc);
+    const b = locate.get(next.tiploc);
+    const direct = Math.hypot(a.e - b.e, a.n - b.n);
+    const via = Math.hypot(a.e - here.e, a.n - here.n) + Math.hypot(here.e - b.e, here.n - b.n);
+    return via - direct <= CHORD_EXTRA_M;
+  });
+}
+
+export function tiplocCoords(catalog, tiplocs) {
+  const map = new Map();
+  if (!catalog) return map;
+  let stmt;
+  try {
+    stmt = catalog.prepare(`SELECT easting AS e, northing AS n FROM tiploc_geo WHERE tiploc = ?`);
+  } catch {
+    return map;
+  }
+  for (const tiploc of tiplocs || []) {
+    const key = String(tiploc || "").toUpperCase();
+    if (!key || map.has(key)) continue;
+    const row = stmt.get(key);
+    if (row?.e == null || row?.n == null) continue;
+    map.set(key, { e: Number(row.e), n: Number(row.n) });
+  }
+  return map;
+}
+
 /**
  * Place a TRUST or TD location that is not already on the list.
  * The clock decides which existing gap it sits in. It does not build a route.

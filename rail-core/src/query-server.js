@@ -9,7 +9,7 @@ import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
 import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
-import { applyLiveToInferred, collectReportedPasses, dropOrmDensifyPasses, insertReportedPasses, overlayTdOnCalls } from "./query-enrich.js";
+import { applyLiveToInferred, collectReportedPasses, dropOrmDensifyPasses, insertReportedPasses, overlayTdOnCalls, reportsForService, tiplocCoords } from "./query-enrich.js";
 import { insertGtclPasses, loadGtclGraph } from "./gtcl-path.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
@@ -744,7 +744,9 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
   if (QUERY_ENV === "dev") {
     const headcode = svc.headcode || svc.train_id;
     calls = dropOrmDensifyPasses(calls, catalog);
-    calls = insertReportedPasses(calls, collectReportedPasses(db, calls, svc.train_id, headcode, catalog));
+    const reports = collectReportedPasses(db, calls, svc.train_id, headcode, catalog);
+    const coords = tiplocCoords(catalog, [...calls.map((c) => c.tiploc), ...reports.map((r) => r.tiploc)]);
+    calls = insertReportedPasses(calls, reportsForService(calls, reports, coords));
     calls = overlayTdOnCalls(db, calls, headcode, catalog);
     const track = loadGtclGraph(process.env.GTCL_GRAPH || `${DATA_DIR}/gtcl-graph.sqlite`);
     if (track) calls = insertGtclPasses(calls, track, catalog, svc.timing_load, process.env.TLK_DB || `${DATA_DIR}/tlk.sqlite`);

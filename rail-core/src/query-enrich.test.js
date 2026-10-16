@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { applyLiveToInferred, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, overlayTdOnCalls } from "./query-enrich.js";
+import { applyLiveToInferred, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, overlayTdOnCalls, reportsForService } from "./query-enrich.js";
 import { openDayDb } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
 import { mkdtempSync } from "node:fs";
@@ -24,6 +24,31 @@ test("insertReportedPasses places a feed location by time and leaves scheduled r
   assert.equal(out[1].atp, "18:34");
   assert.equal(out[1].actual_source, "td");
   assert.equal(out[0].actual_source, "trust");
+});
+
+test("reportsForService ignores another train on the same headcode and a point off the line", () => {
+  const calls = [
+    { tiploc: "DIGGLEJ", is_passing: 1, atp: "18:27" },
+    { tiploc: "MARSDEN", is_passing: 1, atp: "18:31" },
+    { tiploc: "NCL", is_passing: 0, wta: "20:24" },
+  ];
+  const coords = new Map([
+    ["DIGGLEJ", { e: 0, n: 0 }],
+    ["MARSDEN", { e: 8000, n: 0 }],
+    ["NCL", { e: 100000, n: 0 }],
+    ["UPRMILL", { e: 4000, n: 40 }],
+    ["DEANLNE", { e: -30000, n: 0 }],
+  ]);
+  const out = reportsForService(
+    calls,
+    [
+      { tiploc: "DALS", clock: "09:43", minute: 9 * 60 + 43, source: "td" },
+      { tiploc: "DEANLNE", clock: "18:27", minute: 18 * 60 + 27, source: "td" },
+      { tiploc: "UPRMILL", clock: "18:29", minute: 18 * 60 + 29, source: "td" },
+    ],
+    coords,
+  );
+  assert.deepEqual(out.map((row) => row.tiploc), ["UPRMILL"]);
 });
 
 test("dropUnreportedOrmPasses keeps stations and named junctions, and drops yards", () => {
