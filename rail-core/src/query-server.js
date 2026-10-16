@@ -10,7 +10,7 @@ import { formatTiplocName } from "./tiploc-names.js";
 import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
 import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropOrmDensifyPasses, insertReportedPasses, overlayTdOnCalls, reportsForService, tiplocCoords } from "./query-enrich.js";
-import { assignTrackMiles, insertGtclPasses, loadGtclGraph } from "./gtcl-path.js";
+import { assignTrackMiles, insertGtclPasses, loadGtclGraph, orderStationBeforeEastJunction } from "./gtcl-path.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
@@ -752,6 +752,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     if (track) calls = insertGtclPasses(calls, track, catalog, svc.timing_load, process.env.TLK_DB || `${DATA_DIR}/tlk.sqlite`);
     calls = applyLiveToInferred(db, calls, svc.train_id, catalog);
     calls = carryRunningLateness(calls);
+    calls = orderStationBeforeEastJunction(calls, catalog);
     calls = assignTrackMiles(calls, track, catalog);
   }
   const units = Array.isArray(consist?.allocations)

@@ -430,13 +430,19 @@ export function assignTrackMiles(calls, graph, catalog) {
   const byTpl = new Map(locations(catalog).locs.map((l) => [l.tiploc, l]));
   if (graph) ensureCells(graph);
   let cum = 0;
+  let last = 0;
   rows[0].leg_m = null;
   rows[0].cum_m = 0;
   for (let i = 1; i < rows.length; i++) {
-    const a = byTpl.get(String(rows[i - 1].tiploc || "").toUpperCase());
     const b = byTpl.get(String(rows[i].tiploc || "").toUpperCase());
+    if (!b) {
+      rows[i].leg_m = null;
+      rows[i].cum_m = cum;
+      continue;
+    }
+    const a = byTpl.get(String(rows[last].tiploc || "").toUpperCase());
     let metres = null;
-    if (a && b) {
+    if (a) {
       const straight = Math.hypot(a.e - b.e, a.n - b.n);
       if (graph) {
         const maxLen = straight * 1.8 + 400;
@@ -456,7 +462,25 @@ export function assignTrackMiles(calls, graph, catalog) {
     }
     rows[i].leg_m = metres;
     cum += metres || 0;
-    rows[i].cum_m = metres == null ? rows[i - 1].cum_m : cum;
+    rows[i].cum_m = cum;
+    last = i;
+  }
+  return rows;
+}
+
+/** A station berth reported after its own east junction still belongs before it. */
+export function orderStationBeforeEastJunction(calls, catalog) {
+  const rows = (calls || []).map((c) => ({ ...c }));
+  if (!catalog) return rows;
+  const byTpl = new Map(locations(catalog).locs.map((l) => [l.tiploc, l]));
+  for (let i = 1; i < rows.length; i++) {
+    const prev = byTpl.get(String(rows[i - 1].tiploc || "").toUpperCase());
+    const cur = byTpl.get(String(rows[i].tiploc || "").toUpperCase());
+    const next = byTpl.get(String(rows[i + 1]?.tiploc || "").toUpperCase());
+    if (!stationBeforeJunction(prev, cur, next || (prev ? { e: prev.e + 1, n: prev.n } : null))) continue;
+    const swap = rows[i - 1];
+    rows[i - 1] = rows[i];
+    rows[i] = swap;
   }
   return rows;
 }
