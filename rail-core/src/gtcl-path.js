@@ -196,7 +196,7 @@ function ensureCells(graph) {
   graph.cell = cell;
 }
 
-function route(graph, fromKey, toKey) {
+function route(graph, fromKey, toKey, maxLen = Infinity) {
   if (fromKey === toKey) return [];
   const dist = new Map([[fromKey, 0]]);
   const prev = new Map();
@@ -244,9 +244,11 @@ function route(graph, fromKey, toKey) {
     const [d, key] = pop();
     if (d !== dist.get(key)) continue;
     if (key === toKey) break;
+    if (d > maxLen) break;
     for (const edge of graph.adj.get(key) || []) {
       const next = `${edge.ax},${edge.ay}` === key ? `${edge.bx},${edge.by}` : `${edge.ax},${edge.ay}`;
       const nd = d + edge.len;
+      if (nd > maxLen) continue;
       if (nd < (dist.get(next) ?? Infinity)) {
         dist.set(next, nd);
         prev.set(next, { key, edge });
@@ -285,15 +287,14 @@ function midsBetween(graph, locIndex, rail, a, b, used, tlk) {
   const fromCands = snapCandidates(graph, a.e, a.n, b);
   const toCands = snapCandidates(graph, b.e, b.n, a);
   const straight = Math.hypot(a.e - b.e, a.n - b.n);
+  const maxLen = straight * 1.8 + 400;
   let edges = null;
   // The node nearest the far end can be a dead-end spur. Keep trying snaps
-  // until one of them actually connects.
+  // until one of them connects within the direct-line budget.
   for (const from of fromCands) {
     for (const to of toCands) {
-      const walkedEdges = route(graph, from.key, to.key);
+      const walkedEdges = route(graph, from.key, to.key, maxLen);
       if (!walkedEdges?.length) continue;
-      const walked = walkedEdges.reduce((sum, edge) => sum + edge.len, 0);
-      if (walked > straight * 1.8 + 400) continue;
       edges = walkedEdges;
       break;
     }
