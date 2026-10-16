@@ -143,13 +143,13 @@ export function buildStopStatus(
     Boolean(trimSeconds(stop.etd || stop.eta || stop.etp))
   const bookedTime = scheduledTime !== '—' ? scheduledTime : ''
   // Working/densify passes with a booked clock but no live feed: never bare "Delayed".
-  // Ahead of the train → Due + wtp; already passed without a report → No report.
+  // Ahead of the train → Expected + wtp; already passed without a report → No report.
   if (kind === 'pass' && !hasActual && !hasEst && !live) {
     if (passedBeyond) {
       return { verb: 'No report', time: bookedTime, delay: '', tone: 'ontime' }
     }
     if (bookedTime) {
-      return { verb: historical ? '' : 'Due', time: bookedTime, delay: '', tone: 'ontime' }
+      return { verb: historical ? '' : 'Expected', time: bookedTime, delay: '', tone: 'ontime' }
     }
     if (!historical) {
       return { verb: 'No report', time: '', delay: '', tone: 'ontime' }
@@ -177,10 +177,10 @@ export function buildStopStatus(
   const eventTime = live || bookedTime
 
   if (!eventTime) {
-    return { verb: historical ? '—' : 'Due', time: '', delay: '', tone: 'ontime' }
+    return { verb: historical ? '—' : 'Expected', time: '', delay: '', tone: 'ontime' }
   }
 
-  let verb = 'Due'
+  let verb = 'Expected'
   if (historical && !hasActual && !hasEst) {
     verb = ''
   } else if (hasEst && !hasActual) verb = 'Expected'
@@ -632,7 +632,7 @@ export function ServiceStopList({
     : inferProgressIndex(orderedStops, nowMins) ?? reportedIndex(orderedStops, location?.last?.tiploc)
   const stopHasActual = (stop: ServiceStop) =>
     Boolean(trimSeconds(stop.atd || stop.ata || stop.atp)) || isActualLiveKind(stop.liveKind)
-  // Detailed keeps upcoming working passes as Due; drop densify rows the train
+  // Detailed keeps upcoming working passes as Expected; drop densify rows the train
   // has already gone past without a report (those were filling the list with "No report").
   const visible = orderedStops
     .map((stop, index) => ({ stop, index }))

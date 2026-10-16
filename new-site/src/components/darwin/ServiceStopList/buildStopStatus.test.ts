@@ -15,9 +15,9 @@ function passStop(overrides: Partial<ServiceStop> = {}): ServiceStop {
 }
 
 describe('buildStopStatus densify / working passes', () => {
-  it('shows Due + wtp instead of Delayed when carried delay has no live report', () => {
+  it('shows Expected + wtp instead of Delayed when carried delay has no live report', () => {
     const status = buildStopStatus(passStop(), 'pass', 6, '17:59', false, null, null, false)
-    expect(status.verb).toBe('Due')
+    expect(status.verb).toBe('Expected')
     expect(status.time).toBe('17:59')
     expect(status.delay).toBe('')
   })

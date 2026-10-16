@@ -41,18 +41,18 @@ const leedsYork = [
 ]
 
 describe('inferProgressIndex', () => {
-  it('stays at Leeds until the Cross Gates pass time', () => {
+  it('stays at the last reported point until a later actual exists', () => {
     expect(inferProgressIndex(leedsYork, 12 * 60 + 4)).toBe(0)
+    expect(inferProgressIndex(leedsYork, 12 * 60 + 7)).toBe(0)
+    expect(inferProgressIndex(leedsYork, 12 * 60 + 20)).toBe(0)
+    expect(inferProgressIndex(leedsYork, 12 * 60 + 40)).toBe(0)
   })
 
-  it('steps through passing stations as booked times elapse', () => {
-    expect(inferProgressIndex(leedsYork, 12 * 60 + 7)).toBe(1)
-    expect(inferProgressIndex(leedsYork, 12 * 60 + 11)).toBe(2)
-    expect(inferProgressIndex(leedsYork, 12 * 60 + 20)).toBe(5)
-  })
-
-  it('does not invent an arrival at York', () => {
-    expect(inferProgressIndex(leedsYork, 12 * 60 + 40)).toBe(5)
+  it('moves only when a later point has an actual report', () => {
+    const passedGarforth = leedsYork.map((row, i) =>
+      i === 2 ? stop('GARF', 'Garforth', 'PP', { wtp: '12:10', atp: '12:11', liveKind: 'actual' }) : row,
+    )
+    expect(inferProgressIndex(passedGarforth, 12 * 60 + 11)).toBe(2)
   })
 
   it('does not treat unreported ORM densify passes as progress', () => {
@@ -62,7 +62,7 @@ describe('inferProgressIndex', () => {
       ...leedsYork.slice(1),
     ]
     expect(inferProgressIndex(withOrm, 12 * 60 + 5)).toBe(0)
-    expect(inferProgressIndex(withOrm, 12 * 60 + 7)).toBe(2)
+    expect(inferProgressIndex(withOrm, 12 * 60 + 7)).toBe(0)
   })
 })
 
