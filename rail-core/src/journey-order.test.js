@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByBookedTime, sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isWorkingPass, publicCallTime, publicJourneyEnds, recoverBookedPublic, sortCallsByBookedTime, sortCallsByJourneyTime } from "./journey-order.js";
 
 test("orders a same-evening run from first time to last", () => {
   const rows = [
@@ -106,6 +106,31 @@ test("public journey ends ignore a working junction after the last advertised st
   ]);
   assert.equal(origin.crs, "SHF");
   assert.equal(dest.crs, "LDS");
+});
+
+test("a pass after midnight keeps its working time and the train is not cut short", () => {
+  const rows = [
+    { tiploc: "KNGX", crs: "KGX", seq: 0, std: "00:07", wtd: "00:07", is_passing: 0 },
+    { tiploc: "KNGXBEL", crs: null, seq: 1, sta: "00:00", std: "00:00", wtp: "00:09", is_passing: 1 },
+    { tiploc: "HAYESAH", crs: "HAY", seq: 2, sta: "00:50", std: "00:50", wtd: "00:50", is_passing: 0 },
+    { tiploc: "HTRWAJN", crs: null, seq: 3, sta: "00:00", std: "00:00", wtp: "00:51", is_passing: 1 },
+    { tiploc: "RDNGSTN", crs: "RDG", seq: 4, sta: "01:29", wta: "01:29", is_passing: 0 },
+  ];
+  assert.deepEqual(
+    sortCallsByBookedTime(rows).map((r) => r.tiploc),
+    ["KNGX", "KNGXBEL", "HAYESAH", "HTRWAJN", "RDNGSTN"],
+  );
+  assert.equal(isWorkingPass(rows[1]), true);
+  assert.deepEqual(
+    dropCifTailAfterPublicTerminus(rows).map((r) => r.tiploc),
+    ["KNGX", "KNGXBEL", "HAYESAH", "HTRWAJN", "RDNGSTN"],
+  );
+});
+
+test("a destination arrival keeps the stop when only the departure is 00:00", () => {
+  const stop = { tiploc: "KYLEAKN", crs: "KYK", sta: "12:04", std: "00:00", wta: "12:04", wtd: "12:04", is_passing: 0 };
+  assert.equal(isWorkingPass(stop), false);
+  assert.equal(publicCallTime(stop.sta, stop), "12:04");
 });
 
 test("dummy 00:00 public times do not become the destination or reorder the run", () => {

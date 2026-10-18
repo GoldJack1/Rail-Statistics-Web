@@ -18,14 +18,16 @@ export function railwayDayMinutes(clockMins, overnightLong = false) {
   return clockMins < RAILWAY_DAY_START_MINUTES ? clockMins + 1440 : clockMins;
 }
 
-/** CIF/Darwin often store 00:00 public times on working locations that are not midnight stops. */
+/**
+ * CIF and TRUST store 00:00 in the public fields of a working pass.
+ * That is a real midnight call only when the working time is midnight too.
+ */
 export function publicCallTime(value, row) {
   if (value == null || value === "") return null;
   const hm = String(value).trim().slice(0, 5);
   if (hm !== "00:00") return String(value).trim();
   const work = parseHmMinutes(row?.wtp || row?.wtd || row?.wta);
-  if (work == null) return hm;
-  if (work >= 22 * 60 || work < 3 * 60) return hm;
+  if (work == null || work === 0) return hm;
   return null;
 }
 

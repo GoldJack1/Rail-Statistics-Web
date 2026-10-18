@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { applyLiveToInferred, carryRunningLateness, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, settleUnreportedPasses } from "./query-enrich.js";
+import { applyLiveToInferred, carryRunningLateness, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, reportsOnServiceTiploc, settleUnreportedPasses } from "./query-enrich.js";
 import { openDayDb } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
 import { mkdtempSync } from "node:fs";
@@ -148,6 +148,136 @@ test("a junction other trains take is kept when it sits between two calls", () =
   assert.deepEqual(out.map((c) => c.tiploc), ["MIRFEJN", "THHLNWJ", "RTHP"]);
   assert.equal(out[1].actual_source, "inferred");
   assert.equal(out[1].wtp, "13:55");
+  assert.equal(out[1].etp, "13:55");
+  assert.equal(out[1].atp, null);
+});
+
+test("a named junction on the straight line between two calls is shown once", () => {
+  const coords = new Map([
+    ["SLTHWTE", { e: 0, n: 0 }],
+    ["HDRSFLD", { e: 1000, n: 0 }],
+    ["LEEDSWJ", { e: 2000, n: 0 }],
+  ]);
+  const out = insertSegmentJunctions(
+    [
+      { tiploc: "SLTHWTE", wtp: "16:10" },
+      { tiploc: "HDRSFLD", wtd: "16:16", wta: "16:15" },
+      { tiploc: "LEEDSWJ", wtp: "16:42", line: "UM" },
+    ],
+    [],
+    coords,
+    [
+      { tiploc: "SPWDJN", e: 890, n: 0 },
+      { tiploc: "LEEDSWJ", e: 1500, n: 0 },
+    ],
+  );
+  assert.deepEqual(out.map((c) => c.tiploc), ["SLTHWTE", "SPWDJN", "HDRSFLD", "LEEDSWJ"]);
+  assert.equal(out.filter((c) => c.tiploc === "LEEDSWJ").length, 1);
+  assert.equal(out[1].actual_source, "inferred");
+  assert.equal(out[1].wtp, "16:15");
+});
+
+test("a junction off the chord, or the same signalling place, is not added", () => {
+  const coords = new Map([
+    ["SLTHWTE", { e: 0, n: 0 }],
+    ["HDRSFLD", { e: 1000, n: 0 }],
+    ["ARDWCKJ", { e: 0, n: 0 }],
+    ["ASHBRYS", { e: 1000, n: 0 }],
+  ]);
+  const springwood = insertSegmentJunctions(
+    [{ tiploc: "SLTHWTE", wtp: "16:10" }, { tiploc: "HDRSFLD", wtd: "16:16" }],
+    [],
+    coords,
+    [{ tiploc: "SPWDJN", e: 500, n: 350 }],
+  );
+  assert.deepEqual(springwood.map((c) => c.tiploc), ["SLTHWTE", "HDRSFLD"]);
+  const ardwick = insertSegmentJunctions(
+    [{ tiploc: "ARDWCKJ", wtp: "13:17" }, { tiploc: "ASHBRYS", wtp: "13:19" }],
+    [],
+    coords,
+    [
+      { tiploc: "ARDWCKJ", e: 0, n: 0, stanox: "32009" },
+      { tiploc: "ARDWKEJ", e: 400, n: 0, stanox: "32009" },
+    ],
+  );
+  assert.deepEqual(ardwick.map((c) => c.tiploc), ["ARDWCKJ", "ASHBRYS"]);
+});
+
+test("a guessed junction uses the pass times of the calls either side", () => {
+  const coords = new Map([
+    ["MIRFEJN", { e: 0, n: 0 }],
+    ["THHLNWJ", { e: 500, n: 0 }],
+    ["RTHP", { e: 1000, n: 0 }],
+  ]);
+  const out = insertSegmentJunctions(
+    [
+      { tiploc: "MIRFEJN", wtp: "13:54", atp: "13:55:06", actual_source: "trust" },
+      { tiploc: "RTHP", wtp: "13:56", atp: "13:56:05", actual_source: "td" },
+    ],
+    [
+      ["MIRFEJN", "THHLNWJ", "RTHP"],
+      ["MIRFEJN", "THHLNWJ", "RTHP"],
+      ["MIRFEJN", "THHLNWJ", "RTHP"],
+    ],
+    coords,
+  );
+  assert.equal(out[1].wtp, "13:55");
+  assert.equal(out[1].atp, "13:55:36");
+  assert.equal(out[1].live_kind, "actual");
+});
+
+test("the other passing of the same junction is not given this report", () => {
+  const out = applyLiveToInferred(null, [
+    { tiploc: "LEEDSWJ", is_passing: 1, wtp: "14:14", atp: "14:11", actual_source: "trust" },
+    { tiploc: "LEEDS", is_passing: 0, wtd: "14:23", atd: "14:23", actual_source: "darwin" },
+    { tiploc: "LEEDSWJ", is_passing: 1, wtp: "14:24", atp: "14:24", actual_source: "darwin" },
+  ], null);
+  assert.equal(out[0].atp, "14:11");
+  assert.equal(out[2].atp, "14:24");
+});
+
+test("a second spelling of a junction already on the train is the same place", () => {
+  const stanox = new Map([
+    ["ARDWCKJ", "32009"],
+    ["ARDWKEJ", "32009"],
+    ["ASHBRYS", "32050"],
+    ["ASHBREJ", "32050"],
+  ]);
+  const out = reportsOnServiceTiploc(
+    [{ tiploc: "ARDWCKJ", wtp: "13:17" }, { tiploc: "ASHBRYS", wtp: "13:18" }, { tiploc: "ASHBREJ", wtp: "13:18" }],
+    [
+      { tiploc: "ARDWKEJ", clock: "13:18:19" },
+      { tiploc: "ASHBREJ", clock: "13:20" },
+    ],
+    (tiploc) => stanox.get(tiploc),
+  );
+  assert.deepEqual(out.map((row) => row.tiploc), ["ARDWCKJ", "ASHBREJ"]);
+});
+
+test("a siding or depot report is not added, and a real timing point still is", () => {
+  const out = insertReportedPasses(
+    [
+      { tiploc: "HDRSFLD", wtd: "13:46" },
+      { tiploc: "DEIGHTN", wtp: "13:48" },
+    ],
+    [
+      { tiploc: "HUDHESD", name: "Hillhouse East Siding", clock: "13:50", minute: 13 * 60 + 50, source: "td" },
+      { tiploc: "ARDWTMD", name: "Ardwick T.M.D", crs: "XRK", clock: "13:19", minute: 13 * 60 + 19, source: "td" },
+      { tiploc: "ARDWKEJ", name: "Ardwick East Junction", clock: "13:18", minute: 13 * 60 + 18, source: "td" },
+      { tiploc: "FAIRFLD", name: "Fairfield", crs: "FRF", clock: "13:25", minute: 13 * 60 + 25, source: "td" },
+    ],
+  );
+  assert.deepEqual(out.map((c) => c.tiploc), ["ARDWKEJ", "FAIRFLD", "HDRSFLD", "DEIGHTN"]);
+});
+
+test("an estimated junction is not cleared once a later stop has reported", () => {
+  const settled = settleUnreportedPasses([
+    { tiploc: "MIRFEJN", atp: "13:55", actual_source: "trust" },
+    { tiploc: "THHLNWJ", wtp: null, etp: "13:55", atp: null, actual_source: "inferred" },
+    { tiploc: "RTHP", atp: "13:56", actual_source: "td" },
+  ]);
+  assert.equal(settled[1].atp, null);
+  assert.equal(settled[1].etp, "13:55");
 });
 
 test("schedule pass uses the path that also reaches the next stop", () => {

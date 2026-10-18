@@ -55,14 +55,14 @@ export function dropUnreportedPasses(calls) {
   });
 }
 
-function nearestOpenVisit(calls, tiploc, clock) {
+/** The booked visit this clock belongs to. A filled visit is not skipped, so the other passing of the same junction is left alone. */
+function nearestBookedVisitIndex(calls, tiploc, clock) {
   const key = String(tiploc || "").toUpperCase();
   const minute = hmToMin(clock);
   let best = -1;
   let bestDelta = Infinity;
   calls.forEach((call, index) => {
     if (String(call.tiploc || "").toUpperCase() !== key) return;
-    if (call.atp || call.atd || call.ata) return;
     const booked = hmToMin(call.wtp || call.wtd || call.wta || call.std || call.sta);
     let delta = booked == null || minute == null ? 0 : Math.abs(booked - minute);
     if (delta > 12 * 60) delta = 1440 - delta;
@@ -232,14 +232,58 @@ function onSegment(a, b, point, slack = 400) {
   return t;
 }
 
+function clockSeconds(value) {
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(value || ""));
+  if (!m) return null;
+  return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] || 0);
+}
+
+function formatClock(seconds, withSeconds) {
+  const wrapped = ((Math.round(seconds) % 86400) + 86400) % 86400;
+  const hh = String(Math.floor(wrapped / 3600)).padStart(2, "0");
+  const mm = String(Math.floor((wrapped % 3600) / 60)).padStart(2, "0");
+  const ss = String(wrapped % 60).padStart(2, "0");
+  return withSeconds ? `${hh}:${mm}:${ss}` : `${hh}:${mm}`;
+}
+
+function interpolateClock(a, b, t) {
+  const as = clockSeconds(a);
+  const bs = clockSeconds(b);
+  if (as == null || bs == null) return null;
+  let delta = bs - as;
+  if (delta < -12 * 3600) delta += 86400;
+  else if (delta < 0) delta = 0;
+  const withSeconds = String(a).split(":").length > 2 || String(b).split(":").length > 2;
+  return formatClock(as + delta * t, withSeconds);
+}
+
+function reportedClock(call) {
+  return call?.atp || call?.atd || call?.ata || null;
+}
+
+/** Working time and pass time are each taken from the calls on either side. */
+function guessBetween(before, after, t) {
+  const fraction = Number.isFinite(t) ? t : 0.5;
+  const wtp = interpolateClock(callClock(before), callClock(after), fraction);
+  const passed = Boolean(reportedClock(before) && reportedClock(after));
+  const live = interpolateClock(reportedClock(before), reportedClock(after), fraction);
+  return { wtp, atp: passed ? live : null, etp: passed ? null : wtp };
+}
+
 /**
  * A junction the timetable omitted, when other trains leave the previous
  * stop through it and it sits on the way to the next call.
  */
-export function insertSegmentJunctions(calls, sequences, coords) {
+export function insertSegmentJunctions(calls, sequences, coords, junctions = []) {
   const spine = (calls || []).filter((c) => c?.tiploc).map((c) => ({ ...c }));
   if (spine.length < 2) return spine;
-  const locate = coords instanceof Map ? (tpl) => coords.get(String(tpl || "").toUpperCase()) : () => null;
+  const map = coords instanceof Map ? new Map(coords) : new Map();
+  for (const junction of junctions || []) {
+    const key = String(junction?.tiploc || "").toUpperCase();
+    if (!key || junction.e == null || junction.n == null || map.has(key)) continue;
+    map.set(key, { e: Number(junction.e), n: Number(junction.n) });
+  }
+  const locate = (tpl) => map.get(String(tpl || "").toUpperCase());
   const nextOf = new Map();
   for (const seq of sequences || []) {
     for (let i = 0; i < seq.length - 1; i++) {
@@ -255,24 +299,51 @@ export function insertSegmentJunctions(calls, sequences, coords) {
     }
   }
   const present = new Set(spine.map((c) => String(c.tiploc).toUpperCase()));
+  const stanoxOf = new Map();
+  for (const junction of junctions || []) {
+    const key = String(junction?.tiploc || "").toUpperCase();
+    if (key && junction.stanox) stanoxOf.set(key, String(junction.stanox));
+  }
+  const presentStanox = new Set();
+  for (const tiploc of present) {
+    const stanox = stanoxOf.get(tiploc);
+    if (stanox) presentStanox.add(stanox);
+  }
   const out = [];
   for (let i = 0; i < spine.length; i++) {
     if (i > 0) {
       const prev = String(spine[i - 1].tiploc).toUpperCase();
       const here = String(spine[i].tiploc).toUpperCase();
       const candidates = [];
+      const seen = new Set();
+      const consider = (tpl) => {
+        const key = String(tpl || "").toUpperCase();
+        if (!key || key === here || present.has(key) || seen.has(key)) return;
+        const t = onSegment(locate(prev), locate(here), locate(key));
+        if (t == null) return;
+        seen.add(key);
+        candidates.push({ tpl: key, t });
+      };
       for (const [tpl, count] of nextOf.get(prev) || []) {
-        if (count < 3 || tpl === here || present.has(tpl)) continue;
-        const t = onSegment(locate(prev), locate(here), locate(tpl));
-        if (t == null) continue;
-        candidates.push({ tpl, t });
+        if (count < 3) continue;
+        consider(tpl);
+      }
+      for (const junction of junctions || []) {
+        const key = String(junction?.tiploc || "").toUpperCase();
+        const stanox = key ? stanoxOf.get(key) : "";
+        if (stanox && presentStanox.has(stanox)) continue;
+        const t = onSegment(locate(prev), locate(here), locate(key), 280);
+        if (t == null || !key || key === here || present.has(key) || seen.has(key)) continue;
+        seen.add(key);
+        if (stanox) presentStanox.add(stanox);
+        candidates.push({ tpl: key, t });
       }
       candidates.sort((a, b) => a.t - b.t);
-      const t0 = callClock(spine[i - 1]);
-      const t1 = callClock(spine[i]);
-      candidates.forEach((candidate, index) => {
+      const before = spine[i - 1];
+      const after = spine[i];
+      candidates.forEach((candidate) => {
         present.add(candidate.tpl);
-        const wtp = interpolateHm(t0, t1, index, candidates.length);
+        const guess = guessBetween(before, after, candidate.t);
         out.push({
           tiploc: candidate.tpl,
           crs: null,
@@ -281,12 +352,12 @@ export function insertSegmentJunctions(calls, sequences, coords) {
           platform: null,
           wta: null,
           wtd: null,
-          wtp,
-          etp: wtp,
+          wtp: guess.wtp,
+          etp: guess.atp ? null : guess.etp,
           ata: null,
           atd: null,
-          atp: null,
-          live_kind: "est",
+          atp: guess.atp,
+          live_kind: guess.atp ? "actual" : "est",
           actual_source: "inferred",
         });
       });
@@ -343,6 +414,49 @@ function callActualMin(call) {
   return hmToMin(call?.atp || call?.atd || call?.ata);
 }
 
+function stanoxByTiploc(catalog, tiplocs) {
+  const map = new Map();
+  if (!catalog) return map;
+  let stmt;
+  try {
+    stmt = catalog.prepare(`SELECT stanox FROM corpus WHERE tiploc = ? COLLATE NOCASE`);
+  } catch {
+    return map;
+  }
+  for (const tiploc of tiplocs || []) {
+    const key = String(tiploc || "").toUpperCase();
+    if (!key || map.has(key)) continue;
+    const row = stmt.get(key);
+    const stanox = String(row?.stanox || "").trim();
+    if (stanox) map.set(key, stanox);
+  }
+  return map;
+}
+
+/**
+ * Two TIPLOCs can name one junction. A report for the other spelling updates
+ * the place already on this train instead of adding a second row.
+ */
+export function reportsOnServiceTiploc(calls, reports, stanoxOf) {
+  const present = [];
+  for (const call of calls || []) {
+    const tiploc = String(call?.tiploc || "").toUpperCase();
+    if (tiploc && !present.includes(tiploc)) present.push(tiploc);
+  }
+  const onService = new Set(present);
+  const stanoxToCall = new Map();
+  for (const tiploc of present) {
+    const stanox = stanoxOf?.(tiploc);
+    if (stanox && !stanoxToCall.has(stanox)) stanoxToCall.set(stanox, tiploc);
+  }
+  return (reports || []).map((report) => {
+    const tiploc = String(report?.tiploc || "").toUpperCase();
+    if (!tiploc || onService.has(tiploc)) return { ...report, tiploc };
+    const existing = stanoxToCall.get(stanoxOf?.(tiploc));
+    return { ...report, tiploc: existing || tiploc };
+  });
+}
+
 function tiplocForStanox(catalog, stanox) {
   if (!catalog || !stanox) return "";
   try {
@@ -381,9 +495,10 @@ export function applyLiveToInferred(db, calls, trainId, catalog = null) {
     }
   }
   for (const [tiploc, ev] of byTpl) {
-    const index = nearestOpenVisit(rows, tiploc, ev.actual);
+    const index = nearestBookedVisitIndex(rows, tiploc, ev.actual);
     if (index < 0 || !ev?.actual) continue;
     const call = rows[index];
+    if (call.atp || call.atd || call.ata) continue;
     const kind = String(ev.event_type || "").toUpperCase();
     if (Number(call.is_passing) || kind === "PASS") {
       call.atp = ev.actual;
@@ -560,6 +675,8 @@ export function settleUnreportedPasses(calls) {
     const call = rows[i];
     if (String(call.actual_source || "") !== "inferred") continue;
     if (call.atp || call.atd || call.ata) continue;
+    // No booked time: the clock is only an estimate, so it is not cleared into "No report".
+    if (callBookedMin(call) == null && call.etp) continue;
     call.etp = null;
     call.etd = null;
     call.eta = null;
@@ -583,7 +700,18 @@ function tdByTiploc(db, headcode, catalog, calls) {
     if (!tpl || byTpl.has(tpl)) continue;
     byTpl.set(tpl, row);
   }
-  return byTpl;
+  const rows = [...byTpl.entries()].map(([tiploc, row]) => ({ tiploc, row }));
+  const stanoxOf = stanoxByTiploc(catalog, [
+    ...hints,
+    ...rows.map((item) => item.tiploc),
+  ]);
+  const aliased = reportsOnServiceTiploc(calls, rows, (tiploc) => stanoxOf.get(tiploc));
+  const out = new Map();
+  for (const item of aliased) {
+    const prev = out.get(item.tiploc);
+    if (!prev || Number(item.row?.received_at || 0) >= Number(prev.received_at || 0)) out.set(item.tiploc, item.row);
+  }
+  return out;
 }
 
 function callMinute(call) {
@@ -645,6 +773,36 @@ export function reportsForService(calls, reports, coords = null) {
   });
 }
 
+let namedJunctionCache = null;
+
+/** Junctions with a grid position. Sidings and depots are left out. */
+export function namedJunctionPoints(catalog) {
+  if (namedJunctionCache) return namedJunctionCache;
+  if (!catalog) return [];
+  try {
+    const rows = catalog
+      .prepare(
+        `SELECT c.tiploc AS tiploc, c.name AS name, c.crs AS crs, c.stanox AS stanox,
+                g.easting AS e, g.northing AS n
+         FROM corpus c
+         JOIN tiploc_geo g ON g.tiploc = c.tiploc
+         WHERE c.name LIKE '%Junction%' AND g.easting IS NOT NULL AND g.northing IS NOT NULL`,
+      )
+      .all();
+    namedJunctionCache = rows
+      .filter((row) => row.e != null && row.n != null && !isNonPassengerLocation(row.tiploc, { name: row.name, crs: row.crs }))
+      .map((row) => ({
+        tiploc: String(row.tiploc).toUpperCase(),
+        e: Number(row.e),
+        n: Number(row.n),
+        stanox: String(row.stanox || "").trim(),
+      }));
+  } catch {
+    namedJunctionCache = [];
+  }
+  return namedJunctionCache;
+}
+
 export function tiplocCoords(catalog, tiplocs) {
   const map = new Map();
   if (!catalog) return map;
@@ -675,6 +833,7 @@ export function insertReportedPasses(calls, reports) {
   for (const report of reports || []) {
     const tiploc = String(report.tiploc || "").toUpperCase();
     if (!tiploc || present.has(tiploc) || report.minute == null || !report.clock) continue;
+    if (isNonPassengerLocation(tiploc, { name: report.name, crs: report.crs })) continue;
     present.add(tiploc);
     pending.push({ ...report, tiploc });
   }
@@ -728,7 +887,8 @@ export function collectReportedPasses(db, calls, trainId, headcode, catalog = nu
       const minute = hmToMin(clock);
       if (!tiploc || minute == null) continue;
       const meta = corpusMeta(catalog, tiploc);
-      byTpl.set(tiploc, { tiploc, crs: meta.crs || null, clock, minute, source: "trust" });
+      if (isNonPassengerLocation(tiploc, meta)) continue;
+      byTpl.set(tiploc, { tiploc, crs: meta.crs || null, name: meta.name || "", clock, minute, source: "trust" });
     }
   }
   for (const [tiploc, row] of tdByTiploc(db, headcode, catalog, calls)) {
@@ -736,9 +896,15 @@ export function collectReportedPasses(db, calls, trainId, headcode, catalog = nu
     const minute = hmToMin(clock);
     if (!tiploc || minute == null) continue;
     const meta = corpusMeta(catalog, tiploc);
-    byTpl.set(tiploc, { tiploc, crs: meta.crs || null, clock, minute, source: "td" });
+    if (isNonPassengerLocation(tiploc, meta)) continue;
+    byTpl.set(tiploc, { tiploc, crs: meta.crs || null, name: meta.name || "", clock, minute, source: "td" });
   }
-  return [...byTpl.values()];
+  const reports = [...byTpl.values()];
+  const stanoxOf = stanoxByTiploc(catalog, [
+    ...(calls || []).map((call) => call.tiploc),
+    ...reports.map((report) => report.tiploc),
+  ]);
+  return reportsOnServiceTiploc(calls, reports, (tiploc) => stanoxOf.get(tiploc));
 }
 
 export function overlayTdOnCalls(db, calls, headcode, catalog = null) {
