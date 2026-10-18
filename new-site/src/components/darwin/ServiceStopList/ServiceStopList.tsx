@@ -728,7 +728,12 @@ export function ServiceStopList({
     .filter(({ stop, index }) => {
       const kind = slotKind(stop.slot)
       if (!showPasses && kind === 'pass') return false
-      if (showPasses && kind === 'pass' && String(stop.actualSource || '') === 'inferred') return false
+      if (
+        showPasses &&
+        kind === 'pass' &&
+        String(stop.actualSource || '') === 'inferred' &&
+        !stopHasActual(stop)
+      ) return false
       if (
         showPasses &&
         kind === 'pass' &&
