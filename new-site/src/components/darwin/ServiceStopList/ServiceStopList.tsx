@@ -282,6 +282,24 @@ function delayFromStop(stop: ServiceStop, kind: StopKind): number | null {
   return colourDelay(stop, kind)
 }
 
+/** Live intermediate stop: arrival is the headline. The departure is added only after the train has left. */
+export function stationArrivalFirst(
+  stop: ServiceStop,
+  kind: StopKind,
+): { time: string; delay: string; departedTime: string | null; departedDelay: string } | null {
+  if (kind !== 'stop') return null
+  const arrived = preserveClock(stop.ata)
+  if (!trimSeconds(arrived)) return null
+  const { arrival, departure } = movementDelays(stop, kind)
+  const left = preserveClock(stop.atd)
+  return {
+    time: arrived,
+    delay: formatDelayLabel(arrival),
+    departedTime: trimSeconds(left) ? left : null,
+    departedDelay: formatDelayLabel(departure),
+  }
+}
+
 export function arrivalAside(stop: ServiceStop, kind: StopKind): string | null {
   if (kind === 'pass' || kind === 'destination') return null
   if (!trimSeconds(stop.atd) || !trimSeconds(stop.ata)) return null
@@ -394,7 +412,8 @@ function ServiceStopRow({
   const clocks = rowClocks(kind, stop)
   const deltaMinutes = delayMinutesProp ?? delayFromStop(stop, kind)
   const time = primaryTime(stop, kind)
-  const arrivedNote = arrivalAside(stop, kind)
+  const arrivedNote = historical ? arrivalAside(stop, kind) : null
+  const arrivalFirst = historical ? null : stationArrivalFirst(stop, kind)
   const status = buildStopStatus(
     stop,
     kind,
@@ -431,8 +450,13 @@ function ServiceStopRow({
     ? shownClock(stop.atp || stop.etp, detailed)
     : kind === 'destination'
       ? ''
-      : shownClock(stop.atd || stop.etd, detailed)
-  const statusTime = shownClock(status.time, detailed)
+      : shownClock(stop.atd || (arrivalFirst ? null : stop.etd), detailed)
+  const statusVerb = arrivalFirst ? 'Arrived' : status.verb
+  const statusTime = shownClock(arrivalFirst ? arrivalFirst.time : status.time, detailed)
+  const statusDelay = arrivalFirst ? arrivalFirst.delay : status.delay
+  const departedNote = arrivalFirst?.departedTime
+    ? `Departed at ${shownClock(arrivalFirst.departedTime, detailed)}${arrivalFirst.departedDelay}`
+    : null
   const statusEta = status.eta ? shownClock(status.eta, detailed) : status.eta
   const colCount = detailed ? 6 : 4
   const dash = (value: string) => value || '—'
@@ -486,16 +510,17 @@ function ServiceStopRow({
         <td className={`svc-stops-table__status${status.note || status.eta ? ' svc-stops-table__status--note' : ''}`}>
           {statusTime ? (
             <>
-              {status.verb ? (
+              {statusVerb ? (
                 <span className="svc-stops-table__status-main">
-                  {status.verb}
+                  {statusVerb}
                   <span className="svc-stops-table__status-at"> at</span>
                 </span>
               ) : null}
               {' '}
               <span className="svc-stops-table__status-meta">
                 {statusTime}
-                {status.delay ? <span className="svc-stops-table__status-delay">{status.delay}</span> : null}
+                {statusDelay ? <span className="svc-stops-table__status-delay">{statusDelay}</span> : null}
+                {departedNote ? <span className="svc-stops-table__status-delay"> {departedNote}</span> : null}
                 {arrivedNote ? <span className="svc-stops-table__status-delay">{arrivedNote}</span> : null}
               </span>
             </>
@@ -732,7 +757,8 @@ export function ServiceStopList({
         showPasses &&
         kind === 'pass' &&
         String(stop.actualSource || '') === 'inferred' &&
-        !stopHasActual(stop)
+        !stopHasActual(stop) &&
+        !trimSeconds(stop.etp)
       ) return false
       if (
         showPasses &&

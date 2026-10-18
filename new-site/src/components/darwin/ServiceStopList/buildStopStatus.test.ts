@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ServiceStop } from '@/types/darwin'
-import { arrivalAside, buildStopStatus, colourDelay, delayMinutesAlong, platformCell } from './ServiceStopList'
+import { arrivalAside, buildStopStatus, colourDelay, delayMinutesAlong, platformCell, stationArrivalFirst } from './ServiceStopList'
 
 function passStop(overrides: Partial<ServiceStop> = {}): ServiceStop {
   return {
@@ -26,6 +26,27 @@ describe('buildStopStatus densify / working passes', () => {
     const status = buildStopStatus(passStop(), 'pass', 6, '17:59', false, null, null, true)
     expect(status.verb).toBe('No report')
     expect(status.time).toBe('17:59')
+  })
+
+  it('shows a calculated junction guess as a normal pass', () => {
+    const status = buildStopStatus(
+      passStop({
+        tpl: 'THHLNWJ',
+        crs: null,
+        wtp: '13:54',
+        atp: '13:55:36',
+        liveTime: '13:55:36',
+        liveKind: 'actual',
+        actualSource: 'inferred',
+      }),
+      'pass',
+      1,
+      '13:54',
+      false,
+    )
+    expect(status.verb).toBe('Passed')
+    expect(status.time).toBe('13:55:36')
+    expect(status.delay).toBe('(+1m L)')
   })
 
   it('still shows Passed when an actual pass time exists', () => {
@@ -72,7 +93,12 @@ describe('calling pattern path and carried delay', () => {
       liveKind: 'actual',
     })
     expect(colourDelay(leeds, 'stop')).toBe(0)
-    expect(arrivalAside(leeds, 'stop')).toBe('Arrived 4m E')
+    expect(stationArrivalFirst(leeds, 'stop')).toEqual({
+      time: '14:12',
+      delay: '(4m E)',
+      departedTime: '14:23',
+      departedDelay: '(0 L)',
+    })
     const waiting = passStop({
       slot: 'IP',
       wtp: null,
@@ -83,6 +109,9 @@ describe('calling pattern path and carried delay', () => {
       liveKind: 'actual-arr',
     })
     expect(colourDelay(waiting, 'stop')).toBe(-4)
+    const waitingOnly = stationArrivalFirst(waiting, 'stop')
+    expect(waitingOnly?.departedTime).toBeNull()
+    expect(waitingOnly?.time).toBe('14:12')
     const terminus = passStop({
       slot: 'DT',
       wtp: null,
