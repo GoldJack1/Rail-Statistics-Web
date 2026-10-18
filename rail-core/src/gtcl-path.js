@@ -1,7 +1,8 @@
 /**
  * Passes the timetable does not book, compiled the way Railfeed describes it.
  * Schedule neighbours come first. A place is kept only when it also lies on
- * the GTCL path and has at least two rail neighbours. The clock is the booked
+ * the GTCL path and is a current timing tip or a working-timetable link.
+ * A junction drawn on the map is not enough. The clock is the booked
  * running time split by distance along that path.
  */
 import { DatabaseSync } from "node:sqlite";
@@ -10,7 +11,7 @@ import { callClock } from "./tiploc-graph.js";
 
 const NEAR_M = 40;
 const SCHEDULE_M = 70;
-const SNAP_M = 80;
+const SNAP_M = 120;
 const CELL = 200;
 
 const PASSING =
@@ -91,6 +92,76 @@ function keepLocation(loc) {
   return PASSING.test(name);
 }
 
+function locKey(loc) {
+  return `${Math.floor(loc.e / CELL)},${Math.floor(loc.n / CELL)}`;
+}
+
+function indexLocations(locs) {
+  const grid = new Map();
+  for (const loc of locs) {
+    const list = grid.get(locKey(loc));
+    if (list) list.push(loc);
+    else grid.set(locKey(loc), [loc]);
+  }
+  return { locs, grid };
+}
+
+function isPublicCrs(loc) {
+  const crs = String(loc?.crs || "");
+  return crs.length === 3 && !crs.startsWith("X");
+}
+
+/**
+ * A compass junction drawn more than 1.2 km from its own station, while the
+ * station and the other same-name neighbours sit together, is on the wrong
+ * siding. Bletchley South is the case: the plot is south of Drayton Road, and
+ * every Bletchley neighbour is up at the station.
+ */
+export function anchorIsolatedPlaces(locs, pairs) {
+  const nbr = new Map();
+  const link = (a, b) => {
+    const from = String(a || "").toUpperCase();
+    const to = String(b || "").toUpperCase();
+    if (!from || !to || from === to) return;
+    if (!nbr.has(from)) nbr.set(from, new Set());
+    nbr.get(from).add(to);
+  };
+  for (const [a, b] of pairs || []) {
+    link(a, b);
+    link(b, a);
+  }
+  const by = new Map(locs.map((loc) => [loc.tiploc, loc]));
+  for (const loc of locs) {
+    if (isPublicCrs(loc) || !compassSide(loc.name)) continue;
+    const near = [];
+    for (const other of nbr.get(loc.tiploc) || []) {
+      const there = by.get(other);
+      if (!there) continue;
+      const d = Math.hypot(there.e - loc.e, there.n - loc.n);
+      if (d < 40 || d > 4000 || !samePlaceName(loc.name, there.name)) continue;
+      near.push(there);
+    }
+    if (near.length < 2 || !near.some(isPublicCrs)) continue;
+    const span = Math.max(
+      Math.max(...near.map((p) => p.e)) - Math.min(...near.map((p) => p.e)),
+      Math.max(...near.map((p) => p.n)) - Math.min(...near.map((p) => p.n)),
+    );
+    if (span > 800) continue;
+    const station = near.find(isPublicCrs);
+    const e = near.reduce((sum, p) => sum + p.e, 0) / near.length;
+    const n = near.reduce((sum, p) => sum + p.n, 0) / near.length;
+    if (Math.hypot(e - loc.e, n - loc.n) < 1200 || !station) continue;
+    // Sit just on the plotted side of the station, so the point stays on the
+    // running line instead of in the middle of the sidings.
+    const dx = loc.e - station.e;
+    const dy = loc.n - station.n;
+    const len = Math.hypot(dx, dy) || 1;
+    loc.e = station.e + (dx / len) * 200;
+    loc.n = station.n + (dy / len) * 200;
+  }
+  return locs;
+}
+
 function loadLocations(catalog) {
   const rows = catalog
     .prepare(
@@ -100,7 +171,6 @@ function loadLocations(catalog) {
        WHERE g.easting IS NOT NULL AND g.northing IS NOT NULL`,
     )
     .all();
-  const grid = new Map();
   const locs = [];
   for (const row of rows) {
     const loc = {
@@ -112,12 +182,18 @@ function loadLocations(catalog) {
     };
     if (!loc.tiploc || !Number.isFinite(loc.e)) continue;
     locs.push(loc);
-    const k = `${Math.floor(loc.e / CELL)},${Math.floor(loc.n / CELL)}`;
-    const list = grid.get(k);
-    if (list) list.push(loc);
-    else grid.set(k, [loc]);
   }
-  return { locs, grid };
+  let links = [];
+  try {
+    links = catalog.prepare(`SELECT from_tpl, to_tpl FROM nwk_edges`).all();
+  } catch {
+    links = [];
+  }
+  anchorIsolatedPlaces(
+    locs,
+    links.map((row) => [row.from_tpl, row.to_tpl]),
+  );
+  return indexLocations(locs);
 }
 
 let railCache = null;
@@ -286,16 +362,34 @@ function samePlaceName(a, b) {
   return false;
 }
 
-/** East junction is reached after the station when the train is going east. */
-function stationBeforeJunction(anchor, mid, next) {
-  if (!anchor || !mid || !next) return false;
-  if (Math.hypot(anchor.e - mid.e, anchor.n - mid.n) > 200) return false;
-  if (!samePlaceName(anchor.name, mid.name)) return false;
-  if (/junction|\bjn\b/i.test(mid.name || "")) return false;
-  const side = /\beast\b/i.test(anchor.name || "") ? "east" : /\bwest\b/i.test(anchor.name || "") ? "west" : null;
-  if (!side || !/junction|\bjn\b/i.test(anchor.name || "")) return false;
-  const goingEast = next.e >= anchor.e;
-  return (side === "east" && goingEast) || (side === "west" && !goingEast);
+const ROUTE_OFF_M = 80;
+
+function isScheduleCall(call) {
+  return Boolean(call?.wtp || call?.wtd || call?.wta || call?.sta || call?.std || call?.ptd || call?.pta);
+}
+
+function pathEdges(graph, a, b) {
+  ensureCells(graph);
+  const straight = Math.hypot(a.e - b.e, a.n - b.n);
+  const maxLen = straight * 1.8 + 400;
+  for (const from of snapCandidates(graph, a.e, a.n, b).slice(0, 3)) {
+    for (const to of snapCandidates(graph, b.e, b.n, a).slice(0, 3)) {
+      const walked = route(graph, from.key, to.key, maxLen);
+      if (walked?.length) return walked;
+    }
+  }
+  return null;
+}
+
+function projectOnPath(loc, edges) {
+  let best = null;
+  let chain = 0;
+  for (const edge of edges) {
+    const hit = pointSegDist(loc.e, loc.n, edge.ax, edge.ay, edge.bx, edge.by);
+    if (!best || hit.d < best.d) best = { d: hit.d, at: chain + hit.t * edge.len };
+    chain += edge.len;
+  }
+  return best;
 }
 
 function pointSegDist(px, py, ax, ay, bx, by) {
@@ -340,9 +434,11 @@ function midsBetween(graph, locIndex, rail, a, b, used, tlk) {
       for (let y = y0; y <= y1; y++) {
         for (const loc of locIndex.grid.get(`${x},${y}`) || []) {
           if (used.has(loc.tiploc) || seen.has(loc.tiploc) || !keepLocation(loc)) continue;
-          const neighbours = rail.nbr.get(loc.tiploc);
-          if (!neighbours || neighbours.size < 2) continue;
-          if (tlk && !tlkTips(tlk).has(loc.tiploc)) continue;
+          // A junction drawn on the map is not enough. Old layouts and junctions
+          // that are not open yet sit on the same centreline. Only a current
+          // timing tip, or a place the working timetable still links, is added.
+          const timed = (tlk && tlkTips(tlk).has(loc.tiploc)) || rail.schedule.has(loc.tiploc);
+          if (!timed) continue;
           const hit = pointSegDist(loc.e, loc.n, edge.ax, edge.ay, edge.bx, edge.by);
           if (hit.d > NEAR_M) continue;
           seen.add(loc.tiploc);
@@ -394,6 +490,9 @@ export function insertGtclPasses(calls, graph, catalog, timingLoad, tlkFile) {
     const a = byTpl.get(String(calls[i].tiploc || "").toUpperCase());
     const b = byTpl.get(String(calls[i + 1].tiploc || "").toUpperCase());
     if (!a || !b) continue;
+    // A report left before the origin must not walk the whole route backwards.
+    // A normal gap, Leighton Buzzard to Bletchley is about 10 km, still fills.
+    if (!isScheduleCall(calls[i]) && Math.hypot(a.e - b.e, a.n - b.n) > 30000) continue;
     const t0 = callClock(calls[i]);
     const t1 = callClock(calls[i + 1]);
     const live0 = calls[i].atp || calls[i].atd || calls[i].ata || calls[i].etp || calls[i].etd || calls[i].eta;
@@ -416,8 +515,7 @@ export function insertGtclPasses(calls, graph, catalog, timingLoad, tlkFile) {
         actual_source: "inferred",
         platform: null,
       };
-      if (stationBeforeJunction(a, mid.loc, b)) out.splice(out.length - 1, 0, row);
-      else out.push(row);
+      out.push(row);
     }
   }
   return out;
@@ -468,19 +566,191 @@ export function assignTrackMiles(calls, graph, catalog) {
   return rows;
 }
 
-/** A station berth reported after its own east junction still belongs before it. */
-export function orderStationBeforeEastJunction(calls, catalog) {
+/**
+ * Timetable calls stay in schedule order. A report with no booked time is
+ * placed where it sits on the track between those calls, so the same rule
+ * holds on every route.
+ */
+export function orderByTrack(calls, graph, locList) {
   const rows = (calls || []).map((c) => ({ ...c }));
-  if (!catalog) return rows;
-  const byTpl = new Map(locations(catalog).locs.map((l) => [l.tiploc, l]));
-  for (let i = 1; i < rows.length; i++) {
-    const prev = byTpl.get(String(rows[i - 1].tiploc || "").toUpperCase());
-    const cur = byTpl.get(String(rows[i].tiploc || "").toUpperCase());
-    const next = byTpl.get(String(rows[i + 1]?.tiploc || "").toUpperCase());
-    if (!stationBeforeJunction(prev, cur, next || (prev ? { e: prev.e + 1, n: prev.n } : null))) continue;
-    const swap = rows[i - 1];
-    rows[i - 1] = rows[i];
-    rows[i] = swap;
+  if (!graph || rows.length < 2) return rows;
+  const byTpl = new Map((locList || []).map((loc) => [String(loc.tiploc || "").toUpperCase(), loc]));
+  const anchorAt = [];
+  rows.forEach((row, index) => {
+    if (isScheduleCall(row)) anchorAt.push(index);
+  });
+  if (anchorAt.length < 2) return rows;
+  const paths = [];
+  for (let gap = 0; gap < anchorAt.length - 1; gap++) {
+    const from = byTpl.get(String(rows[anchorAt[gap]].tiploc || "").toUpperCase());
+    const to = byTpl.get(String(rows[anchorAt[gap + 1]].tiploc || "").toUpperCase());
+    paths.push(from && to ? pathEdges(graph, from, to) : null);
+  }
+  const onRoute = anchorAt.slice(0, -1).map(() => []);
+  const placed = new Set();
+  for (let index = 0; index < rows.length; index++) {
+    if (isScheduleCall(rows[index])) continue;
+    const loc = byTpl.get(String(rows[index].tiploc || "").toUpperCase());
+    if (!loc) continue;
+    let best = null;
+    for (let gap = 0; gap < paths.length; gap++) {
+      if (!paths[gap]) continue;
+      const hit = projectOnPath(loc, paths[gap]);
+      if (!hit || hit.d > ROUTE_OFF_M) continue;
+      if (!best || hit.d < best.d) best = { gap, at: hit.at, index };
+    }
+    if (!best) continue;
+    onRoute[best.gap].push(best);
+    placed.add(index);
+  }
+  const lead = [];
+  const unmatched = anchorAt.slice(0, -1).map(() => []);
+  const tail = [];
+  for (let index = 0; index < rows.length; index++) {
+    if (isScheduleCall(rows[index]) || placed.has(index)) continue;
+    let gap = -1;
+    for (let anchor = 0; anchor < anchorAt.length; anchor++) {
+      if (anchorAt[anchor] < index) gap = anchor;
+      else break;
+    }
+    if (gap < 0) lead.push(rows[index]);
+    else if (gap >= anchorAt.length - 1) tail.push(rows[index]);
+    else unmatched[gap].push(rows[index]);
+  }
+  const out = [...lead];
+  for (let gap = 0; gap < anchorAt.length; gap++) {
+    out.push(rows[anchorAt[gap]]);
+    if (gap >= anchorAt.length - 1) continue;
+    onRoute[gap].sort((a, b) => a.at - b.at || a.index - b.index);
+    for (const hit of onRoute[gap]) out.push(rows[hit.index]);
+    out.push(...unmatched[gap]);
+  }
+  out.push(...tail);
+  return out;
+}
+
+export function orderCallsAlongTrack(calls, graph, catalog) {
+  if (!graph || !catalog) return (calls || []).map((c) => ({ ...c }));
+  return orderByTrack(calls, graph, locations(catalog).locs);
+}
+
+const CLOSE_M = 120;
+// A named side plotted on the wrong side of the same place, up to about a kilometre.
+const SIDE_M = 1100;
+
+function compassSide(name) {
+  const text = String(name || "");
+  const long = text.match(/\b(north|south|east|west)\b/i);
+  if (long) return long[1].toLowerCase();
+  const short = text.match(/\b([nsew])\.?\s*(?:jn|jcn|junction)\b/i);
+  if (!short) return null;
+  return { n: "north", s: "south", e: "east", w: "west" }[short[1].toLowerCase()];
+}
+
+function sideAxis(side) {
+  if (side === "north" || side === "south") return "ns";
+  if (side === "east" || side === "west") return "ew";
+  return null;
+}
+
+/** 0 is reached first. A place with no side sits in the middle. */
+function sideRank(side, towardPositive) {
+  if (!side) return 1;
+  const positive = side === "north" || side === "east";
+  return towardPositive === positive ? 2 : 0;
+}
+
+function coordinated(rows, byTpl, index) {
+  const row = rows[index];
+  if (!row) return null;
+  return byTpl.get(String(row.tiploc || "").toUpperCase()) || null;
+}
+
+function travelPast(rows, byTpl, index) {
+  let before = null;
+  for (let j = index - 2; j >= 0; j--) {
+    const loc = coordinated(rows, byTpl, j);
+    if (!loc) continue;
+    const here = coordinated(rows, byTpl, index - 1);
+    if (here && Math.hypot(loc.e - here.e, loc.n - here.n) < 200) continue;
+    before = loc;
+    break;
+  }
+  let after = null;
+  for (let j = index + 1; j < rows.length; j++) {
+    const loc = coordinated(rows, byTpl, j);
+    if (!loc) continue;
+    const here = coordinated(rows, byTpl, index);
+    if (here && Math.hypot(loc.e - here.e, loc.n - here.n) < 200) continue;
+    after = loc;
+    break;
+  }
+  if (!before || !after) return null;
+  return { dx: after.e - before.e, dy: after.n - before.n };
+}
+
+function plottedOnWrongSide(side, point, other) {
+  if (side === "east") return point.e < other.e - 50;
+  if (side === "west") return point.e > other.e + 50;
+  if (side === "north") return point.n < other.n - 50;
+  if (side === "south") return point.n > other.n + 50;
+  return false;
+}
+
+function closePairBackwards(rows, byTpl, index) {
+  const a = coordinated(rows, byTpl, index - 1);
+  const b = coordinated(rows, byTpl, index);
+  if (!a || !b) return false;
+  const dist = Math.hypot(a.e - b.e, a.n - b.n);
+  if (dist > SIDE_M) return false;
+  if (!samePlaceName(a.name, b.name)) return false;
+  const sideA = compassSide(a.name);
+  const sideB = compassSide(b.name);
+  const axis = sideAxis(sideA) || sideAxis(sideB);
+  if (!axis || (sideA && sideB && sideAxis(sideA) !== sideAxis(sideB))) return false;
+  if (dist > CLOSE_M) {
+    const wrong =
+      (sideA && plottedOnWrongSide(sideA, a, b)) || (sideB && plottedOnWrongSide(sideB, b, a));
+    // A kilometre is enough to fix Margam East plotted west of Margam Middle.
+    // It is not enough to pull Bletchley South back past Drayton Road: that
+    // second name is a different junction, not the middle of the same place.
+    const centre = (name) => {
+      const words = placeWords(name);
+      words.delete("middle");
+      return [...words].sort().join(" ");
+    };
+    if (!wrong || centre(a.name) !== centre(b.name)) return false;
+  }
+  const travel = travelPast(rows, byTpl, index);
+  if (!travel) return false;
+  const delta = axis === "ns" ? travel.dy : travel.dx;
+  if (Math.abs(delta) < 200) return false;
+  return sideRank(sideA, delta > 0) > sideRank(sideB, delta > 0);
+}
+
+/**
+ * Coordinates closer than about 120 m are inside survey noise. The named
+ * side then follows the direction of the train, which is the order Realtime
+ * Trains keeps.
+ */
+export function orderClosePlaces(calls, locList) {
+  const rows = (calls || []).map((c) => ({ ...c }));
+  const byTpl = new Map((locList || []).map((loc) => [String(loc.tiploc || "").toUpperCase(), loc]));
+  let moved = true;
+  for (let guard = 0; moved && guard < rows.length; guard++) {
+    moved = false;
+    for (let index = 1; index < rows.length; index++) {
+      if (!closePairBackwards(rows, byTpl, index)) continue;
+      const swap = rows[index - 1];
+      rows[index - 1] = rows[index];
+      rows[index] = swap;
+      moved = true;
+    }
   }
   return rows;
+}
+
+export function orderCloseCallingPlaces(calls, catalog) {
+  if (!catalog) return (calls || []).map((c) => ({ ...c }));
+  return orderClosePlaces(calls, locations(catalog).locs);
 }

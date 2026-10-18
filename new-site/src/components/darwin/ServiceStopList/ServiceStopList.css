@@ -90,6 +90,15 @@
 .svc-stops-key__item--delay-60 { background: var(--cp-delay-60-bg); color: var(--cp-delay-60-fg); }
 .svc-stops-key__item--cancelled { background: var(--cp-cancelled-bg); color: var(--cp-cancelled-fg); }
 
+.svc-stops-table .svc-stop-note {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  color: var(--text-secondary);
+  white-space: normal;
+}
+
 .svc-stops-table .svc-eta-short { display: none; }
 .svc-stops-table .svc-eta-full { display: inline; }
 

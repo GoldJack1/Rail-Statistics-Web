@@ -47,20 +47,64 @@ export function parseCifBxAtoc(line) {
   return /^[A-Z0-9]{2}$/.test(toc) ? toc : null;
 }
 
+function numericSpeed(raw) {
+  const text = String(raw || "").trim();
+  return /^\d{2,3}$/.test(text) ? String(Number(text)) : null;
+}
+
 /** CIF BS power type (47–49), timing load (50–53), speed (54–57), 1-based. */
 export function parseCifBsStock(line) {
-  if (!line || line.slice(0, 2) !== "BS") return { powerType: null, timingLoad: null };
+  if (!line || line.slice(0, 2) !== "BS") return { powerType: null, timingLoad: null, speed: null };
   const rawPower = line.slice(46, 49).trim().toUpperCase();
   const rawLoad = line.slice(49, 53).trim().toUpperCase();
   const speed = line.slice(53, 57).trim().toUpperCase();
   const knownPower = /^(EMU|DMU|DEM|HST|ED|E|D)$/;
   let powerType = rawPower && rawPower !== "000" ? rawPower : null;
   let timingLoad = rawLoad || null;
+  let mph = numericSpeed(line.slice(57, 60));
   if (!powerType && knownPower.test(rawLoad)) {
     powerType = rawLoad;
     timingLoad = /^\d+$/.test(speed) ? speed : null;
+  } else if (!mph) {
+    mph = numericSpeed(speed);
   }
-  return { powerType, timingLoad };
+  return { powerType, timingLoad, speed: mph };
+}
+
+/** CIF BS identity fields that sit beside the stock codes. */
+export function parseCifBsProfile(line) {
+  if (!line || line.slice(0, 2) !== "BS") return null;
+  const stock = parseCifBsStock(line);
+  return {
+    runsFrom: cifYymmdd(line.slice(9, 15)),
+    runsTo: cifYymmdd(line.slice(15, 21)),
+    daysRun: line.slice(21, 28),
+    bankHoliday: line.slice(28, 29).trim().toUpperCase() || null,
+    trainStatus: line.slice(29, 30).trim().toUpperCase() || null,
+    category: line.slice(30, 32).trim().toUpperCase() || null,
+    identity: line.slice(32, 36).trim().toUpperCase() || null,
+    headcode: line.slice(36, 40).trim().toUpperCase() || null,
+    tsc: line.slice(41, 49).trim().toUpperCase() || null,
+    speed: stock.speed,
+    operating: line.slice(60, 66).trim().toUpperCase() || null,
+    seating: line.slice(66, 67).trim().toUpperCase() || null,
+    reservations: line.slice(68, 69).trim().toUpperCase() || null,
+  };
+}
+
+/** CIF CR: timing load, power or speed changes from this location. */
+export function parseCifChange(line) {
+  if (!line || line.slice(0, 2) !== "CR") return null;
+  const tiploc = String(line.slice(2, 10) || "").trim().toUpperCase();
+  if (!tiploc) return null;
+  const power = line.slice(30, 33).trim().toUpperCase();
+  const load = line.slice(33, 37).trim().toUpperCase();
+  return {
+    tiploc,
+    powerType: power && power !== "000" ? power : null,
+    timingLoad: load || null,
+    speed: numericSpeed(line.slice(37, 40)),
+  };
 }
 
 function cifField(line, from, to) {
@@ -68,6 +112,12 @@ function cifField(line, from, to) {
     .slice(from, to)
     .trim()
     .toUpperCase() || null;
+}
+
+function cifAllowance(line, from) {
+  const raw = cifField(line, from, from + 2);
+  if (!raw || raw === "00") return null;
+  return raw;
 }
 
 /**
@@ -92,6 +142,9 @@ export function parseCifLocation(rec, line) {
       platform: cifField(line, 19, 22),
       line: cifField(line, 22, 25),
       path: null,
+      engineeringAllowance: cifAllowance(line, 25),
+      pathingAllowance: cifAllowance(line, 27),
+      performanceAllowance: cifAllowance(line, 29),
       passing: false,
     };
   }
@@ -108,6 +161,9 @@ export function parseCifLocation(rec, line) {
       platform: cifField(line, 19, 22),
       line: null,
       path: cifField(line, 22, 25),
+      engineeringAllowance: null,
+      pathingAllowance: null,
+      performanceAllowance: null,
       passing: false,
     };
   }
@@ -128,6 +184,9 @@ export function parseCifLocation(rec, line) {
     platform: cifField(line, 33, 36),
     line: cifField(line, 36, 39),
     path: cifField(line, 39, 42),
+    engineeringAllowance: cifAllowance(line, 44),
+    pathingAllowance: cifAllowance(line, 46),
+    performanceAllowance: cifAllowance(line, 48),
     passing,
   };
 }

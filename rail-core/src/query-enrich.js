@@ -45,6 +45,35 @@ export function dropUnreportedOrmPasses(calls, catalog) {
   return dropOrmDensifyPasses(calls, catalog);
 }
 
+/** Dev list: a place with no feed report is not a calling point. */
+export function dropUnreportedPasses(calls) {
+  return (calls || []).filter((c) => {
+    const src = String(c.actual_source || "");
+    if (src === "inferred") return false;
+    if (src === "orm") return Boolean(c.ata || c.atd || c.atp);
+    return true;
+  });
+}
+
+function nearestOpenVisit(calls, tiploc, clock) {
+  const key = String(tiploc || "").toUpperCase();
+  const minute = hmToMin(clock);
+  let best = -1;
+  let bestDelta = Infinity;
+  calls.forEach((call, index) => {
+    if (String(call.tiploc || "").toUpperCase() !== key) return;
+    if (call.atp || call.atd || call.ata) return;
+    const booked = hmToMin(call.wtp || call.wtd || call.wta || call.std || call.sta);
+    let delta = booked == null || minute == null ? 0 : Math.abs(booked - minute);
+    if (delta > 12 * 60) delta = 1440 - delta;
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = index;
+    }
+  });
+  return best;
+}
+
 function clockFromTrust(value) {
   const s = String(value || "").trim();
   const iso = /T(\d{2}):(\d{2}):(\d{2})/.exec(s);
@@ -273,10 +302,10 @@ export function applyLiveToInferred(db, calls, trainId, catalog = null) {
       if (tpl) byTpl.set(tpl, ev);
     }
   }
-  for (const call of rows) {
-    if (call.atp || call.atd || call.ata) continue;
-    const ev = byTpl.get(String(call.tiploc || "").toUpperCase());
-    if (!ev?.actual) continue;
+  for (const [tiploc, ev] of byTpl) {
+    const index = nearestOpenVisit(rows, tiploc, ev.actual);
+    if (index < 0 || !ev?.actual) continue;
+    const call = rows[index];
     const kind = String(ev.event_type || "").toUpperCase();
     if (Number(call.is_passing) || kind === "PASS") {
       call.atp = ev.actual;
@@ -420,6 +449,30 @@ export function carryRunningLateness(calls) {
     if (next != null && placed >= next) placed = Math.max(prev ?? next - 1, next - 1);
     if (placed !== shown) setShownMinute(call, placed);
     prev = placed;
+  }
+  return rows;
+}
+
+/**
+ * An inferred pass with only an interpolated clock is not a report. Once a
+ * later call has a real time, drop that estimate so the row is not left on
+ * "Expected at".
+ */
+export function settleUnreportedPasses(calls) {
+  const rows = (calls || []).map((c) => ({ ...c }));
+  let lastReal = -1;
+  rows.forEach((call, index) => {
+    if (isRealActual(call)) lastReal = index;
+  });
+  if (lastReal < 0) return rows;
+  for (let i = 0; i < lastReal; i++) {
+    const call = rows[i];
+    if (String(call.actual_source || "") !== "inferred") continue;
+    if (call.atp || call.atd || call.ata) continue;
+    call.etp = null;
+    call.etd = null;
+    call.eta = null;
+    call.live_kind = null;
   }
   return rows;
 }
@@ -600,14 +653,29 @@ export function collectReportedPasses(db, calls, trainId, headcode, catalog = nu
 export function overlayTdOnCalls(db, calls, headcode, catalog = null) {
   const byTpl = tdByTiploc(db, headcode, catalog, calls);
   if (!byTpl.size) return calls || [];
-  return (calls || []).map((c) => {
-    const ev = byTpl.get(String(c.tiploc || "").toUpperCase());
-    const actual = ev ? actualFromTdEvent(ev) : null;
-    if (c.ata || c.atd || c.atp) return actual ? withTdSeconds(c, actual) : c;
-    if (!actual) return c;
-    if (Number(c.is_passing)) {
-      return { ...c, atp: actual, live_kind: "actual", actual_source: c.actual_source || "td" };
+  const rows = (calls || []).map((c) => ({ ...c }));
+  for (const [tiploc, ev] of byTpl) {
+    const actual = actualFromTdEvent(ev);
+    if (!actual) continue;
+    const minute = hmToMin(actual);
+    let target = -1;
+    let best = Infinity;
+    rows.forEach((call, index) => {
+      if (String(call.tiploc || "").toUpperCase() !== tiploc) return;
+      const booked = hmToMin(call.wtp || call.wtd || call.wta || call.atp || call.atd || call.ata);
+      let delta = booked == null || minute == null ? 0 : Math.abs(booked - minute);
+      if (delta > 12 * 60) delta = 1440 - delta;
+      if (delta < best) {
+        best = delta;
+        target = index;
+      }
+    });
+    if (target < 0) continue;
+    const call = rows[target];
+    if (call.ata || call.atd || call.atp) rows[target] = withTdSeconds(call, actual);
+    else if (Number(call.is_passing)) {
+      rows[target] = { ...call, atp: actual, live_kind: "actual", actual_source: call.actual_source || "td" };
     }
-    return c;
-  });
+  }
+  return rows;
 }

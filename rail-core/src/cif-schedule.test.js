@@ -7,7 +7,9 @@ import {
   darwinScheduleAnchors,
   mergeDarwinCallsWithCifPasses,
   parseCifBxAtoc,
+  parseCifBsProfile,
   parseCifBsStock,
+  parseCifChange,
   parseCifLocation,
   parseCifTime,
 } from "./cif-schedule.js";
@@ -80,6 +82,66 @@ test("LI path and line and half-minute pass", () => {
   assert.equal(loc.wtp, "13:02½");
   assert.equal(loc.line, "UM");
   assert.equal(loc.path, "UF");
+});
+
+test("LI pathing allowance is half-minutes", () => {
+  const chars = "LI".padEnd(80, " ").split("");
+  const put = (from, text) => {
+    for (let i = 0; i < text.length; i++) chars[from + i] = text[i];
+  };
+  put(2, "APPERLYJ");
+  put(20, "1240 ");
+  put(46, "02");
+  const loc = parseCifLocation("LI", chars.join(""));
+  assert.equal(loc.pathingAllowance, "02");
+  assert.equal(loc.engineeringAllowance, null);
+});
+
+test("CIF BS profile reads the service code, dates and speed", () => {
+  const chars = "BS".padEnd(80, " ").split("");
+  const put = (from, text) => {
+    for (let i = 0; i < text.length; i++) chars[from + i] = text[i];
+  };
+  put(3, "C32529");
+  put(9, "260517");
+  put(15, "261206");
+  put(21, "0000001");
+  put(29, "P");
+  put(30, "OO");
+  put(32, "2H58");
+  put(36, "5908");
+  put(41, "21869000");
+  put(50, "DMU");
+  put(53, "150 ");
+  put(57, "075");
+  put(66, "S");
+  put(68, "A");
+  const profile = parseCifBsProfile(chars.join(""));
+  assert.equal(profile.identity, "2H58");
+  assert.equal(profile.headcode, "5908");
+  assert.equal(profile.tsc, "21869000");
+  assert.equal(profile.runsFrom, "2026-05-17");
+  assert.equal(profile.runsTo, "2026-12-06");
+  assert.equal(profile.daysRun, "0000001");
+  assert.equal(profile.seating, "S");
+  assert.equal(profile.reservations, "A");
+  assert.equal(profile.speed, "75");
+});
+
+test("CIF change en route carries the new timing load", () => {
+  const chars = "CR".padEnd(70, " ").split("");
+  const put = (from, text) => {
+    for (let i = 0; i < text.length; i++) chars[from + i] = text[i];
+  };
+  put(2, "SHIPLEY ");
+  put(30, "DMU");
+  put(33, "158 ");
+  put(37, "090");
+  const change = parseCifChange(chars.join(""));
+  assert.equal(change.tiploc, "SHIPLEY");
+  assert.equal(change.powerType, "DMU");
+  assert.equal(change.timingLoad, "158");
+  assert.equal(change.speed, "90");
 });
 
 test("CIF BS stock fields", () => {

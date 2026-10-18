@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByBookedTime, sortCallsByJourneyTime } from "./journey-order.js";
 
 test("orders a same-evening run from first time to last", () => {
   const rows = [
@@ -62,6 +62,23 @@ test("orders a short afternoon service 10:00 to 12:00", () => {
     sortCallsByJourneyTime(rows).map((r) => r.tiploc),
     ["A", "B", "C"],
   );
+});
+
+test("keeps a junction passed in and then back out", () => {
+  const rows = [
+    { tiploc: "SHIPLEY", seq: 4, wta: "12:44", wtd: "12:45", path: "DSM", line: "DSM" },
+    { tiploc: "SHIPWJ", seq: 5, wtp: "12:46", path: "DM" },
+    { tiploc: "SHIPLEY", seq: 8, wta: "13:10", wtd: "13:12", path: "UM", line: "UM" },
+    { tiploc: "SHIPWJ", seq: 9, wtp: "13:13", path: "UM" },
+    { tiploc: "SHIPLEY", seq: 4, wta: "12:44", wtd: "12:45", ata: "12:44" },
+  ];
+  const out = collapseRevisits(rows);
+  assert.deepEqual(
+    out.map((row) => `${row.tiploc}@${row.wtd || row.wtp}`),
+    ["SHIPLEY@12:45", "SHIPWJ@12:46", "SHIPLEY@13:12", "SHIPWJ@13:13"],
+  );
+  assert.equal(out[0].ata, "12:44");
+  assert.equal(out[0].path, "DSM");
 });
 
 test("collapses the same TIPLOC copied from an adjacent day file", () => {
@@ -148,6 +165,19 @@ test("recovers public dep when Darwin copied the actual onto std", () => {
     atd: "16:59",
   });
   assert.equal(recovered.std, "17:15");
+});
+
+test("an early estimate does not move a booked timing point", () => {
+  const rows = [
+    { tiploc: "EDINBUR", seq: 0, std: "21:15", wtd: "21:15" },
+    { tiploc: "HAYMRKT", seq: 2, wtd: "21:19" },
+    { tiploc: "EDINPRK", seq: 16, wtp: "21:21", etp: "09:38" },
+    { tiploc: "GLGQHL", seq: 15, sta: "22:04", wta: "22:04" },
+  ];
+  assert.deepEqual(
+    sortCallsByBookedTime(rows).map((r) => r.tiploc),
+    ["EDINBUR", "HAYMRKT", "EDINPRK", "GLGQHL"],
+  );
 });
 
 test("a working dwell with no public time is a pass", () => {

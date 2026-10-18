@@ -1,5 +1,5 @@
 import { londonInstant } from "./calendar-day.js";
-import { isWorkingPass, parseHmMinutes, sortCallsByJourneyTime } from "./journey-order.js";
+import { bookedCallMinutes, isWorkingPass, parseHmMinutes, railwayDayMinutes } from "./journey-order.js";
 
 function isPass(c) {
   return isWorkingPass(c);
@@ -25,8 +25,27 @@ function point(c) {
   };
 }
 
+function locationMinutes(call) {
+  return bookedCallMinutes(call) ?? parseHmMinutes(call?.atd || call?.ata || call?.atp);
+}
+
+/** Booked order, with an unbooked report placed by its actual clock. */
+function sortForLocation(calls) {
+  const list = calls || [];
+  return list
+    .map((call, index) => ({ call, index }))
+    .sort((a, b) => {
+      const am = locationMinutes(a.call);
+      const bm = locationMinutes(b.call);
+      const ak = am == null ? 10_000_000 + a.index : railwayDayMinutes(am) * 1000 + (Number(a.call.seq) || a.index);
+      const bk = bm == null ? 10_000_000 + b.index : railwayDayMinutes(bm) * 1000 + (Number(b.call.seq) || b.index);
+      return ak - bk || a.index - b.index;
+    })
+    .map((row) => row.call);
+}
+
 export function computeServiceLocation(calls, opts = {}) {
-  const journey = sortCallsByJourneyTime(calls || []);
+  const journey = sortForLocation(calls);
   const now = opts.now instanceof Date ? opts.now : new Date();
   const ymd = opts.ymd;
   if (!journey.length) {

@@ -277,6 +277,35 @@ export interface ServiceStop {
   path?: string | null;
   /** CIF/ITPS line code. */
   line?: string | null;
+  /** Set on the origin, and again where the timing load changes. */
+  pathedAs?: string | null;
+  /** Engineering, pathing and performance allowances booked at this location. */
+  allowances?: string[] | null;
+}
+
+export interface ServiceSchedule {
+  uid?: string | null;
+  identity?: string | null;
+  tsc?: string | null;
+  headcode?: string | null;
+  runsFrom?: string | null;
+  runsTo?: string | null;
+  daysRun?: string | null;
+  daysLabel?: string | null;
+  category?: string | null;
+  categoryLabel?: string | null;
+  operatingLabel?: string | null;
+  seating?: string | null;
+  seatingLabel?: string | null;
+  reservations?: string | null;
+  reservationsLabel?: string | null;
+  trustId?: string | null;
+  activatedAt?: string | null;
+  units?: string[] | null;
+  powerType?: string | null;
+  timingLoad?: string | null;
+  speed?: string | null;
+  pathedAs?: string | null;
 }
 
 export interface FormationCoach {
@@ -337,6 +366,8 @@ export interface ServiceDetail {
   trainClass?: string | null;
   powerType?: string | null;
   timingLoad?: string | null;
+  schedule?: ServiceSchedule | null;
+  units?: string[] | null;
   diagramNo?: string | null;
   diagramDate?: string | null;
   isPassenger: boolean;

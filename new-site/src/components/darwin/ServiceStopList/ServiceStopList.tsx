@@ -402,6 +402,8 @@ function ServiceStopRow({
               <span className="svc-stop-name-text">{label}</span>
               {stop.crs ? <span className="svc-stop-name-crs">{stop.crs}</span> : null}
               {kind !== 'pass' && <ActivityPill activity={stop.activity} />}
+              {stop.pathedAs ? <span className="svc-stop-note">{stop.pathedAs}</span> : null}
+              {stop.allowances?.length ? <span className="svc-stop-note">{stop.allowances.join(' · ')}</span> : null}
               {detailed && stop.legMiles != null && Number.isFinite(stop.legMiles) ? (
                 <span className="svc-stop-leg-miles" title={stop.cumMiles != null ? `${stop.cumMiles} mi from origin` : undefined}>
                   +{stop.legMiles.toFixed(1)} mi
@@ -659,6 +661,7 @@ export function ServiceStopList({
     .filter(({ stop, index }) => {
       const kind = slotKind(stop.slot)
       if (!showPasses && kind === 'pass') return false
+      if (showPasses && kind === 'pass' && String(stop.actualSource || '') === 'inferred') return false
       if (
         showPasses &&
         kind === 'pass' &&

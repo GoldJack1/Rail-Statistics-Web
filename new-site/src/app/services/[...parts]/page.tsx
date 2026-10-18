@@ -13,7 +13,8 @@ import { TextCard } from '@/components/cards'
 import { CarriageMap } from '@/components/darwin/CarriageMap'
 import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
 import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
-import { ServiceStopList, slotKind } from '@/components/darwin/ServiceStopList/ServiceStopList'
+import { ServiceSchedulePanel } from '@/components/darwin/ServiceSchedulePanel'
+import { ServiceStopList } from '@/components/darwin/ServiceStopList/ServiceStopList'
 import { ServiceVehicleDetails } from '@/components/darwin/ServiceVehicleDetails'
 import { buildStopNameLookup, displayStopName } from '@/components/darwin/serviceStopLabel'
 import { ServiceViewModeToggle } from '@/components/darwin/ServiceViewModeToggle'
@@ -433,9 +434,6 @@ const ServiceDetailPage: React.FC = () => {
     return dateText
   }, [status, error, ageMs, historicalMode, futureTimetableMode, data])
 
-  const callingCount = data ? data.stops.filter((s) => slotKind(s.slot) !== 'pass').length : 0
-  const passingCount = data ? data.stops.length - callingCount : 0
-
   return (
     <DarwinDetailsLayout
       title={title}
@@ -517,6 +515,8 @@ const ServiceDetailPage: React.FC = () => {
         {data && section === 'overview' && (
           <section className="modal-section">
             <StationSectionTitle title="Overview" icon={Info} pageHeading />
+            <div className="svc-overview-layout">
+            <ServiceSchedulePanel data={data} />
             <section
               className={`svc-summary-card ${data.cancelled ? 'svc-summary-card--cancelled' : ''}`}
               aria-label="Service summary"
@@ -613,38 +613,7 @@ const ServiceDetailPage: React.FC = () => {
                 <StationDetailField label="Destination" value={destinationLabel || data.destinationName || data.destination} />
               </div>
             </section>
-            {viewMode === 'detailed' && (
-              <SidebarDropdownSection
-                title="Service identity"
-                defaultExpanded
-                className="svc-content-dropdown"
-              >
-                <div className="modal-details-grid">
-                  <StationDetailField label="UID" value={data.uid} />
-                  <StationDetailField label="Service date" value={data.ssd} />
-                  <StationDetailField
-                    label="Calling pattern"
-                    value={`${callingCount} calling · ${passingCount} passing`}
-                  />
-                  <StationDetailField
-                    label="Type"
-                    value={`${data.isPassenger ? 'Passenger' : 'Non-passenger'}${data.trainClass ? ` · class ${data.trainClass}` : ''}${data.trainCat ? ` · ${data.trainCat}` : ''}`}
-                  />
-                  {data.diagramNo || data.diagramDate ? (
-                    <StationDetailField
-                      label="Diagram"
-                      value={[data.diagramNo, data.diagramDate].filter(Boolean).join(' · ')}
-                    />
-                  ) : null}
-                  {data.powerType || data.timingLoad ? (
-                    <StationDetailField
-                      label="Traction"
-                      value={[data.powerType, data.timingLoad].filter(Boolean).join(' / ')}
-                    />
-                  ) : null}
-                </div>
-              </SidebarDropdownSection>
-            )}
+            </div>
             <p className="edit-hint kb-source-hint svc-footer">
               <span>Source: Network Rail Darwin Push Port</span>
               <span className="svc-footer-sep" aria-hidden="true">·</span>

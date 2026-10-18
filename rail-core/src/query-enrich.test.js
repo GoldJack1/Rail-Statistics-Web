@@ -1,12 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { applyLiveToInferred, carryRunningLateness, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, overlayTdOnCalls, reportsForService } from "./query-enrich.js";
+import { applyLiveToInferred, carryRunningLateness, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, overlayTdOnCalls, reportsForService, settleUnreportedPasses } from "./query-enrich.js";
 import { openDayDb } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+test("an inferred pass behind a real report does not keep an expected time", () => {
+  const out = settleUnreportedPasses([
+    { tiploc: "DLTNN", actual_source: "inferred", etp: "19:34", live_kind: "est", wtp: "19:33" },
+    { tiploc: "DLTN", actual_source: "trust", atd: "19:36", wtd: "19:35" },
+    { tiploc: "AHEAD", actual_source: "inferred", etp: "19:40", live_kind: "est", wtp: "19:40" },
+  ]);
+  assert.equal(out[0].etp, null);
+  assert.equal(out[0].live_kind, null);
+  assert.equal(out[2].etp, "19:40");
+});
 
 test("insertReportedPasses places a feed location by time and leaves scheduled rows", () => {
   const calls = [

@@ -60,16 +60,29 @@ export function callScheduledMinutes(c) {
   );
 }
 
+/** Booked timetable clock only. An estimate must not move the row. */
+export function bookedCallMinutes(c) {
+  return parseHmMinutes(
+    publicCallTime(c?.std, c) ||
+      publicCallTime(c?.sta, c) ||
+      c?.wtd ||
+      c?.wta ||
+      c?.wtp ||
+      c?.ptd ||
+      c?.pta,
+  );
+}
+
 export function journeyKey(minutes, overnightLong = false, seq = 0) {
   if (minutes == null) return 10_000_000 + (seq ?? 0);
   return railwayDayMinutes(minutes, overnightLong) * 1000 + (seq ?? 0);
 }
 
-function isOvernightLongRun(rows) {
+function isOvernightLongRun(rows, minutesOf = callScheduledMinutes) {
   let seenEvening = false;
   const ordered = [...(rows || [])].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
   for (const row of ordered) {
-    const mins = callScheduledMinutes(row);
+    const mins = minutesOf(row);
     if (mins == null) continue;
     if (mins >= 18 * 60) seenEvening = true;
     if (seenEvening && mins < 12 * 60) return true;
@@ -98,16 +111,49 @@ export function collapseCallsByTiploc(rows) {
   return sortCallsByJourneyTime([...by.values()]);
 }
 
-export function sortCallsByJourneyTime(rows) {
+function bookedVisitKey(c) {
+  return [c?.wtp, c?.wtd, c?.wta, c?.std, c?.sta].map((value) => (value ? String(value).slice(0, 8) : "")).join("|");
+}
+
+/**
+ * A junction the train passes, calls beyond, then passes again on the way
+ * back is two visits. Collapse only a copy of the same booked time.
+ */
+export function collapseRevisits(rows) {
+  const out = [];
+  const indexByKey = new Map();
+  for (const c of rows || []) {
+    const tpl = String(c.tiploc || "").toUpperCase();
+    if (!tpl) continue;
+    const key = `${tpl}|${bookedVisitKey(c)}`;
+    const prev = indexByKey.get(key);
+    if (prev == null) {
+      indexByKey.set(key, out.length);
+      out.push(c);
+    } else {
+      out[prev] = richerCall(out[prev], c);
+    }
+  }
+  return sortCallsByBookedTime(out);
+}
+
+function sortByMinutes(rows, minutesOf) {
   const list = rows || [];
-  const overnightLong = isOvernightLongRun(list);
+  const overnightLong = isOvernightLongRun(list, minutesOf);
   return [...list].sort((a, b) => {
     const d =
-      journeyKey(callScheduledMinutes(a), overnightLong, a.seq) -
-      journeyKey(callScheduledMinutes(b), overnightLong, b.seq);
+      journeyKey(minutesOf(a), overnightLong, a.seq) - journeyKey(minutesOf(b), overnightLong, b.seq);
     if (d) return d;
     return (Number(a.seq) || 0) - (Number(b.seq) || 0) || String(a.tiploc || "").localeCompare(String(b.tiploc || ""));
   });
+}
+
+export function sortCallsByJourneyTime(rows) {
+  return sortByMinutes(rows, callScheduledMinutes);
+}
+
+export function sortCallsByBookedTime(rows) {
+  return sortByMinutes(rows, bookedCallMinutes);
 }
 
 /** CIF often appends another working after Darwin's public terminus (seq jumps backward in time). */

@@ -383,6 +383,21 @@ test("?at= hides later actuals", () => {
   assert.equal(trust.actual_source, null);
 });
 
+test("an early unbooked report does not jump the train to the destination", () => {
+  const loc = computeServiceLocation(
+    [
+      { tiploc: "CONONLY", seq: 2, atp: "13:03", is_passing: 1, actual_source: "td" },
+      { tiploc: "SKPT", crs: "SKI", seq: 3, sta: "13:06", std: "13:09", ata: "13:09", atd: "13:11", is_passing: 0 },
+      { tiploc: "GRGRAVE", crs: "GGV", seq: 4, sta: "13:14", std: "13:15", ata: "13:16", atd: null, is_passing: 0 },
+      { tiploc: "CARLILE", crs: "CAR", seq: 9, sta: "15:15", is_passing: 0 },
+    ],
+    { stationName: (_crs, tpl) => ({ CONONLY: "Cononley", SKPT: "Skipton", GRGRAVE: "Gargrave", CARLILE: "Carlisle" }[tpl]) },
+  );
+  assert.equal(loc.phase, "at_station");
+  assert.equal(loc.label, "At Gargrave");
+  assert.equal(loc.last.tiploc, "GRGRAVE");
+});
+
 test("location at_station when arrived and not departed", () => {
   const loc = computeServiceLocation(
     [

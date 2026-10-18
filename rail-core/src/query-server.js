@@ -7,10 +7,11 @@ import { longRangeAheadDays } from "./cif-schedule.js";
 import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
-import { collapseCallsByTiploc, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByBookedTime, sortCallsByJourneyTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
-import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropOrmDensifyPasses, insertReportedPasses, overlayTdOnCalls, reportsForService, tiplocCoords } from "./query-enrich.js";
-import { assignTrackMiles, insertGtclPasses, loadGtclGraph, orderStationBeforeEastJunction } from "./gtcl-path.js";
+import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropUnreportedPasses, insertReportedPasses, overlayTdOnCalls, reportsForService, settleUnreportedPasses, tiplocCoords } from "./query-enrich.js";
+import { assignTrackMiles, loadGtclGraph, orderCallsAlongTrack, orderCloseCallingPlaces } from "./gtcl-path.js";
+import { annotateStops, publicSchedule } from "./schedule-notes.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
@@ -413,11 +414,13 @@ function collapseCalls(rows) {
   return [...map.values()].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
 }
 
-function trimCallsToDestination(rows, svc) {
+function trimCallsToDestination(rows, svc, keepOrder = false) {
   const destCrs = String(svc?.destination_crs || "").toUpperCase();
   const destTpl = String(svc?.destination || "").toUpperCase();
   const destName = String(svc?.destination_name || "").trim().toUpperCase();
-  const ordered = collapseCalls(rows);
+  // Darwin appends a timing point with a later seq even when the train passes
+  // it earlier. Cutting that list by seq drops the point; booked-time order keeps it.
+  const ordered = keepOrder ? rows || [] : collapseCalls(rows);
   if (!destCrs && destTpl.length < 3 && destName.length < 3) return ordered;
   let seenPublic = false;
   const destHits = [];
@@ -605,11 +608,35 @@ function publicEndName(db, svc) {
   };
 }
 
-function gatherServiceCalls(ymd, svc) {
+function gatherServiceCalls(ymd, svc, { keepRevisits = false } = {}) {
   const db = openDay(ymd);
   if (!db) return [];
   const rows = db.prepare(`SELECT * FROM calls WHERE rid = ?`).all(svc.rid);
-  return collapseCallsByTiploc(dropCifTailAfterPublicTerminus(rows)).map(recoverBookedPublic);
+  const trimmed = dropCifTailAfterPublicTerminus(rows);
+  const collapsed = keepRevisits ? collapseRevisits(trimmed) : collapseCallsByTiploc(trimmed);
+  return collapsed.map(recoverBookedPublic);
+}
+
+function trustActivation(db, uid) {
+  if (!db || !uid) return null;
+  try {
+    return db
+      .prepare(
+        `SELECT train_id, activated_at FROM trust_trains WHERE uid = ? COLLATE NOCASE ORDER BY activated_at DESC LIMIT 1`,
+      )
+      .get(String(uid));
+  } catch {
+    return null;
+  }
+}
+
+function storedSchedule(svc) {
+  if (!svc?.schedule_json) return null;
+  try {
+    return JSON.parse(svc.schedule_json);
+  } catch {
+    return null;
+  }
 }
 
 function concatCallsAtTpl(first, second, tpl) {
@@ -666,7 +693,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     svc = hit.svc;
   }
   const resolvedRid = svc.rid;
-  let rawCalls = gatherServiceCalls(ymd, svc);
+  let rawCalls = gatherServiceCalls(ymd, svc, { keepRevisits: QUERY_ENV === "dev" });
   if (!rawCalls.length && hop < 1) {
     const np = db
       .prepare(
@@ -743,16 +770,23 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
   );
   if (QUERY_ENV === "dev") {
     const headcode = svc.headcode || svc.train_id;
-    calls = dropOrmDensifyPasses(calls, catalog);
+    calls = dropOrmNearDuplicates(
+      maskCallsAsOf(
+        trimCallsToDestination(sortCallsByBookedTime(dropCifTailAfterPublicTerminus(rawCalls)), svc, true),
+        at,
+      ),
+    );
+    calls = dropUnreportedPasses(calls);
     const reports = collectReportedPasses(db, calls, svc.train_id, headcode, catalog);
     const coords = tiplocCoords(catalog, [...calls.map((c) => c.tiploc), ...reports.map((r) => r.tiploc)]);
     calls = insertReportedPasses(calls, reportsForService(calls, reports, coords));
     calls = overlayTdOnCalls(db, calls, headcode, catalog);
     const track = loadGtclGraph(process.env.GTCL_GRAPH || `${DATA_DIR}/gtcl-graph.sqlite`);
-    if (track) calls = insertGtclPasses(calls, track, catalog, svc.timing_load, process.env.TLK_DB || `${DATA_DIR}/tlk.sqlite`);
+    calls = orderCallsAlongTrack(calls, track, catalog);
+    calls = orderCloseCallingPlaces(calls, catalog);
     calls = applyLiveToInferred(db, calls, svc.train_id, catalog);
     calls = carryRunningLateness(calls);
-    calls = orderStationBeforeEastJunction(calls, catalog);
+    calls = settleUnreportedPasses(calls);
     calls = assignTrackMiles(calls, track, catalog);
   }
   const units = Array.isArray(consist?.allocations)
@@ -824,7 +858,21 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
       line: c.line,
       legMiles: c.legMiles,
       cumMiles: c.cumMiles,
+      pathedAs: null,
+      allowances: [],
     };
+  });
+  const scheduleProfile = storedSchedule(svc);
+  const schedule = publicSchedule({
+    svc,
+    profile: scheduleProfile,
+    units,
+    trust: trustActivation(db, svc.uid),
+  });
+  const notedStops = annotateStops(stops, scheduleProfile, {
+    powerType: schedule.powerType,
+    timingLoad: schedule.timingLoad,
+    speed: schedule.speed,
   });
   const hspPending = serviceHspPending(db, ymd, resolvedRid);
   if (hspPending) maybeStartBoardHspFill(ymd, [resolvedRid]);
@@ -877,6 +925,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     trainClass: trainClassDigit(svc.headcode || svc.train_id),
     powerType: svc.power_type || null,
     timingLoad: svc.timing_load || null,
+    schedule,
     diagramNo,
     diagramDate,
     isPassenger: svc.service_type !== "freight",
@@ -894,7 +943,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     associations,
     alerts: [],
     units,
-    stops,
+    stops: notedStops,
     serviceType: svc.service_type,
     updatedAt: new Date().toISOString(),
     historicalDate: isLiveServiceDay(ymd) ? null : ymd,

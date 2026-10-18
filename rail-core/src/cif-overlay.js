@@ -21,10 +21,13 @@ import {
   cifWeekdayIndex,
   darwinScheduleAnchors,
   mergeDarwinCallsWithCifPasses,
+  parseCifBsProfile,
   parseCifBsStock,
   parseCifBxAtoc,
+  parseCifChange,
   parseCifLocation,
 } from "./cif-schedule.js";
+import { scheduleDocument } from "./schedule-notes.js";
 
 export function openCifLines(path) {
   const fd = openSync(path, "r");
@@ -54,16 +57,19 @@ function rememberWorking(workings, working, preferLongest = false) {
 
 function bsWorking(line) {
   const stock = parseCifBsStock(line);
+  const profile = parseCifBsProfile(line);
   return {
     uid: line.slice(3, 9).trim().toUpperCase(),
     rank: cifStpRank(line),
     locs: [],
+    changes: [],
     source: "cif",
     powerType: stock.powerType,
     timingLoad: stock.timingLoad,
-    trainStatus: line.slice(29, 30).toUpperCase() || null,
-    category: line.slice(30, 32).trim().toUpperCase() || null,
-    headcode: line.slice(32, 36).trim().toUpperCase() || null,
+    trainStatus: profile?.trainStatus || null,
+    category: profile?.category || null,
+    headcode: profile?.identity || null,
+    schedule: profile,
     runsOnYmd: false,
     toc: null,
   };
@@ -124,6 +130,11 @@ export async function loadCifWorkings(file, ymd, { preferLongest = false, ignore
     if (!current) continue;
     if (rec === "BX") {
       current.toc = parseCifBxAtoc(line) || current.toc;
+      continue;
+    }
+    if (rec === "CR") {
+      const change = parseCifChange(line);
+      if (change) current.changes.push(change);
       continue;
     }
     if (rec === "LO" || rec === "LI" || rec === "LT") {
@@ -259,6 +270,9 @@ export function scheduleJsonLocation(loc) {
     platform: loc.platform ? String(loc.platform).trim() : null,
     line: loc.line ? String(loc.line).trim().toUpperCase() : null,
     path: loc.path ? String(loc.path).trim().toUpperCase() : null,
+    engineeringAllowance: loc.engineering_allowance || null,
+    pathingAllowance: loc.pathing_allowance || null,
+    performanceAllowance: loc.performance_allowance || null,
     passing,
   };
 }
@@ -289,6 +303,20 @@ export function workingFromScheduleJson(schedule, { rank = 3, source = "vstp" } 
     headcode: seg.signalling_id || schedule.signalling_id || null,
     powerType: String(seg.CIF_power_type || schedule.CIF_power_type || "").trim().toUpperCase() || null,
     timingLoad: String(seg.CIF_timing_load || schedule.CIF_timing_load || "").trim().toUpperCase() || null,
+    schedule: {
+      runsFrom: schedule.schedule_start_date || null,
+      runsTo: schedule.schedule_end_date || null,
+      daysRun: schedule.schedule_days_runs || null,
+      category: schedule.CIF_train_category || null,
+      identity: seg.signalling_id || schedule.signalling_id || null,
+      headcode: schedule.CIF_headcode || null,
+      tsc: schedule.CIF_train_service_code || null,
+      speed: schedule.CIF_speed ? String(Number(schedule.CIF_speed) || schedule.CIF_speed) : null,
+      seating: schedule.CIF_train_class || null,
+      reservations: schedule.CIF_reservations || null,
+      operating: schedule.CIF_operating_characteristics || null,
+    },
+    changes: [],
   };
 }
 
@@ -389,10 +417,11 @@ export function applyWorkingsOverlay(dataDir, ymd, workings, { crsForTpl, statio
       }
       if (live.length) restoreCallLive(db, svc.rid, live);
       refreshServiceJourney(db, svc.rid, resolveName);
-      if (working.powerType || working.timingLoad) {
+      if (working.powerType || working.timingLoad || working.schedule) {
+        const scheduleJson = working.schedule || working.changes?.length ? JSON.stringify(scheduleDocument(working)) : null;
         db.prepare(
-          `UPDATE services SET power_type=COALESCE(power_type, ?), timing_load=COALESCE(timing_load, ?) WHERE rid=?`,
-        ).run(working.powerType || null, working.timingLoad || null, svc.rid);
+          `UPDATE services SET power_type=COALESCE(power_type, ?), timing_load=COALESCE(timing_load, ?), schedule_json=COALESCE(?, schedule_json) WHERE rid=?`,
+        ).run(working.powerType || null, working.timingLoad || null, scheduleJson, svc.rid);
       }
       db.exec("COMMIT");
     } catch (err) {
@@ -479,6 +508,9 @@ export function applyWorkingsOverlay(dataDir, ymd, workings, { crsForTpl, statio
           });
         });
         refreshServiceJourney(db, rid, resolveName);
+        if (working.schedule) {
+          db.prepare(`UPDATE services SET schedule_json = ? WHERE rid = ?`).run(JSON.stringify(scheduleDocument(working)), rid);
+        }
         db.exec("COMMIT");
         cifOnly++;
         inserted += working.locs.length;

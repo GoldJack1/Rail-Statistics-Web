@@ -112,6 +112,7 @@ function ensureServiceStockColumns(db) {
   const cols = new Set(db.prepare(`PRAGMA table_info(services)`).all().map((c) => c.name));
   if (!cols.has("power_type")) db.exec(`ALTER TABLE services ADD COLUMN power_type TEXT`);
   if (!cols.has("timing_load")) db.exec(`ALTER TABLE services ADD COLUMN timing_load TEXT`);
+  if (!cols.has("schedule_json")) db.exec(`ALTER TABLE services ADD COLUMN schedule_json TEXT`);
 }
 
 function ensureServiceFormationColumn(db) {
