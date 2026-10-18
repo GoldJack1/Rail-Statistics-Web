@@ -455,6 +455,11 @@ function softerThan(call, late) {
 }
 
 function writeCarried(call, late) {
+  if (
+    String(call.actual_source || "") === "inferred" &&
+    (call.atp || call.ata || call.atd) &&
+    callBookedMin(call) != null
+  ) return;
   let wrote = false;
   for (const [key, booked] of [
     ["etd", call.wtd || call.ptd],
@@ -511,6 +516,14 @@ export function carryRunningLateness(calls) {
     const minute = shownMinute(call);
     if (minute == null) continue;
     const shown = unwrapMinute(minute, origin);
+    if (
+      String(call.actual_source || "") === "inferred" &&
+      (call.atp || call.ata || call.atd) &&
+      callBookedMin(call) != null
+    ) {
+      if (prev == null || shown >= prev) prev = shown;
+      continue;
+    }
     if (isRealActual(call)) {
       if (prev == null || shown >= prev) prev = shown;
       continue;

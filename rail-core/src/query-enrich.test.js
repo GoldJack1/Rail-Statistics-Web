@@ -112,6 +112,18 @@ test("inferred pass behind a later actual takes that lateness", () => {
   assert.equal(out[1].actual_source, "inferred");
 });
 
+test("a passed inferred junction keeps the lateness taken from the next report", () => {
+  const calls = [
+    { tiploc: "MIRFEJN", is_passing: 1, wtp: "13:54", atp: "13:55", actual_source: "trust" },
+    { tiploc: "THHLNWJ", is_passing: 1, wtp: "13:54", atp: "13:56", live_kind: "actual", actual_source: "inferred" },
+    { tiploc: "RTHP", is_passing: 1, wtp: "13:54", atp: "13:56", actual_source: "td" },
+  ];
+  const carried = carryRunningLateness(calls);
+  assert.equal(carried[1].atp, "13:56");
+  const settled = settleUnreportedPasses(carried);
+  assert.equal(settled[1].atp, "13:56");
+});
+
 test("a junction other trains take is kept when it sits between two calls", () => {
   const coords = new Map([
     ["MIRFEJN", { e: 0, n: 0 }],
