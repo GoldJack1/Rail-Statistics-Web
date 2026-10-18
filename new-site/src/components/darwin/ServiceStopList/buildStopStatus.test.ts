@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ServiceStop } from '@/types/darwin'
-import { buildStopStatus } from './ServiceStopList'
+import { arrivalAside, buildStopStatus, colourDelay, delayMinutesAlong, platformCell } from './ServiceStopList'
 
 function passStop(overrides: Partial<ServiceStop> = {}): ServiceStop {
   return {
@@ -41,5 +41,57 @@ describe('buildStopStatus densify / working passes', () => {
     )
     expect(status.verb).toBe('Passed')
     expect(status.time).toBe('18:01')
+  })
+})
+
+describe('calling pattern path and carried delay', () => {
+  it('shows a junction line in the platform column, and the path when it differs', () => {
+    const junction = passStop({ crs: null, platform: null, line: 'E', path: null })
+    expect(platformCell(junction, 'pass')).toBe('E')
+    expect(platformCell(passStop({ crs: null, platform: null, line: 'E', path: 'DHU' }), 'pass')).toBe('DHU E')
+    expect(platformCell(passStop({ platform: '3', line: 'F' }), 'stop')).toBe('3')
+  })
+
+  it('keeps a reported pass with no booked time on the lateness of the stop before it', () => {
+    const delays = delayMinutesAlong([
+      passStop({ tpl: 'HDRSFLD', slot: 'IP', wtd: '13:46', atd: '13:49', liveKind: 'actual' }),
+      passStop({ tpl: 'HUDHESD', crs: null, wtp: null, atp: '13:50:47', liveKind: 'actual' }),
+      passStop({ tpl: 'DEIGHTN', wtp: '13:48', atp: '13:52', liveKind: 'actual' }),
+    ])
+    expect(delays).toEqual([3, 3, 4])
+  })
+
+  it('scores arrival and departure separately, and colours an intermediate stop from the departure', () => {
+    const leeds = passStop({
+      slot: 'IP',
+      wtp: null,
+      wta: '14:16',
+      wtd: '14:23',
+      ata: '14:12',
+      atd: '14:23',
+      liveKind: 'actual',
+    })
+    expect(colourDelay(leeds, 'stop')).toBe(0)
+    expect(arrivalAside(leeds, 'stop')).toBe('Arrived 4m E')
+    const waiting = passStop({
+      slot: 'IP',
+      wtp: null,
+      wta: '14:16',
+      wtd: '14:23',
+      ata: '14:12',
+      atd: null,
+      liveKind: 'actual-arr',
+    })
+    expect(colourDelay(waiting, 'stop')).toBe(-4)
+    const terminus = passStop({
+      slot: 'DT',
+      wtp: null,
+      wta: '15:04',
+      wtd: '15:07',
+      ata: '15:02',
+      atd: '15:09',
+      liveKind: 'actual',
+    })
+    expect(colourDelay(terminus, 'destination')).toBe(-2)
   })
 })

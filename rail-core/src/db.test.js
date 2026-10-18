@@ -786,3 +786,35 @@ test("pruneCifUidStubRids drops YYYYMMDD+UID stubs when Darwin RIDs exist", () =
   assert.equal(db.prepare(`SELECT rid FROM services`).get().rid, "202610037689498");
   db.close();
 });
+
+test("a second booked pass of the same TIPLOC is stored, not overwritten", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rail-core-"));
+  const db = openDayDb(dir, "2026-10-18");
+  upsertCall(db, { rid: "202610187116310", tiploc: "LEEDSWJ", seq: 0, is_passing: 1, wtp: "14:14½", line: "E" });
+  upsertCall(db, { rid: "202610187116310", tiploc: "LEEDSWJ", seq: 1, is_passing: 1, wtp: "14:24", line: "UM" });
+  const rows = db.prepare(`SELECT wtp, line FROM calls WHERE rid = ? AND tiploc = ? ORDER BY seq`).all("202610187116310", "LEEDSWJ");
+  assert.deepEqual(rows.map((row) => [row.wtp, row.line]), [
+    ["14:14½", "E"],
+    ["14:24", "UM"],
+  ]);
+  upsertCall(
+    db,
+    {
+      rid: "202610187116310",
+      tiploc: "LEEDSWJ",
+      seq: 0,
+      is_passing: 1,
+      wtp: "14:14",
+      atp: "14:11",
+      live_kind: "actual",
+      actual_source: "trust",
+    },
+    { overlay: true, fillOnly: true },
+  );
+  const live = db.prepare(`SELECT wtp, atp FROM calls WHERE rid = ? AND tiploc = ? ORDER BY seq`).all("202610187116310", "LEEDSWJ");
+  assert.deepEqual(live.map((row) => [row.wtp, row.atp]), [
+    ["14:14½", "14:11"],
+    ["14:24", null],
+  ]);
+  db.close();
+});

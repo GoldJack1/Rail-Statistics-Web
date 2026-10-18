@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { applyLiveToInferred, carryRunningLateness, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, overlayTdOnCalls, reportsForService, settleUnreportedPasses } from "./query-enrich.js";
+import { applyLiveToInferred, carryRunningLateness, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, settleUnreportedPasses } from "./query-enrich.js";
 import { openDayDb } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
 import { mkdtempSync } from "node:fs";
@@ -110,6 +110,32 @@ test("inferred pass behind a later actual takes that lateness", () => {
   assert.equal(out[1].atp, "15:04");
   assert.equal(out[1].live_kind, "actual");
   assert.equal(out[1].actual_source, "inferred");
+});
+
+test("a junction other trains take is kept when it sits between two calls", () => {
+  const coords = new Map([
+    ["MIRFEJN", { e: 0, n: 0 }],
+    ["THHLNWJ", { e: 500, n: 10 }],
+    ["RTHP", { e: 1000, n: 0 }],
+    ["HORBRYJ", { e: 500, n: 5000 }],
+  ]);
+  const sequences = [
+    ["MIRFEJN", "THHLNWJ", "HORBRYJ"],
+    ["MIRFEJN", "THHLNWJ", "HORBRYJ"],
+    ["MIRFEJN", "THHLNWJ", "HORBRYJ"],
+    ["MIRFEJN", "HORBRYJ"],
+  ];
+  const out = insertSegmentJunctions(
+    [
+      { tiploc: "MIRFEJN", wtp: "13:54" },
+      { tiploc: "RTHP", wtp: "13:56" },
+    ],
+    sequences,
+    coords,
+  );
+  assert.deepEqual(out.map((c) => c.tiploc), ["MIRFEJN", "THHLNWJ", "RTHP"]);
+  assert.equal(out[1].actual_source, "inferred");
+  assert.equal(out[1].wtp, "13:55");
 });
 
 test("schedule pass uses the path that also reaches the next stop", () => {

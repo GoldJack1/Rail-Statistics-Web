@@ -251,12 +251,83 @@ function simpleProgressLabel(
   return betweenStationsLabel(stops, reported, nameAt)
 }
 
+function pairedDelay(booked: string | null | undefined, real: string | null | undefined): number | null {
+  const scheduled = trimSeconds(booked)
+  const live = trimSeconds(real)
+  if (!scheduled || !live) return null
+  return computeDeltaMinutes(scheduled, live)
+}
+
+/** Arrival is WTT arr against realtime arr. Departure or pass is its own pair. */
+export function movementDelays(stop: ServiceStop, kind: StopKind): { arrival: number | null; departure: number | null } {
+  if (stop.unknownDelay) return { arrival: null, departure: null }
+  const arrival = kind === 'pass' ? null : pairedDelay(stop.wta || stop.pta, stop.ata || stop.eta)
+  const depBooked = kind === 'pass' ? (stop.wtp || stop.wtd) : (stop.wtd || stop.ptd)
+  const depActual = trimSeconds(kind === 'pass' ? stop.atp : stop.atd)
+  const depEstimate = trimSeconds(kind === 'pass' ? stop.etp : stop.etd)
+  // An arrival must not be reused as the departure. An estimate counts only before the train has arrived.
+  const depReal = depActual || (trimSeconds(stop.ata) ? null : depEstimate)
+  const departure = pairedDelay(depBooked, depReal)
+  return { arrival, departure }
+}
+
+/** Row colour follows the departure, except the destination, which follows the arrival. */
+export function colourDelay(stop: ServiceStop, kind: StopKind): number | null {
+  const { arrival, departure } = movementDelays(stop, kind)
+  if (kind === 'destination') return arrival ?? departure
+  return departure ?? arrival
+}
+
 function delayFromStop(stop: ServiceStop, kind: StopKind): number | null {
-  if (stop.unknownDelay) return null
-  const clocks = rowClocks(kind, stop)
-  const real = clocks.real || trimSeconds(stop.liveTime)
-  if (!clocks.booked || !real) return null
-  return computeDeltaMinutes(clocks.booked, real)
+  return colourDelay(stop, kind)
+}
+
+export function arrivalAside(stop: ServiceStop, kind: StopKind): string | null {
+  if (kind === 'pass' || kind === 'destination') return null
+  if (!trimSeconds(stop.atd) || !trimSeconds(stop.ata)) return null
+  const { arrival, departure } = movementDelays(stop, kind)
+  if (arrival == null || departure == null) return null
+  if (arrival >= 1) return `Arrived ${arrival}m L`
+  if (arrival <= -1) return `Arrived ${Math.abs(arrival)}m E`
+  return 'Arrived on time'
+}
+
+/**
+ * A reported pass with no booked time cannot compute its own lateness.
+ * Hold the delay from the previous report so it stays with the train.
+ */
+export function delayMinutesAlong(stops: ServiceStop[]): (number | null)[] {
+  let carried: number | null = null
+  return stops.map((stop) => {
+    const kind = slotKind(stop.slot)
+    const own = delayFromStop(stop, kind)
+    if (own != null) {
+      carried = own
+      return own
+    }
+    const reported = Boolean(trimSeconds(stop.atp || stop.atd || stop.ata))
+    if (reported && carried != null) return carried
+    const upcoming = !isActualLiveKind(stop.liveKind)
+    if (upcoming && carried != null && carried >= 1) return carried
+    return null
+  })
+}
+
+/** Platform for a station. A junction shows its line, and its path when that differs. */
+export function platformCell(stop: ServiceStop, kind: StopKind): string {
+  const platformRaw = stop.livePlatform || stop.platform || ''
+  const platform =
+    platformRaw && typeof platformRaw === 'object'
+      ? ''
+      : String(platformRaw) === '[object Object]'
+        ? ''
+        : String(platformRaw).trim()
+  if (platform) return platform
+  if (kind !== 'pass' && stop.crs) return ''
+  const path = (stop.path || '').trim()
+  const line = (stop.line || '').trim()
+  if (path && line && path !== line) return `${path} ${line}`
+  return line || path
 }
 
 function rowClocks(kind: StopKind, stop: ServiceStop): { booked: string | null; real: string | null; estimated: boolean } {
@@ -318,17 +389,12 @@ function ServiceStopRow({
   const wArr = trimSeconds(stop.wta) || null
   const wDep = trimSeconds(stop.wtd) || null
   const wPass = trimSeconds(stop.wtp)
-  const platformRaw = stop.livePlatform || stop.platform || ''
-  const platformValue =
-    platformRaw && typeof platformRaw === 'object'
-      ? ''
-      : String(platformRaw) === '[object Object]'
-        ? ''
-        : String(platformRaw)
+  const platformValue = platformCell(stop, kind)
   const platformSource = platformSourceLabel(stop.platformSource)
   const clocks = rowClocks(kind, stop)
   const deltaMinutes = delayMinutesProp ?? delayFromStop(stop, kind)
   const time = primaryTime(stop, kind)
+  const arrivedNote = arrivalAside(stop, kind)
   const status = buildStopStatus(
     stop,
     kind,
@@ -360,12 +426,12 @@ function ServiceStopRow({
   const gbttDep = kind === 'pass' || kind === 'destination' ? '' : shownClock(pDep, detailed)
   const wttArr = kind === 'pass' ? '' : shownClock(wArr, detailed)
   const wttDep = kind === 'pass' ? shownClock(wPass, detailed) : kind === 'destination' ? '' : shownClock(wDep || wPass, detailed)
-  const rtArr = kind === 'pass' ? '' : shownClock(stop.ata || (kind === 'destination' ? stop.liveTime : null), detailed)
+  const rtArr = kind === 'pass' ? '' : shownClock(stop.ata || stop.eta, detailed)
   const rtDep = kind === 'pass'
-    ? shownClock(stop.atp || stop.liveTime, detailed)
+    ? shownClock(stop.atp || stop.etp, detailed)
     : kind === 'destination'
       ? ''
-      : shownClock(stop.atd || (kind === 'origin' || kind === 'stop' ? stop.liveTime : null), detailed)
+      : shownClock(stop.atd || stop.etd, detailed)
   const statusTime = shownClock(status.time, detailed)
   const statusEta = status.eta ? shownClock(status.eta, detailed) : status.eta
   const colCount = detailed ? 6 : 4
@@ -430,6 +496,7 @@ function ServiceStopRow({
               <span className="svc-stops-table__status-meta">
                 {statusTime}
                 {status.delay ? <span className="svc-stops-table__status-delay">{status.delay}</span> : null}
+                {arrivedNote ? <span className="svc-stops-table__status-delay">{arrivedNote}</span> : null}
               </span>
             </>
           ) : status.note || statusEta ? (
@@ -713,16 +780,7 @@ export function ServiceStopList({
       : null
   const [headingOpen, setHeadingOpen] = useState(true)
   const headingPanelId = useId()
-  let carriedDelay: number | null = null
-  const delayMinutesByStripe = visible.map(({ stop }) => {
-    const kind = slotKind(stop.slot)
-    const own = delayFromStop(stop, kind)
-    if (own != null) carriedDelay = own
-    const upcoming = !isActualLiveKind(stop.liveKind)
-    if (own != null) return own
-    if (upcoming && carriedDelay != null && carriedDelay >= 1) return carriedDelay
-    return null
-  })
+  const delayMinutesByStripe = delayMinutesAlong(visible.map(({ stop }) => stop))
 
   const table = (
       <div className="stations-table-wrap">

@@ -134,7 +134,7 @@ function makeCurrent(day, line) {
 
 function pushCall(current, rec, line) {
   const loc = parseCifLocation(rec, line);
-  if (!loc.tiploc) return;
+  if (!loc?.tiploc) return;
   current.calls.push({
     rid: current.svc.rid,
     tiploc: loc.tiploc,

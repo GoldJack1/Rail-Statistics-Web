@@ -69,6 +69,42 @@ test("CIF working times keep half-minutes", () => {
   assert.equal(parseCifTime("1302"), "13:02");
 });
 
+test("CIF suffix 2 is the same junction visited again", () => {
+  const chars = "LI".padEnd(80, " ").split("");
+  const put = (from, text) => {
+    for (let i = 0; i < text.length; i++) chars[from + i] = text[i];
+  };
+  put(2, "LEEDSWJ2");
+  put(20, "1424 ");
+  put(36, "UM ");
+  const loc = parseCifLocation("LI", chars.join(""));
+  assert.equal(loc.tiploc, "LEEDSWJ");
+  assert.equal(loc.suffix, "2");
+  assert.equal(loc.wtp, "14:24");
+  assert.equal(loc.line, "UM");
+});
+
+test("a diverted schedule keeps both passes of the same junction", () => {
+  const darwin = [
+    { tiploc: "WHRDJN", is_passing: 1, wtp: "14:13" },
+    { tiploc: "LEEDSWJ", is_passing: 1, wtp: "14:24" },
+    { tiploc: "LEEDS", std: "14:23", sta: "14:16", is_passing: 0 },
+    { tiploc: "ESJLEDS", is_passing: 1, wtp: "14:25" },
+  ];
+  const cif = [
+    { tiploc: "WHRDJN", passing: true, wtp: "14:13½" },
+    { tiploc: "LEEDSWJ", passing: true, wtp: "14:14½", line: "E" },
+    { tiploc: "LEEDS", wta: "14:16", wtd: "14:23", pta: "14:16", ptd: "14:23" },
+    { tiploc: "LEEDSWJ", passing: true, wtp: "14:24", line: "UM", suffix: "2" },
+    { tiploc: "ESJLEDS", passing: true, wtp: "14:25" },
+  ];
+  const west = mergeDarwinCallsWithCifPasses(darwin, cif).filter((c) => c.tiploc === "LEEDSWJ");
+  assert.deepEqual(
+    west.map((c) => c.wtp),
+    ["14:14½", "14:24"],
+  );
+});
+
 test("LI path and line and half-minute pass", () => {
   const chars = "LI".padEnd(80, " ").split("");
   const put = (from, text) => {

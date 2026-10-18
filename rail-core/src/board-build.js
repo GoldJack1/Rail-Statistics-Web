@@ -453,6 +453,9 @@ export function buildStationBoard({
     if (passengersOnly && isPassing) continue;
     // ORM junction densify rows are for service detail only — not public CIS/WTT boards.
     if (isPassing && String(r.actual_source || "") === "orm") continue;
+    // A unique headcode can have every TD berth step written on as a pass, including
+    // stations the timetable never books. Those inserts are status TD.
+    if (isPassing && String(r.status || "").toUpperCase() === "TD") continue;
 
     const baseRow = () => ({
       rid: r.s_rid,

@@ -184,6 +184,81 @@ test("ORM passing inserts are excluded from station boards", async () => {
   db.close();
 });
 
+test("TD-invented passes stay off station boards; a booked pass TD timed does not", async () => {
+  const { buildStationBoard } = await import("./board-build.js");
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { openDayDb, upsertCall, upsertService } = await import("./db.js");
+
+  const dir = mkdtempSync(join(tmpdir(), "board-td-"));
+  const db = openDayDb(dir, "2026-10-18");
+  const seed = (row) =>
+    upsertService(db, {
+      rs_id: null,
+      toc: "TL",
+      operator_name: "Thameslink",
+      origin_crs: "BDM",
+      origin_name: "Bedford",
+      destination_crs: "BDM",
+      destination_name: "Bedford",
+      via: null,
+      service_type: "passenger",
+      cancelled: 0,
+      cancel_reason: null,
+      delay_reason: null,
+      is_charter: 0,
+      category: null,
+      updated_at: 1,
+      ...row,
+    });
+  seed({ rid: "20261018C20873", uid: "C20873", train_id: "5V90", headcode: "5V90" });
+  upsertCall(db, {
+    rid: "20261018C20873",
+    tiploc: "LEEDS",
+    crs: "LDS",
+    seq: 0,
+    is_passing: 1,
+    cancelled: 0,
+    wtp: "14:18",
+    atp: "14:18",
+    status: "TD",
+    live_kind: "actual",
+    actual_source: "td",
+    updated_at: 1,
+  });
+  seed({ rid: "20261018C02143", uid: "C02143", train_id: "1A21", headcode: "1A21" });
+  upsertCall(db, {
+    rid: "20261018C02143",
+    tiploc: "LEEDS",
+    crs: "LDS",
+    seq: 0,
+    is_passing: 1,
+    cancelled: 0,
+    wtp: "14:20",
+    atp: "14:22",
+    status: null,
+    live_kind: "actual",
+    actual_source: "td",
+    updated_at: 1,
+  });
+  const board = buildStationBoard({
+    db,
+    ymd: "2026-10-18",
+    crs: "LDS",
+    tiplocs: ["LEEDS"],
+    hours: 6,
+    now: new Date("2026-10-18T13:00:00+01:00"),
+    passengersOnly: false,
+    stationName: (crs) => (crs === "LDS" ? "Leeds" : crs),
+    matchBy: "crs",
+    fullDay: false,
+  });
+  assert.equal(board.departures.find((d) => d.trainId === "5V90"), undefined);
+  assert.equal(board.departures.find((d) => d.trainId === "1A21")?.scheduledTime, "14:20");
+  db.close();
+});
+
 test("departure movement keeps actual-arr while at platform", async () => {
   const { liveClockFromCall } = await import("./board-build.js");
   assert.deepEqual(

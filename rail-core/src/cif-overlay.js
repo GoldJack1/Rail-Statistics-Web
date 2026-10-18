@@ -139,7 +139,7 @@ export async function loadCifWorkings(file, ymd, { preferLongest = false, ignore
     }
     if (rec === "LO" || rec === "LI" || rec === "LT") {
       const loc = parseCifLocation(rec, line);
-      if (loc.tiploc) current.locs.push(loc);
+      if (loc?.tiploc) current.locs.push(loc);
     }
   }
   flush();
@@ -250,9 +250,11 @@ function hhmmFromSchedule(raw) {
 /** Convert one SCHEDULE/VSTP JSON location into the shape mergeDarwinCallsWithCifPasses expects. */
 export function scheduleJsonLocation(loc) {
   if (!loc || typeof loc !== "object") return null;
-  const tiploc = String(loc.tiploc_code || loc.tiploc || loc.TIPLOC || "")
+  const rawTiploc = String(loc.tiploc_code || loc.tiploc || loc.TIPLOC || "")
     .trim()
     .toUpperCase();
+  const instance = String(loc.tiploc_instance || loc.suffix || "").trim().toUpperCase();
+  const tiploc = instance && rawTiploc.endsWith(instance) ? rawTiploc.slice(0, -instance.length) : rawTiploc.slice(0, 7);
   if (!tiploc) return null;
   const pass = hhmmFromSchedule(loc.pass);
   const wta = hhmmFromSchedule(loc.arrival);

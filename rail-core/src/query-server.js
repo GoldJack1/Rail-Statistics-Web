@@ -9,7 +9,7 @@ import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
 import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByBookedTime, sortCallsByJourneyTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
-import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropUnreportedPasses, insertReportedPasses, overlayTdOnCalls, reportsForService, settleUnreportedPasses, tiplocCoords } from "./query-enrich.js";
+import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropUnreportedPasses, insertReportedPasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, scheduleSequences, settleUnreportedPasses, tiplocCoords } from "./query-enrich.js";
 import { assignTrackMiles, loadGtclGraph, orderCallsAlongTrack, orderCloseCallingPlaces } from "./gtcl-path.js";
 import { annotateStops, publicSchedule } from "./schedule-notes.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
@@ -781,6 +781,15 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     const coords = tiplocCoords(catalog, [...calls.map((c) => c.tiploc), ...reports.map((r) => r.tiploc)]);
     calls = insertReportedPasses(calls, reportsForService(calls, reports, coords));
     calls = overlayTdOnCalls(db, calls, headcode, catalog);
+    const sequences = scheduleSequences(db, ymd);
+    const locate = new Set(calls.map((c) => String(c.tiploc || "").toUpperCase()));
+    for (const seq of sequences) {
+      for (let i = 0; i < seq.length - 1; i++) {
+        if (locate.has(seq[i])) locate.add(seq[i + 1]);
+      }
+    }
+    const segmentCoords = tiplocCoords(catalog, locate);
+    calls = insertSegmentJunctions(calls, sequences, segmentCoords);
     const track = loadGtclGraph(process.env.GTCL_GRAPH || `${DATA_DIR}/gtcl-graph.sqlite`);
     calls = orderCallsAlongTrack(calls, track, catalog);
     calls = orderCloseCallingPlaces(calls, catalog);

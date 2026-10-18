@@ -92,10 +92,21 @@ export function parseCifBsProfile(line) {
   };
 }
 
+/**
+ * CIF location field is 7-character TIPLOC plus a 1-character instance.
+ * A second pass over the same junction is LEEDSWJ + "2", not a different place.
+ */
+export function cifLocationIdentity(line) {
+  const field = String(line || "").slice(2, 10).toUpperCase();
+  const tiploc = field.slice(0, 7).trim();
+  const suffix = field.slice(7, 8).trim() || null;
+  return { tiploc, suffix };
+}
+
 /** CIF CR: timing load, power or speed changes from this location. */
 export function parseCifChange(line) {
   if (!line || line.slice(0, 2) !== "CR") return null;
-  const tiploc = String(line.slice(2, 10) || "").trim().toUpperCase();
+  const { tiploc } = cifLocationIdentity(line);
   if (!tiploc) return null;
   const power = line.slice(30, 33).trim().toUpperCase();
   const load = line.slice(33, 37).trim().toUpperCase();
@@ -125,15 +136,14 @@ function cifAllowance(line, from) {
  * Public times are 4 characters; working times are 5 (H = half-minute).
  */
 export function parseCifLocation(rec, line) {
-  const tiploc = String(line || "")
-    .slice(2, 10)
-    .trim()
-    .toUpperCase();
+  const { tiploc, suffix } = cifLocationIdentity(line);
+  if (!tiploc) return null;
   if (rec === "LO") {
     const wtd = parseCifTime(line.slice(10, 15));
     const ptd = parseCifPublicTime(line.slice(15, 19));
     return {
       tiploc,
+      suffix,
       wta: null,
       wtd,
       wtp: null,
@@ -153,6 +163,7 @@ export function parseCifLocation(rec, line) {
     const pta = parseCifPublicTime(line.slice(15, 19));
     return {
       tiploc,
+      suffix,
       wta,
       wtd: null,
       wtp: null,
@@ -176,6 +187,7 @@ export function parseCifLocation(rec, line) {
   const passing = act === "T" || Boolean(wtp && !wta && !wtd && !pta && !ptd);
   return {
     tiploc,
+    suffix,
     wta,
     wtd,
     wtp,
@@ -296,6 +308,22 @@ function callClock(c) {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
+function minutesApart(a, b) {
+  const am = callClock(a);
+  const bm = callClock(b);
+  if (am == null || bm == null) return null;
+  let d = Math.abs(am - bm);
+  if (d > 720) d = 1440 - d;
+  return d;
+}
+
+/** Same TIPLOC and the same booked clock. A later diversion pass is a different visit. */
+function sameVisit(row, loc) {
+  if (cifTpl(row) !== cifTpl(loc)) return false;
+  const apart = minutesApart(row, loc);
+  return apart == null || apart === 0;
+}
+
 /** True when CIF is the same working as Darwin (no extra public stops such as Huddersfield). */
 export function cifMatchesDarwinPublicPath(darwinCalls, cifLocs) {
   const darwin = (darwinCalls || []).filter((c) => cifTpl(c));
@@ -329,26 +357,35 @@ function stampWorkingFromCif(d, loc) {
 }
 
 function mergeFullCifWtt(darwin, cif) {
-  const byTpl = new Map();
-  for (const c of darwin) byTpl.set(cifTpl(c), c);
-  const used = new Set();
+  const unused = darwin.slice();
+  const counts = new Map();
+  for (const loc of cif) counts.set(cifTpl(loc), (counts.get(cifTpl(loc)) || 0) + 1);
   const out = [];
   for (const loc of cif) {
     const tpl = cifTpl(loc);
-    const d = byTpl.get(tpl);
-    if (d) {
-      out.push(stampWorkingFromCif(d, loc));
-      used.add(tpl);
+    let best = -1;
+    let bestDelta = Infinity;
+    unused.forEach((call, index) => {
+      if (cifTpl(call) !== tpl) return;
+      const delta = minutesApart(call, loc);
+      const score = delta == null ? 1e9 : delta;
+      if (score < bestDelta) {
+        bestDelta = score;
+        best = index;
+      }
+    });
+    const unique = counts.get(tpl) === 1;
+    if (best >= 0 && (unique || bestDelta <= 3)) {
+      out.push(stampWorkingFromCif(unused[best], loc));
+      unused.splice(best, 1);
     } else {
       out.push(cifPassRow(loc));
     }
   }
-  for (const d of darwin) {
-    const tpl = cifTpl(d);
-    if (used.has(tpl)) continue;
-    const mins = callClock(d);
-    // Skip clockless extras — splicing at end created orphan tipocs after destination.
+  for (const call of unused) {
+    const mins = callClock(call);
     if (mins == null) continue;
+    if (out.some((row) => sameVisit(row, call))) continue;
     let at = out.length;
     for (let i = 0; i < out.length; i++) {
       const om = callClock(out[i]);
@@ -357,14 +394,12 @@ function mergeFullCifWtt(darwin, cif) {
         break;
       }
     }
-    out.splice(at, 0, d);
-    used.add(tpl);
+    out.splice(at, 0, call);
   }
   return out;
 }
 
 function mergeCifBetweenDarwinAnchors(darwin, cif) {
-  const darwinSet = new Set(darwin.map((c) => cifTpl(c)));
   const out = [];
   let cifFrom = 0;
   for (let i = 0; i < darwin.length; i++) {
@@ -377,13 +412,15 @@ function mergeCifBetweenDarwinAnchors(darwin, cif) {
     if (ib < 0) continue;
     const extras = cif.slice(ia + 1, ib);
     for (const loc of extras) {
-      const tpl = cifTpl(loc);
-      if (darwinSet.has(tpl)) continue;
+      if (out.some((row) => sameVisit(row, loc))) continue;
       // Do not invent a Darwin-omitted public stop (Huddersfield diversion),
       // but still insert working passes in the same span (Huyton / Rainhill).
       if (cifLocIsPublic(loc)) continue;
-      darwinSet.add(tpl);
       out.push(cifPassRow(loc));
+    }
+    const atCursor = cif[ia];
+    if (atCursor && !cifLocIsPublic(atCursor) && !out.some((row) => sameVisit(row, atCursor))) {
+      out.push(cifPassRow(atCursor));
     }
     cifFrom = ib;
   }

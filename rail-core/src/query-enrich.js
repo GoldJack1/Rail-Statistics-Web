@@ -218,6 +218,84 @@ function modalMids(sequences, a, b, c) {
  * Fill each booked gap with the path other trains use between the same
  * stops, and only when those trains also reach the next booked stop.
  */
+function onSegment(a, b, point, slack = 400) {
+  if (!a || !b || !point) return null;
+  const abx = b.e - a.e;
+  const aby = b.n - a.n;
+  const len2 = abx * abx + aby * aby;
+  if (len2 < 1) return null;
+  const t = ((point.e - a.e) * abx + (point.n - a.n) * aby) / len2;
+  if (t <= 0.02 || t >= 0.98) return null;
+  const dx = point.e - (a.e + t * abx);
+  const dy = point.n - (a.n + t * aby);
+  if (Math.hypot(dx, dy) > slack) return null;
+  return t;
+}
+
+/**
+ * A junction the timetable omitted, when other trains leave the previous
+ * stop through it and it sits on the way to the next call.
+ */
+export function insertSegmentJunctions(calls, sequences, coords) {
+  const spine = (calls || []).filter((c) => c?.tiploc).map((c) => ({ ...c }));
+  if (spine.length < 2) return spine;
+  const locate = coords instanceof Map ? (tpl) => coords.get(String(tpl || "").toUpperCase()) : () => null;
+  const nextOf = new Map();
+  for (const seq of sequences || []) {
+    for (let i = 0; i < seq.length - 1; i++) {
+      const from = seq[i];
+      const to = seq[i + 1];
+      if (!from || !to || from === to || isSignalOrElocTiploc(to)) continue;
+      let tally = nextOf.get(from);
+      if (!tally) {
+        tally = new Map();
+        nextOf.set(from, tally);
+      }
+      tally.set(to, (tally.get(to) || 0) + 1);
+    }
+  }
+  const present = new Set(spine.map((c) => String(c.tiploc).toUpperCase()));
+  const out = [];
+  for (let i = 0; i < spine.length; i++) {
+    if (i > 0) {
+      const prev = String(spine[i - 1].tiploc).toUpperCase();
+      const here = String(spine[i].tiploc).toUpperCase();
+      const candidates = [];
+      for (const [tpl, count] of nextOf.get(prev) || []) {
+        if (count < 3 || tpl === here || present.has(tpl)) continue;
+        const t = onSegment(locate(prev), locate(here), locate(tpl));
+        if (t == null) continue;
+        candidates.push({ tpl, t });
+      }
+      candidates.sort((a, b) => a.t - b.t);
+      const t0 = callClock(spine[i - 1]);
+      const t1 = callClock(spine[i]);
+      candidates.forEach((candidate, index) => {
+        present.add(candidate.tpl);
+        const wtp = interpolateHm(t0, t1, index, candidates.length);
+        out.push({
+          tiploc: candidate.tpl,
+          crs: null,
+          is_passing: 1,
+          cancelled: 0,
+          platform: null,
+          wta: null,
+          wtd: null,
+          wtp,
+          etp: wtp,
+          ata: null,
+          atd: null,
+          atp: null,
+          live_kind: "est",
+          actual_source: "inferred",
+        });
+      });
+    }
+    out.push(spine[i]);
+  }
+  return out.map((c, seq) => ({ ...c, seq }));
+}
+
 export function insertSchedulePasses(calls, sequences) {
   const spine = (calls || []).filter((c) => c?.tiploc);
   if (spine.length < 2 || !sequences?.length) return spine;

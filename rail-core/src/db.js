@@ -366,11 +366,39 @@ export function upsertService(db, row, opts = {}) {
   ).run({ ...row, formation: row.formation ?? null, power_type: row.power_type ?? null, timing_load: row.timing_load ?? null });
 }
 
+function bookedVisitClock(row) {
+  const raw = row?.wtp || row?.wtd || row?.std || row?.wta || row?.sta;
+  return raw ? String(raw).slice(0, 8) : "";
+}
+
+function clockMinutes(value) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(value || ""));
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/** Which booked visit a live report belongs to when the junction is passed twice. */
+function nearestBookedVisit(siblings, row) {
+  const target = clockMinutes(row?.atp || row?.atd || row?.ata || row?.etp || row?.etd || row?.eta || bookedVisitClock(row));
+  let best = siblings[0];
+  let bestDelta = Infinity;
+  for (const call of siblings) {
+    const booked = clockMinutes(bookedVisitClock(call));
+    let delta = booked == null || target == null ? 1e9 : Math.abs(booked - target);
+    if (delta > 12 * 60) delta = 1440 - delta;
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = call;
+    }
+  }
+  return best;
+}
+
 export function upsertCall(db, row, opts = {}) {
   if (!row?.rid) return;
   const overlay = Boolean(opts.overlay);
   let existing = row.tiploc
-    ? db.prepare(`SELECT seq, tiploc FROM calls WHERE rid = ? AND tiploc = ?`).get(row.rid, row.tiploc)
+    ? db.prepare(`SELECT seq, tiploc, wtp, wtd, wta, std, sta FROM calls WHERE rid = ? AND tiploc = ?`).get(row.rid, row.tiploc)
     : null;
   if (!existing && row.crs) {
     existing = db
@@ -382,6 +410,19 @@ export function upsertCall(db, row, opts = {}) {
       .get(row.rid, String(row.crs).toUpperCase());
   }
   if (overlay && !existing) return;
+  const incomingClock = bookedVisitClock(row);
+  if (existing) {
+    const siblings = db
+      .prepare(`SELECT seq, tiploc, wtp, wtd, wta, std, sta FROM calls WHERE rid = ? AND tiploc = ?`)
+      .all(row.rid, existing.tiploc);
+    if ((overlay || opts.cifMerge) && siblings.length > 1) {
+      existing = nearestBookedVisit(siblings, row);
+    } else if (!overlay && !opts.cifMerge && incomingClock) {
+      const match = siblings.find((call) => bookedVisitClock(call) === incomingClock);
+      if (match) existing = match;
+      else if (siblings.some((call) => bookedVisitClock(call))) existing = null;
+    }
+  }
   const tiploc = existing?.tiploc || row.tiploc;
   if (!tiploc) return;
   const seq = existing
@@ -429,10 +470,10 @@ export function upsertCall(db, row, opts = {}) {
           sta=COALESCE(sta, @sta), std=COALESCE(std, @std),
           platform=COALESCE(platform, @platform),
           path=COALESCE(path, @path), line=COALESCE(line, @line)
-         WHERE rid=@rid AND tiploc=@tiploc`,
+         WHERE rid=@rid AND seq=@seq`,
       ).run({
         rid: payload.rid,
-        tiploc: payload.tiploc,
+        seq: payload.seq,
         crs: payload.crs,
         wta: payload.wta,
         wtd: payload.wtd,
@@ -475,10 +516,10 @@ export function upsertCall(db, row, opts = {}) {
               : "COALESCE(@actual_source, actual_source)"
           },
           updated_at=@updated_at
-         WHERE rid=@rid AND tiploc=@tiploc`
+         WHERE rid=@rid AND seq=@seq`
       ).run({
         rid: payload.rid,
-        tiploc: payload.tiploc,
+        seq: payload.seq,
         crs: payload.crs,
         cancelled: payload.cancelled,
         platform: payload.platform,
@@ -515,10 +556,10 @@ export function upsertCall(db, row, opts = {}) {
         leg_m=COALESCE(@leg_m, leg_m), cum_m=COALESCE(@cum_m, cum_m),
         path=COALESCE(@path, path), line=COALESCE(@line, line),
         updated_at=@updated_at
-       WHERE rid=@rid AND tiploc=@tiploc`
+       WHERE rid=@rid AND seq=@seq`
     ).run({
       rid: payload.rid,
-      tiploc: payload.tiploc,
+      seq: payload.seq,
       crs: payload.crs,
       is_passing: payload.is_passing,
       cancelled: payload.cancelled,
@@ -662,7 +703,7 @@ export function pruneCifUidStubRids(db) {
 export function snapshotCallLive(db, rid) {
   return db
     .prepare(
-      `SELECT tiploc, ata, atd, atp, eta, etd, etp, live_kind, actual_source, platform
+      `SELECT tiploc, wtp, wtd, wta, std, sta, ata, atd, atp, eta, etd, etp, live_kind, actual_source, platform
        FROM calls WHERE rid = ?
          AND (ata IS NOT NULL OR atd IS NOT NULL OR atp IS NOT NULL
            OR eta IS NOT NULL OR etd IS NOT NULL OR etp IS NOT NULL)`,
@@ -678,7 +719,30 @@ export function restoreCallLive(db, rid, rows) {
         live_kind=COALESCE(@live_kind, live_kind),
         actual_source=COALESCE(@actual_source, actual_source),
         platform=COALESCE(@platform, platform)
-     WHERE rid=@rid AND tiploc=@tiploc`,
+     WHERE rid=@rid AND seq=@seq`,
   );
-  for (const row of rows || []) stmt.run({ ...row, rid });
+  const find = db.prepare(
+    `SELECT seq, wtp, wtd, wta, std, sta, ata, atd, atp FROM calls WHERE rid = ? AND tiploc = ? ORDER BY seq`,
+  );
+  for (const row of rows || []) {
+    const siblings = find.all(rid, row.tiploc);
+    if (!siblings.length) continue;
+    const clock = bookedVisitClock(row);
+    const open = (call) => !call.ata && !call.atd && !call.atp;
+    let target = clock ? siblings.find((call) => bookedVisitClock(call) === clock) : null;
+    if (!target) target = siblings.find(open) || siblings[0];
+    stmt.run({
+      rid,
+      seq: target.seq,
+      ata: row.ata ?? null,
+      atd: row.atd ?? null,
+      atp: row.atp ?? null,
+      eta: row.eta ?? null,
+      etd: row.etd ?? null,
+      etp: row.etp ?? null,
+      live_kind: row.live_kind ?? null,
+      actual_source: row.actual_source ?? null,
+      platform: row.platform ?? null,
+    });
+  }
 }
