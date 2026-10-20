@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { ServiceStop } from '../types/darwin'
 import {
+  applyEurostarRailMiles,
+  continentalEurostarCoordinate,
+  eurostarRailChains,
+  metresAlongWaypoints,
+  pathLengthMetres,
+} from './eurostarContinental'
+import { formatMilesAndChains } from './milesAndChains'
+import {
   interpolateAlongPath,
   interpolateLatLng,
   journeyMapStops,
@@ -68,7 +76,7 @@ describe('serviceJourneyMap', () => {
     expect(mapped.map((p) => p.tpl)).toEqual(['LEEDS', 'YORK'])
   })
 
-  it('routes through a pass that is still ahead and skips one listed back behind the train', () => {
+  it('routes through a station pass that is still ahead and does not use a junction as a via', () => {
     const mapped = journeyMapStops(
       [
         stop('LVRPLSH', 'Liverpool Lime Street', 'OR', { lat: 53.407, lng: -2.976 }),
@@ -79,9 +87,10 @@ describe('serviceJourneyMap', () => {
       [],
     )
     expect(mapped.map((point) => point.tpl)).toEqual(['LVRPLSH', 'TRFDPEJ', 'URMSTON', 'MNCROXR'])
+    expect(mapped.find((point) => point.tpl === 'TRFDPEJ')?.kind).toBe('junction')
     expect(mappedRouteWaypoints(mapped)).toEqual([
       [53.407, -2.976],
-      [53.463, -2.288],
+      [53.448, -2.353],
       [53.474, -2.242],
     ])
   })
@@ -120,6 +129,7 @@ describe('serviceJourneyMap', () => {
       ],
       [],
     )
+    expect(mapped.find((point) => point.tpl === 'LEEDSWJ')?.kind).toBe('junction')
     expect(
       mappedRouteWaypoints(mapped, {
         0: {
@@ -134,7 +144,6 @@ describe('serviceJourneyMap', () => {
       }),
     ).toEqual([
       [53.7939, -1.5482],
-      [53.79259, -1.55573],
       [53.544, -2.632],
     ])
   })
@@ -330,6 +339,78 @@ describe('serviceJourneyMap', () => {
     const mid = interpolateAlongPath(path, 0.5)
     expect(mid.lat).toBeCloseTo(0, 5)
     expect(mid.lng).toBeCloseTo(1, 5)
+  })
+
+  it('keeps Eurostar junction markers off the route and plots Paris Nord on the continent', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('STPANCI', 'St Pancras International', 'OR', { crs: 'SPX', lat: 51.53253, lng: -0.1269 }),
+        stop('YWAYSJN', 'York Way South Junction', 'PP', { lat: 51.54064, lng: -0.12388 }),
+        stop('WENGTNX', 'Wennington Crossovers', 'PP', { lat: 51.50631, lng: 0.2075 }),
+        stop('PARISND', 'Paris Nord', 'DT', { crs: 'PBN', lat: 51.07401, lng: 1.39385 }),
+      ],
+      [],
+      { PARISND: { lat: 51.07401, lng: 1.39385 } },
+    )
+    expect(mapped.find((point) => point.tpl === 'YWAYSJN')?.kind).toBe('junction')
+    expect(mapped.find((point) => point.tpl === 'WENGTNX')?.kind).toBe('pass')
+    expect(mapped.find((point) => point.tpl === 'PARISND')).toMatchObject({
+      lat: 48.8805227,
+      lng: 2.3547846,
+      kind: 'stop',
+    })
+    expect(mappedRouteWaypoints(mapped)).toEqual([
+      [51.53253, -0.1269],
+      [51.50631, 0.2075],
+      [48.8805227, 2.3547846],
+    ])
+    expect(tiplocsNeedingCoordinates([
+      stop('PARISND', 'Paris Nord', 'DT', { crs: 'PBN' }),
+      stop('CHUNCTR', 'Eurotunnel Boundary (Ctrl)', 'PP'),
+    ])).toEqual(['CHUNCTR'])
+    expect(continentalEurostarCoordinate({ tpl: 'LILLE', name: 'Lille Europe', crs: 'LIU' })?.lat).toBeCloseTo(50.636, 3)
+  })
+
+  it('uses the continental pin for Paris even when the station catalogue says Folkestone', () => {
+    const mapped = journeyMapStops(
+      [stop('PARISND', 'Paris Nord', 'DT', { crs: 'PBN' })],
+      [{ crsCode: 'PBN', tiploc: 'PARISND', stationName: 'Paris Nord', latitude: 51.074, longitude: 1.394 }],
+    )
+    expect(mapped[0]).toMatchObject({ lat: 48.8805227, lng: 2.3547846 })
+  })
+
+  it('extends Eurostar running miles along the rail path and drops the Folkestone chord', () => {
+    const calls = [
+      stop('STPANCI', 'St Pancras International', 'OR', { crs: 'SPX', cumMiles: 0 }),
+      stop('YWAYSJN', 'York Way South Junction', 'PP', { cumMiles: 0.96 }),
+      stop('CHUNCTR', 'Eurotunnel Boundary (Ctrl)', 'PP', { cumMiles: 68.94 }),
+      stop('PARISND', 'Paris Nord', 'DT', { crs: 'PBN', cumMiles: 80.7 }),
+    ]
+    expect(eurostarRailChains(calls)).toEqual([[2, 3]])
+    const pending = applyEurostarRailMiles(calls, {})
+    expect(pending[0].cumMiles).toBe(0)
+    expect(pending[1].cumMiles).toBe(0.96)
+    expect(pending[2].cumMiles).toBe(68.94)
+    expect(pending[3].cumMiles).toBeNull()
+    expect(pending[3].cumM).toBeNull()
+    const railMetres = 300_000
+    const routed = applyEurostarRailMiles(calls, { '2:3': railMetres })
+    const parisMetres = 68.94 * 1609.344 + railMetres
+    expect(routed[3].cumM).toBeCloseTo(parisMetres, 3)
+    expect(routed[3].cumMiles).toBeGreaterThan(200)
+    expect(formatMilesAndChains({ metres: routed[3].cumM })).not.toBe('80m 56ch')
+    const chord: [number, number][] = [
+      [51.09421, 1.12965],
+      [48.8805227, 2.3547846],
+    ]
+    const viaLille: [number, number][] = [
+      [51.09421, 1.12965],
+      [50.6360451, 3.0712488],
+      [48.8805227, 2.3547846],
+    ]
+    expect(pathLengthMetres(viaLille)).toBeGreaterThan(pathLengthMetres(chord))
+    const along = metresAlongWaypoints(viaLille, [viaLille[0], viaLille[2]])
+    expect(along?.[1]).toBeCloseTo(pathLengthMetres(viaLille), 3)
   })
 
   it('snaps a between-stations live point onto the rail path', () => {

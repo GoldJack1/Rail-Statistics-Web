@@ -13,6 +13,7 @@ import { buildStopNameLookup, displayStopName, sortStopsByJourneyTime } from '@/
 import type { ServiceViewMode } from '@/components/darwin/serviceViewMode'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
 import { betweenStationsLabel, inferProgressIndex } from '@/utils/serviceProgress'
+import { useEurostarRunningMiles } from '@/hooks/useEurostarRunningMiles'
 import { formatMilesAndChains, milesAndChainsTitle } from '@/utils/milesAndChains'
 import { formatQuarterClock } from '@/utils/quarterClock'
 import { railwayDayMinutesFromHhmm } from '@/utils/railwayOperatingDayUk'
@@ -775,6 +776,7 @@ export function ServiceStopList({
     return () => window.clearInterval(id)
   }, [historical, orderedStops])
   const showPasses = viewMode === 'detailed'
+  const mileageStops = useEurostarRunningMiles(orderedStops, showPasses)
   const reportedFull = historical
     ? null
     : inferProgressIndex(orderedStops, nowMins) ?? reportedIndex(orderedStops, location?.last?.tiploc)
@@ -782,7 +784,7 @@ export function ServiceStopList({
     Boolean(trimSeconds(stop.atd || stop.ata || stop.atp)) || isActualLiveKind(stop.liveKind)
   // Detailed keeps upcoming working passes as Expected; drop densify rows the train
   // has already gone past without a report (those were filling the list with "No report").
-  const visible = orderedStops
+  const visible = mileageStops
     .map((stop, index) => ({ stop, index }))
     .filter(({ stop, index }) => {
       const kind = slotKind(stop.slot)

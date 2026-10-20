@@ -319,9 +319,13 @@ export function ServiceJourneyMap({
     [mapped],
   )
   const activePlatforms = platformQueryReady === platformQuery ? platformCoords : NO_PLATFORMS
+  const routeStops = useMemo(
+    () => mapped.filter((point) => point.kind !== 'junction'),
+    [mapped],
+  )
   const waypoints = useMemo(
-    () => mappedRouteWaypoints(mapped, activePlatforms),
-    [mapped, activePlatforms],
+    () => mappedRouteWaypoints(routeStops, activePlatforms),
+    [routeStops, activePlatforms],
   )
   const waypointKey = useMemo(
     () => waypoints.map((point) => `${point[0].toFixed(5)},${point[1].toFixed(5)}`).join('|'),
@@ -370,6 +374,8 @@ export function ServiceJourneyMap({
   }, [neededKey])
 
   useEffect(() => {
+    // Junction markers are drawn with the other timing points. They are not
+    // waypoints: only stops and station passes are sent to the router.
     const points = waypointsRef.current
     if (!geoReady || platformQueryReady !== platformQuery || points.length < 2) return
     const controller = new AbortController()

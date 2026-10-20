@@ -67,6 +67,21 @@ export async function GET(request: NextRequest) {
     )
   }
 
+  const respond = (coordinates: LatLngTuple[]) => {
+    routeCache.set(cacheKey, { at: Date.now(), coordinates })
+    return NextResponse.json(
+      { coordinates, fallback: false },
+      { headers: { 'Cache-Control': 'private, max-age=300' } },
+    )
+  }
+
+  const alongTracksOr = async (routed: LatLngTuple[]): Promise<LatLngTuple[] | null> => {
+    if (routed.length >= 2 && !routeLeavesTheRailway(points, routed)) return routed
+    const alongTracks = await osmRailPath(points)
+    if (alongTracks && alongTracks.length >= 2) return alongTracks
+    return routed.length >= 2 ? routed : null
+  }
+
   try {
     const upstream = await fetch(buildOpenRailRouteUrl(points), {
       headers: {
@@ -78,23 +93,22 @@ export async function GET(request: NextRequest) {
     })
     if (!upstream.ok) {
       const limited = upstream.status === 403 || upstream.status === 429 || upstream.status >= 500
-      return NextResponse.json({ coordinates: fallback, fallback: true, limited })
-    }
-    const payload: unknown = await upstream.json()
-    let coordinates = parseOpenRailRoute(payload)
-    if (coordinates.length < 2) {
+      if (limited) return NextResponse.json({ coordinates: fallback, fallback: true, limited })
+      const alongTracks = await osmRailPath(points)
+      if (alongTracks && alongTracks.length >= 2) return respond(alongTracks)
       return NextResponse.json({ coordinates: fallback, fallback: true })
     }
-    if (routeLeavesTheRailway(points, coordinates)) {
-      const alongTracks = await osmRailPath(points)
-      if (alongTracks && alongTracks.length >= 2) coordinates = alongTracks
-    }
-    routeCache.set(cacheKey, { at: Date.now(), coordinates })
-    return NextResponse.json(
-      { coordinates, fallback: false },
-      { headers: { 'Cache-Control': 'private, max-age=300' } }
-    )
+    const payload: unknown = await upstream.json()
+    const coordinates = await alongTracksOr(parseOpenRailRoute(payload))
+    if (!coordinates) return NextResponse.json({ coordinates: fallback, fallback: true })
+    return respond(coordinates)
   } catch {
+    try {
+      const alongTracks = await osmRailPath(points)
+      if (alongTracks && alongTracks.length >= 2) return respond(alongTracks)
+    } catch {
+      /* The railway graph is optional. A straight chord stays marked as a fallback. */
+    }
     return NextResponse.json({ coordinates: fallback, fallback: true })
   }
 }

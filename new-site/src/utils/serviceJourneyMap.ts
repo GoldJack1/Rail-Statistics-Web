@@ -1,4 +1,8 @@
 import type { ServiceLocation, ServiceStop } from '../types/darwin'
+import {
+  continentalEurostarCoordinate,
+  eurostarEndCoordinate,
+} from './eurostarContinental'
 import { isValidStationCoordinate } from './stationCoordinates'
 import { inferProgressIndex, nextProgressIndex } from './serviceProgress'
 import { railwayDaySecondsFromClock } from './railwayOperatingDayUk'
@@ -70,18 +74,20 @@ function stillAhead(from: MapPoint, point: MapPoint, next: MapPoint): boolean {
 }
 
 /**
- * Route through the timetable. Every stop and pass is a via when it still lies
- * ahead, so the line takes the booked points. A point listed back behind the
- * train is left out, because sending the router there and back draws a spur.
- * A booked platform moves that via onto the rail beside the platform. One
- * point per place: a bay starts at the buffer, and a call stands on the
- * stopping mark. A second point on the same platform makes the line reverse.
+ * Route through the timetable. Stops and station passes are vias when they
+ * still lie ahead. Junction markers stay on the map, but they are not vias:
+ * a junction coordinate pulls the router off the through line. A point listed
+ * back behind the train is left out, because sending the router there and
+ * back draws a spur. A booked platform moves that via onto the rail beside
+ * the platform. One point per place: a bay starts at the buffer, and a call
+ * stands on the stopping mark. A second point on the same platform makes the
+ * line reverse.
  */
 export function mappedRouteWaypoints(
   mapped: JourneyMapStop[],
   platformAt?: Readonly<Record<string, RoutePlatform>>,
 ): LatLngTuple[] {
-  const active = mapped.filter((stop) => !stop.cancelled)
+  const active = mapped.filter((stop) => !stop.cancelled && stop.kind !== 'junction')
   const calls = active.filter((stop) => stop.calling)
   const placeAt = (stop: JourneyMapStop): MapPoint =>
     platformAt?.[String(stop.index)] ?? { lat: stop.lat, lng: stop.lng }
@@ -407,6 +413,7 @@ export function tiplocsNeedingCoordinates(
   const out: string[] = []
   const seen = new Set<string>()
   for (const stop of stops || []) {
+    if (continentalEurostarCoordinate(stop)) continue
     if (matchStationCoord(stop, stations)) continue
     const tpl = String(stop.tpl || '').trim().toUpperCase()
     if (!tpl || seen.has(tpl)) continue
@@ -425,12 +432,16 @@ export function journeyMapStops(
   for (let i = 0; i < (stops || []).length; i++) {
     const stop = stops[i]
     const stn = matchStationCoord(stop, stations)
-    // Catalogue pins are the station. The TIPLOC file is the WGS84 position
-    // on the railway. The schedule lat/lng is an OS grid conversion and is
-    // only used when neither of those exists.
-    const coord = (stn ? { lat: stn.latitude, lng: stn.longitude } : null)
+    // Paris, Lille, Brussels, Rotterdam and Amsterdam are not on the UK grid.
+    // The bundled TIPLOC pin for some of them is the Folkestone NaPTAN
+    // placeholder, so the continental table wins for those stations only.
+    // Everywhere else, catalogue pins beat the TIPLOC file, and the TIPLOC
+    // file beats the schedule's OS grid conversion.
+    const coord = continentalEurostarCoordinate(stop)
+      || (stn ? { lat: stn.latitude, lng: stn.longitude } : null)
       || coordFromLookup(stop, extra)
       || coordFromStop(stop)
+      || eurostarEndCoordinate(stop)
     if (!coord) continue
     const kind = journeyPointKind(stop)
     const platform = String(stop.platform || '').trim()
