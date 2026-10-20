@@ -158,6 +158,35 @@ function hmToMin(value) {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
+/** A reused headcode can still be stepping from the previous working. */
+const HEADCODE_ACTUAL_MATCH_MIN = 8 * 60;
+
+function circularMinuteDelta(a, b) {
+  let delta = Math.abs(a - b);
+  if (delta > 12 * 60) delta = 1440 - delta;
+  return delta;
+}
+
+/**
+ * TD is stored by headcode, so the morning train's steps land on the evening
+ * schedule. Drop a TD actual that is not this call's booked time.
+ */
+export function dropForeignTdActuals(calls) {
+  return (calls || []).map((call) => {
+    if (String(call.actual_source || "") !== "td") return call;
+    const booked = callBookedMin(call);
+    const actual = callActualMin(call);
+    if (booked == null || actual == null) return call;
+    if (circularMinuteDelta(booked, actual) <= HEADCODE_ACTUAL_MATCH_MIN) return call;
+    const next = { ...call, ata: null, atd: null, atp: null };
+    const estimate = next.eta || next.etd || next.etp;
+    if (next.live_kind === "actual" || next.live_kind === "actual-arr") {
+      next.live_kind = estimate ? "est" : null;
+    }
+    return next;
+  });
+}
+
 const sequenceCache = new Map();
 
 /** Every stored calling pattern for the day, in schedule order. */
@@ -563,7 +592,12 @@ export function applyLiveToInferred(db, calls, trainId, catalog = null) {
   }
   const reported = rows
     .map((call, index) => ({ index, booked: callBookedMin(call), actual: callActualMin(call) }))
-    .filter((row) => row.actual != null && row.booked != null);
+    .filter(
+      (row) =>
+        row.actual != null &&
+        row.booked != null &&
+        circularMinuteDelta(row.actual, row.booked) <= HEADCODE_ACTUAL_MATCH_MIN,
+    );
   if (!reported.length) return rows;
   for (let i = 0; i < rows.length; i++) {
     const call = rows[i];
@@ -984,6 +1018,8 @@ export function overlayTdOnCalls(db, calls, headcode, catalog = null) {
     });
     if (target < 0) continue;
     const call = rows[target];
+    const schedule = hmToMin(call.wtp || call.wtd || call.wta || call.std || call.sta);
+    if (schedule != null && minute != null && circularMinuteDelta(schedule, minute) > HEADCODE_ACTUAL_MATCH_MIN) continue;
     if (call.ata || call.atd || call.atp) rows[target] = withTdSeconds(call, actual);
     else if (Number(call.is_passing)) {
       rows[target] = { ...call, atp: actual, live_kind: "actual", actual_source: call.actual_source || "td" };

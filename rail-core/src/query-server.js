@@ -9,7 +9,7 @@ import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
 import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime, sortCallsByWttTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
-import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropUnreportedPasses, insertReportedPasses, insertSegmentJunctions, namedJunctionPoints, overlayTdOnCalls, reportsForService, retimeInferredPasses, scheduleSequences, settleUnreportedPasses, tiplocCoords } from "./query-enrich.js";
+import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropForeignTdActuals, dropUnreportedPasses, insertReportedPasses, insertSegmentJunctions, namedJunctionPoints, overlayTdOnCalls, reportsForService, retimeInferredPasses, scheduleSequences, settleUnreportedPasses, tiplocCoords } from "./query-enrich.js";
 import { assignTrackMiles, loadGtclGraph } from "./gtcl-path.js";
 import { annotateStops, publicSchedule } from "./schedule-notes.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
@@ -778,6 +778,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
       ),
     );
     calls = dropUnreportedPasses(calls);
+    calls = dropForeignTdActuals(calls);
     const reports = collectReportedPasses(db, calls, svc.train_id, headcode, catalog);
     const coords = tiplocCoords(catalog, [...calls.map((c) => c.tiploc), ...reports.map((r) => r.tiploc)]);
     calls = insertReportedPasses(calls, reportsForService(calls, reports, coords));

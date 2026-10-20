@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { applyLiveToInferred, carryRunningLateness, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, reportsOnServiceTiploc, retimeInferredPasses, settleUnreportedPasses } from "./query-enrich.js";
+import { applyLiveToInferred, carryRunningLateness, dropForeignTdActuals, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, reportsOnServiceTiploc, retimeInferredPasses, settleUnreportedPasses } from "./query-enrich.js";
 import { openDayDb } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
 import { mkdtempSync } from "node:fs";
@@ -389,6 +389,60 @@ test("overlayTdOnCalls maps null-tiploc events via SMART", () => {
   assert.equal(out[0].actual_source, "td");
   db.close();
   catalog.close();
+});
+
+test("a morning headcode step is not this evening's pass", () => {
+  const calls = [
+    { tiploc: "SHEFFLD", is_passing: 0, wta: "21:56", wtd: "22:02", atd: "22:02", actual_source: "trust" },
+    { tiploc: "CLAYXSJ", is_passing: 1, wtp: "22:30", atp: "09:20", actual_source: "td", live_kind: "actual" },
+    { tiploc: "DRBYLNW", is_passing: 1, wtp: "22:51", atp: "09:41:53", actual_source: "td", live_kind: "actual" },
+    { tiploc: "CHFD", is_passing: 0, wta: "22:25", wtd: "22:26", eta: "22:25", etd: "22:26" },
+    { tiploc: "BHAMNWS", is_passing: 0, wta: "23:28", eta: "23:28" },
+  ];
+  const dropped = dropForeignTdActuals(calls);
+  assert.equal(dropped[1].atp, null);
+  assert.equal(dropped[1].live_kind, null);
+  assert.equal(dropped[2].atp, null);
+  assert.equal(dropped[0].atd, "22:02");
+  const inferred = applyLiveToInferred(null, [
+    dropped[0],
+    dropped[3],
+    { tiploc: "CLAYXSJ", is_passing: 1, wtp: "22:30", actual_source: "inferred" },
+    dropped[2],
+  ], null);
+  assert.equal(inferred[2].atp ?? null, null);
+  const carried = carryRunningLateness(inferred);
+  assert.equal(carried[1].eta, "22:25");
+  assert.equal(carried[1].etd, "22:26");
+});
+
+test("overlayTdOnCalls ignores a headcode reused from the morning", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rail-core-"));
+  const db = openDayDb(dir, "2026-10-20");
+  db.exec(`
+    INSERT INTO td_events (event_id, headcode, area_id, berth, from_berth, msg_type, tiploc, stanox, json, received_at)
+    VALUES ('4', '1M00', 'B2', '1234', '0000', 'CA', 'PROOFHJ', '12345', '{"CA_MSG":{"time":"090715","msg_type":"CA"}}', 4)
+  `);
+  const calls = [
+    { tiploc: "PROOFHJ", is_passing: 1, wtp: "23:25", atp: null },
+    { tiploc: "BHAMNWS", is_passing: 0, wta: "23:28" },
+  ];
+  const out = overlayTdOnCalls(db, calls, "1M00");
+  assert.equal(out[0].atp, null);
+  db.close();
+});
+
+test("overlayTdOnCalls keeps a pass just after midnight", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rail-core-"));
+  const db = openDayDb(dir, "2026-10-20");
+  db.exec(`
+    INSERT INTO td_events (event_id, headcode, area_id, berth, from_berth, msg_type, tiploc, stanox, json, received_at)
+    VALUES ('5', '1M00', 'B2', '1234', '0000', 'CA', 'PROOFHJ', '12345', '{"CA_MSG":{"time":"001015","msg_type":"CA"}}', 5)
+  `);
+  const calls = [{ tiploc: "PROOFHJ", is_passing: 1, wtp: "23:50", atp: null }];
+  const out = overlayTdOnCalls(db, calls, "1M00");
+  assert.equal(out[0].atp, "00:10:15");
+  db.close();
 });
 
 test("overlayTdOnCalls keeps TD seconds on the same minute", () => {
