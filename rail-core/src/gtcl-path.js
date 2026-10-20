@@ -274,9 +274,16 @@ function ensureCells(graph) {
 
 function route(graph, fromKey, toKey, maxLen = Infinity) {
   if (fromKey === toKey) return [];
+  const goal = toKey.split(",").map(Number);
+  const heur = (key) => {
+    const [x, y] = key.split(",").map(Number);
+    return Math.hypot(x - goal[0], y - goal[1]);
+  };
   const dist = new Map([[fromKey, 0]]);
   const prev = new Map();
-  const heap = [[0, fromKey]];
+  // Straight-line remainder keeps a long leg on the corridor instead of
+  // searching every edge within the distance budget.
+  const heap = [[heur(fromKey), 0, fromKey]];
   const less = (i, j) => heap[i][0] < heap[j][0];
   const swap = (i, j) => {
     const t = heap[i];
@@ -317,10 +324,11 @@ function route(graph, fromKey, toKey, maxLen = Infinity) {
     return top;
   };
   while (heap.length) {
-    const [d, key] = pop();
+    const [f, d, key] = pop();
     if (d !== dist.get(key)) continue;
     if (key === toKey) break;
-    if (d > maxLen) break;
+    // Ordered by remaining distance, so a later node cannot beat this budget.
+    if (f > maxLen) break;
     for (const edge of graph.adj.get(key) || []) {
       const next = `${edge.ax},${edge.ay}` === key ? `${edge.bx},${edge.by}` : `${edge.ax},${edge.ay}`;
       const nd = d + edge.len;
@@ -328,20 +336,24 @@ function route(graph, fromKey, toKey, maxLen = Infinity) {
       if (nd < (dist.get(next) ?? Infinity)) {
         dist.set(next, nd);
         prev.set(next, { key, edge });
-        push([nd, next]);
+        push([nd + heur(next), nd, next]);
       }
     }
   }
   if (!prev.has(toKey) && fromKey !== toKey) return null;
-  const nodes = [toKey];
   const edges = [];
   let cur = toKey;
   while (cur !== fromKey) {
     const step = prev.get(cur);
     if (!step) return null;
-    edges.push(step.edge);
+    // The stored edge may point against the way the train walks it.
+    const start = `${step.edge.ax},${step.edge.ay}`;
+    const edge =
+      start === step.key
+        ? step.edge
+        : { ax: step.edge.bx, ay: step.edge.by, bx: step.edge.ax, by: step.edge.ay, len: step.edge.len };
+    edges.push(edge);
     cur = step.key;
-    nodes.push(cur);
   }
   edges.reverse();
   return edges;
@@ -362,9 +374,23 @@ function samePlaceName(a, b) {
   return false;
 }
 
-const ROUTE_OFF_M = 80;
+/** Compass words removed. "Crewe Coal Yard" stays distinct from "Crewe". */
+function centreName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/\b(north|south|east|west|middle|junction|jn|jcn)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+// A junction plotted in the village, not on the rail centreline, is still on this train.
+const ROUTE_OFF_M = 800;
 
 function isScheduleCall(call) {
+  // A guessed junction clock is not a timetable anchor. Leaving it as one
+  // pins the junction in front of a report that belongs earlier on the track.
+  if (String(call?.actual_source || "") === "inferred") return false;
   return Boolean(call?.wtp || call?.wtd || call?.wta || call?.sta || call?.std || call?.ptd || call?.pta);
 }
 
@@ -382,25 +408,48 @@ function pathEdges(graph, a, b) {
 }
 
 function projectOnPath(loc, edges) {
+  if (!edges?.length) return null;
   let best = null;
   let chain = 0;
   for (const edge of edges) {
     const hit = pointSegDist(loc.e, loc.n, edge.ax, edge.ay, edge.bx, edge.by);
-    if (!best || hit.d < best.d) best = { d: hit.d, at: chain + hit.t * edge.len };
+    const at = chain + hit.t * edge.len;
+    if (!best || hit.d < best.d) best = { d: hit.d, at, tRaw: hit.tRaw };
     chain += edge.len;
   }
-  return best;
+  // Only a point past the path's own end belongs on the next leg. A corner
+  // vertex is the closest point for a junction just off the throat, and that
+  // vertex sits in the middle of this leg.
+  const total = chain;
+  if (best.tRaw > 1 + 1e-4 && best.at >= total - 0.01) return { d: best.d, at: total, overhang: "after" };
+  if (best.tRaw < -1e-4 && best.at <= 0.01) return { d: best.d, at: 0, overhang: "before" };
+  return { d: best.d, at: best.at, overhang: null };
+}
+
+/** Fraction along the straight line between two calls. Null when it is off to the side. */
+function chordFraction(loc, from, to) {
+  if (!loc || !from || !to) return null;
+  const dx = to.e - from.e;
+  const dy = to.n - from.n;
+  const l2 = dx * dx + dy * dy;
+  if (!l2) return null;
+  const t = ((loc.e - from.e) * dx + (loc.n - from.n) * dy) / l2;
+  if (t < -0.02 || t > 1.02) return null;
+  const px = from.e + t * dx;
+  const py = from.n + t * dy;
+  if (Math.hypot(loc.e - px, loc.n - py) > 15000) return null;
+  return Math.max(0, Math.min(1, t));
 }
 
 function pointSegDist(px, py, ax, ay, bx, by) {
   const dx = bx - ax;
   const dy = by - ay;
   const l2 = dx * dx + dy * dy;
-  let t = l2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / l2;
-  t = Math.max(0, Math.min(1, t));
+  const tRaw = l2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / l2;
+  const t = Math.max(0, Math.min(1, tRaw));
   const x = ax + t * dx;
   const y = ay + t * dy;
-  return { d: Math.hypot(px - x, py - y), t };
+  return { d: Math.hypot(px - x, py - y), t, tRaw };
 }
 
 function midsBetween(graph, locIndex, rail, a, b, used, tlk) {
@@ -542,7 +591,9 @@ export function assignTrackMiles(calls, graph, catalog) {
     let metres = null;
     if (a) {
       const straight = Math.hypot(a.e - b.e, a.n - b.n);
-      if (graph) {
+      // A hop longer than this is two places that are not neighbours. Searching
+      // the whole corridor only stalls the request.
+      if (graph && straight <= 40000) {
         const maxLen = straight * 1.8 + 400;
         const fromCands = snapCandidates(graph, a.e, a.n, b).slice(0, 3);
         const toCands = snapCandidates(graph, b.e, b.n, a).slice(0, 3);
@@ -566,48 +617,123 @@ export function assignTrackMiles(calls, graph, catalog) {
   return rows;
 }
 
+function callTiploc(row) {
+  return String(row?.tiploc || "").toUpperCase();
+}
+
+function hasPublicTime(call) {
+  return (call?.sta != null && call.sta !== "") || (call?.std != null && call.std !== "");
+}
+
+function bookedMinutes(row) {
+  for (const key of ["wtp", "wtd", "wta", "std", "sta", "ptd", "pta"]) {
+    const text = String(row?.[key] ?? "");
+    const match = /^(\d{1,2}):(\d{2})/.exec(text);
+    if (!match) continue;
+    return Number(match[1]) * 60 + Number(match[2]) + (text.includes("½") ? 0.5 : 0);
+  }
+  return null;
+}
+
+/** True when this pass's booked time falls on this leg, not the reversal after it. */
+function gapFitsTime(rows, anchorAt, gap, minutes) {
+  if (minutes == null || gap < 0 || gap >= anchorAt.length - 1) return false;
+  const start = bookedMinutes(rows[anchorAt[gap]]);
+  let end = bookedMinutes(rows[anchorAt[gap + 1]]);
+  if (start == null || end == null) return false;
+  let t = minutes;
+  if (end < start - 60) end += 24 * 60;
+  if (t < start - 60) t += 24 * 60;
+  return t >= start - 1 && t <= end + 1;
+}
+
+/**
+ * Advertised calls keep timetable order. Every pass between them is laid
+ * along the track, including one that carries its own booked time. A pass
+ * time a minute out was pinning junctions on the wrong side of the station.
+ */
+function anchorIndexes(rows) {
+  const schedule = [];
+  const pub = [];
+  rows.forEach((row, index) => {
+    const inferred = String(row?.actual_source || "") === "inferred";
+    if (isScheduleCall(row)) schedule.push(index);
+    if (!inferred && hasPublicTime(row)) pub.push(index);
+  });
+  return pub.length >= 2 ? pub : schedule;
+}
+
 /**
  * Timetable calls stay in schedule order. A report with no booked time is
  * placed where it sits on the track between those calls, so the same rule
- * holds on every route.
+ * holds on every route. Once a journey has advertised calls, those are the
+ * anchors and booked passes are ordered along the same track.
  */
 export function orderByTrack(calls, graph, locList) {
   const rows = (calls || []).map((c) => ({ ...c }));
   if (!graph || rows.length < 2) return rows;
   const byTpl = new Map((locList || []).map((loc) => [String(loc.tiploc || "").toUpperCase(), loc]));
-  const anchorAt = [];
-  rows.forEach((row, index) => {
-    if (isScheduleCall(row)) anchorAt.push(index);
-  });
+  const anchorAt = anchorIndexes(rows);
   if (anchorAt.length < 2) return rows;
+  const anchorSet = new Set(anchorAt);
   const paths = [];
   for (let gap = 0; gap < anchorAt.length - 1; gap++) {
-    const from = byTpl.get(String(rows[anchorAt[gap]].tiploc || "").toUpperCase());
-    const to = byTpl.get(String(rows[anchorAt[gap + 1]].tiploc || "").toUpperCase());
+    const from = byTpl.get(callTiploc(rows[anchorAt[gap]]));
+    const to = byTpl.get(callTiploc(rows[anchorAt[gap + 1]]));
     paths.push(from && to ? pathEdges(graph, from, to) : null);
   }
   const onRoute = anchorAt.slice(0, -1).map(() => []);
   const placed = new Set();
+  const edgeCase = new Map();
   for (let index = 0; index < rows.length; index++) {
-    if (isScheduleCall(rows[index])) continue;
-    const loc = byTpl.get(String(rows[index].tiploc || "").toUpperCase());
+    if (anchorSet.has(index)) continue;
+    const loc = byTpl.get(callTiploc(rows[index]));
     if (!loc) continue;
+    const minutes = bookedMinutes(rows[index]);
     let best = null;
     for (let gap = 0; gap < paths.length; gap++) {
       if (!paths[gap]) continue;
       const hit = projectOnPath(loc, paths[gap]);
       if (!hit || hit.d > ROUTE_OFF_M) continue;
-      if (!best || hit.d < best.d) best = { gap, at: hit.at, index };
+      let target = gap;
+      let at = hit.at;
+      let rank = 0;
+      if (hit.overhang === "after") {
+        target = gap + 1;
+        at = -1;
+        rank = 1;
+      } else if (hit.overhang === "before") {
+        target = gap - 1;
+        at = Number.POSITIVE_INFINITY;
+        rank = 1;
+      }
+      const fits = gapFitsTime(rows, anchorAt, target, minutes) ? 0 : 1;
+      const better =
+        !best ||
+        rank < best.rank ||
+        (rank === best.rank && fits < best.fits && hit.d <= ROUTE_OFF_M && best.d <= ROUTE_OFF_M) ||
+        (rank === best.rank && fits === best.fits && hit.d < best.d);
+      if (better) best = { target, at, rank, d: hit.d, index, fits };
     }
     if (!best) continue;
-    onRoute[best.gap].push(best);
     placed.add(index);
+    if (best.target < 0) edgeCase.set(index, "lead");
+    else if (best.target >= onRoute.length) edgeCase.set(index, "tail");
+    else onRoute[best.target].push(best);
   }
   const lead = [];
   const unmatched = anchorAt.slice(0, -1).map(() => []);
   const tail = [];
   for (let index = 0; index < rows.length; index++) {
-    if (isScheduleCall(rows[index]) || placed.has(index)) continue;
+    if (anchorSet.has(index) || (placed.has(index) && !edgeCase.has(index))) continue;
+    if (edgeCase.get(index) === "lead") {
+      lead.push(rows[index]);
+      continue;
+    }
+    if (edgeCase.get(index) === "tail") {
+      tail.push(rows[index]);
+      continue;
+    }
     let gap = -1;
     for (let anchor = 0; anchor < anchorAt.length; anchor++) {
       if (anchorAt[anchor] < index) gap = anchor;
@@ -615,15 +741,34 @@ export function orderByTrack(calls, graph, locList) {
     }
     if (gap < 0) lead.push(rows[index]);
     else if (gap >= anchorAt.length - 1) tail.push(rows[index]);
-    else unmatched[gap].push(rows[index]);
+    else unmatched[gap].push({ index, row: rows[index] });
   }
   const out = [...lead];
   for (let gap = 0; gap < anchorAt.length; gap++) {
     out.push(rows[anchorAt[gap]]);
     if (gap >= anchorAt.length - 1) continue;
-    onRoute[gap].sort((a, b) => a.at - b.at || a.index - b.index);
-    for (const hit of onRoute[gap]) out.push(rows[hit.index]);
-    out.push(...unmatched[gap]);
+    const path = paths[gap];
+    const fromLoc = byTpl.get(callTiploc(rows[anchorAt[gap]]));
+    const toLoc = byTpl.get(callTiploc(rows[anchorAt[gap + 1]]));
+    const span = fromLoc && toLoc ? Math.hypot(toLoc.e - fromLoc.e, toLoc.n - fromLoc.n) : 0;
+    const pathLen = path?.reduce((sum, edge) => sum + edge.len, 0) || span || 1;
+    const merged = onRoute[gap].map((hit) => ({ at: hit.at, index: hit.index, row: rows[hit.index] }));
+    const rest = [];
+    for (const item of unmatched[gap]) {
+      const loc = byTpl.get(callTiploc(item.row));
+      const hit = loc && path ? projectOnPath(loc, path) : null;
+      let at = hit && !hit.overhang && hit.d <= 2000 ? hit.at : null;
+      if (at == null) {
+        const t = chordFraction(loc, fromLoc, toLoc);
+        if (t != null) at = t * pathLen;
+      }
+      if (at == null) rest.push(item);
+      else merged.push({ ...item, at });
+    }
+    merged.sort((a, b) => a.at - b.at || a.index - b.index);
+    for (const item of merged) out.push(item.row);
+    rest.sort((a, b) => a.index - b.index);
+    for (const item of rest) out.push(item.row);
   }
   out.push(...tail);
   return out;
@@ -704,6 +849,9 @@ function closePairBackwards(rows, byTpl, index) {
   const dist = Math.hypot(a.e - b.e, a.n - b.n);
   if (dist > SIDE_M) return false;
   if (!samePlaceName(a.name, b.name)) return false;
+  // A north junction is reordered against its station, not against every
+  // other place that shares the town name.
+  if (centreName(a.name) !== centreName(b.name)) return false;
   const sideA = compassSide(a.name);
   const sideB = compassSide(b.name);
   const axis = sideAxis(sideA) || sideAxis(sideB);

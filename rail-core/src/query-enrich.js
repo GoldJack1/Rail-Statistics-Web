@@ -233,9 +233,12 @@ function onSegment(a, b, point, slack = 400) {
 }
 
 function clockSeconds(value) {
-  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(value || ""));
+  const text = String(value || "").trim();
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(text);
   if (!m) return null;
-  return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] || 0);
+  let secs = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] || 0);
+  if (!m[3] && /½/.test(text)) secs += 30;
+  return secs;
 }
 
 function formatClock(seconds, withSeconds) {
@@ -261,10 +264,55 @@ function reportedClock(call) {
   return call?.atp || call?.atd || call?.ata || null;
 }
 
+function strictlyInside(value, before, after) {
+  const t = clockSeconds(value);
+  const a = clockSeconds(before);
+  const b = clockSeconds(after);
+  if (t == null || a == null || b == null || b <= a) return true;
+  return t > a && t <= b;
+}
+
+/**
+ * Ordering can move a guessed junction to the other side of a station and
+ * leave its clock behind. Put that clock back between the calls it now sits between.
+ */
+export function retimeInferredPasses(calls) {
+  const rows = (calls || []).map((c) => ({ ...c }));
+  for (let i = 0; i < rows.length; i++) {
+    const call = rows[i];
+    if (String(call.actual_source || "") !== "inferred") continue;
+    const prev = [...rows.slice(0, i)].reverse().find((row) => callClock(row) || reportedClock(row));
+    const next = rows.slice(i + 1).find((row) => callClock(row) || reportedClock(row));
+    if (!prev || !next) continue;
+    const guess = guessBetween(prev, next, 0.5);
+    if (call.wtp && callClock(prev) && callClock(next) && !strictlyInside(call.wtp, callClock(prev), callClock(next)) && guess.wtp) {
+      call.wtp = guess.wtp;
+      if (!reportedClock(call)) call.etp = guess.etp || guess.wtp;
+    }
+    const live = reportedClock(call);
+    const prevLive = reportedClock(prev);
+    const nextLive = reportedClock(next);
+    if (live && prevLive && nextLive && !strictlyInside(live, prevLive, nextLive) && guess.atp) {
+      if (call.atp) call.atp = guess.atp;
+      else if (call.atd) call.atd = guess.atp;
+      else call.ata = guess.atp;
+    }
+  }
+  return rows;
+}
+
+/** A pass booked on the way out of a call cannot show an earlier clock than that call. */
+function notBefore(value, previous) {
+  const got = clockSeconds(value);
+  const prev = clockSeconds(previous);
+  if (got == null || prev == null || got > prev) return value;
+  return formatClock(prev + 60, false);
+}
+
 /** Working time and pass time are each taken from the calls on either side. */
 function guessBetween(before, after, t) {
   const fraction = Number.isFinite(t) ? t : 0.5;
-  const wtp = interpolateClock(callClock(before), callClock(after), fraction);
+  const wtp = notBefore(interpolateClock(callClock(before), callClock(after), fraction), callClock(before));
   const passed = Boolean(reportedClock(before) && reportedClock(after));
   const live = interpolateClock(reportedClock(before), reportedClock(after), fraction);
   return { wtp, atp: passed ? live : null, etp: passed ? null : wtp };
@@ -319,8 +367,15 @@ export function insertSegmentJunctions(calls, sequences, coords, junctions = [])
       const consider = (tpl) => {
         const key = String(tpl || "").toUpperCase();
         if (!key || key === here || present.has(key) || seen.has(key)) return;
-        const t = onSegment(locate(prev), locate(here), locate(key));
+        const point = locate(key);
+        const t = onSegment(locate(prev), locate(here), point);
         if (t == null) return;
+        // Ardwick station sits on Ardwick Junction. Other trains time the
+        // platforms; this one has already booked the junction.
+        if (point && [...present].some((existing) => {
+          const placed = locate(existing);
+          return placed && Math.hypot(placed.e - point.e, placed.n - point.n) < 400;
+        })) return;
         seen.add(key);
         candidates.push({ tpl: key, t });
       };

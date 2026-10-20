@@ -7,14 +7,15 @@ import { longRangeAheadDays } from "./cif-schedule.js";
 import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
-import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByBookedTime, sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime, sortCallsByWttTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
-import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropUnreportedPasses, insertReportedPasses, insertSegmentJunctions, namedJunctionPoints, overlayTdOnCalls, reportsForService, scheduleSequences, settleUnreportedPasses, tiplocCoords } from "./query-enrich.js";
-import { assignTrackMiles, loadGtclGraph, orderCallsAlongTrack, orderCloseCallingPlaces } from "./gtcl-path.js";
+import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropUnreportedPasses, insertReportedPasses, insertSegmentJunctions, namedJunctionPoints, overlayTdOnCalls, reportsForService, retimeInferredPasses, scheduleSequences, settleUnreportedPasses, tiplocCoords } from "./query-enrich.js";
+import { assignTrackMiles, loadGtclGraph } from "./gtcl-path.js";
 import { annotateStops, publicSchedule } from "./schedule-notes.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
+import { osgbToWgs84 } from "./osgb.js";
 import { ensureDayImported, ridNeedsHsp, ridsNeedHsp, startBoardHspFill } from "./ensure-history-day.js";
 import { consistDocument, endOfDayMilesForUnit, lookupConsist, normalizePtacVehicles, unitIdsFromConsistRow } from "./ptac-apply.js";
 import {
@@ -772,7 +773,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     const headcode = svc.headcode || svc.train_id;
     calls = dropOrmNearDuplicates(
       maskCallsAsOf(
-        trimCallsToDestination(sortCallsByBookedTime(dropCifTailAfterPublicTerminus(rawCalls)), svc, true),
+        trimCallsToDestination(sortCallsByWttTime(dropCifTailAfterPublicTerminus(rawCalls)), svc, true),
         at,
       ),
     );
@@ -791,8 +792,9 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     const segmentCoords = tiplocCoords(catalog, locate);
     calls = insertSegmentJunctions(calls, sequences, segmentCoords, namedJunctionPoints(catalog));
     const track = loadGtclGraph(process.env.GTCL_GRAPH || `${DATA_DIR}/gtcl-graph.sqlite`);
-    calls = orderCallsAlongTrack(calls, track, catalog);
-    calls = orderCloseCallingPlaces(calls, catalog);
+    calls = sortCallsByWttTime(calls);
+    calls = retimeInferredPasses(calls);
+    calls = sortCallsByWttTime(calls);
     calls = applyLiveToInferred(db, calls, svc.train_id, catalog);
     calls = carryRunningLateness(calls);
     calls = settleUnreportedPasses(calls);
@@ -803,6 +805,17 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     : [];
   const toMiles = (m) =>
     m == null || !Number.isFinite(Number(m)) ? null : Math.round((Number(m) / 1609.344) * 100) / 100;
+  const pointGeo = tiplocCoords(catalog, calls.map((c) => c.tiploc));
+  const latLngFor = (tiploc) => {
+    const grid = pointGeo.get(String(tiploc || "").toUpperCase());
+    if (!grid) return { lat: null, lng: null };
+    const wgs = osgbToWgs84(grid.e, grid.n);
+    if (!wgs) return { lat: null, lng: null };
+    return {
+      lat: Math.round(wgs.lat * 1e5) / 1e5,
+      lng: Math.round(wgs.lon * 1e5) / 1e5,
+    };
+  };
   const callingPoints = calls.map((c) => ({
       crs: (c.crs && String(c.crs).trim().length === 3 ? String(c.crs).toUpperCase() : null) || catalogCrs(c.tiploc),
       tiploc: c.tiploc,
@@ -867,6 +880,8 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
       line: c.line,
       legMiles: c.legMiles,
       cumMiles: c.cumMiles,
+      cumM: c.cumM,
+      ...latLngFor(c.tiploc),
       pathedAs: null,
       allowances: [],
     };

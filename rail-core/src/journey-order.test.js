@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isWorkingPass, publicCallTime, publicJourneyEnds, recoverBookedPublic, sortCallsByBookedTime, sortCallsByJourneyTime } from "./journey-order.js";
+import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isWorkingPass, publicCallTime, publicJourneyEnds, recoverBookedPublic, sortCallsByBookedTime, sortCallsByJourneyTime, sortCallsByWttTime } from "./journey-order.js";
 
 test("orders a same-evening run from first time to last", () => {
   const rows = [
@@ -148,6 +148,46 @@ test("dummy 00:00 public times do not become the destination or reorder the run"
   assert.equal(dest.crs, "LDS");
 });
 
+test("a half-minute copy is the same visit and keeps the precise booked time", () => {
+  const rows = [
+    { tiploc: "BOWSFLD", seq: 7, wtp: "11:21½", atp: "11:21", is_passing: 1 },
+    { tiploc: "BOWSFLD", seq: 52, wtp: "11:21", is_passing: 1 },
+    { tiploc: "YORK", seq: 16, crs: "YRK", std: "12:20", wtd: "12:20½", atd: "12:20", is_passing: 0 },
+    { tiploc: "YORK", seq: 83, crs: "YRK", std: "12:20", wtd: "12:20", is_passing: 0 },
+  ];
+  const out = collapseRevisits(rows);
+  assert.deepEqual(out.map((row) => row.tiploc), ["BOWSFLD", "YORK"]);
+  assert.equal(out[0].wtp, "11:21½");
+  assert.equal(out[0].atp, "11:21");
+  assert.equal(out[1].wtd, "12:20½");
+  assert.equal(out[1].seq, 16);
+});
+
+test("passes filed on a second copy of this journey stay in running order", () => {
+  const rows = [
+    { tiploc: "YORK", seq: 16, crs: "YRK", std: "12:20", wtd: "12:20½", is_passing: 0 },
+    { tiploc: "WHRDJN", seq: 24, wtp: "12:46½", is_passing: 1 },
+    { tiploc: "MRLY", seq: 25, wtp: "12:50½", is_passing: 1 },
+    { tiploc: "MIRFEJN", seq: 28, wtp: "12:59½", is_passing: 1 },
+    { tiploc: "HETNLJN", seq: 29, wtp: "13:01", is_passing: 1 },
+    { tiploc: "HDRSFLD", seq: 31, crs: "HUD", std: "13:07", wtd: "13:07½", is_passing: 0 },
+    { tiploc: "MRSN", seq: 32, wtp: "13:14½", is_passing: 1 },
+    { tiploc: "MNCRIAP", seq: 51, crs: "MIA", sta: "14:08", is_passing: 0 },
+    { tiploc: "COTNGLY", seq: 60, wtp: "12:48", is_passing: 1 },
+    { tiploc: "MIRFILD", seq: 65, wtp: "13:00", is_passing: 1 },
+    { tiploc: "SLTHWTE", seq: 67, wtp: "13:11", is_passing: 1 },
+    { tiploc: "HDRSFLD", seq: 84, crs: "HUD", std: "13:07", wtd: "13:07", is_passing: 0 },
+    { tiploc: "YORK", seq: 83, crs: "YRK", std: "12:20", wtd: "12:20", is_passing: 0 },
+  ];
+  const out = collapseRevisits(dropCifTailAfterPublicTerminus(rows));
+  assert.deepEqual(
+    out.map((row) => row.tiploc),
+    ["YORK", "WHRDJN", "COTNGLY", "MRLY", "MIRFEJN", "MIRFILD", "HETNLJN", "HDRSFLD", "SLTHWTE", "MRSN", "MNCRIAP"],
+  );
+  assert.equal(out.filter((row) => row.tiploc === "YORK").length, 1);
+  assert.equal(out.filter((row) => row.tiploc === "HDRSFLD").length, 1);
+});
+
 test("drops a CIF working glued on after the public terminus", () => {
   const rows = [
     { tiploc: "MNCRIAP", crs: "MIA", seq: 0, std: "16:44", is_passing: 0 },
@@ -208,4 +248,41 @@ test("an early estimate does not move a booked timing point", () => {
 test("a working dwell with no public time is a pass", () => {
   assert.equal(isWorkingPass({ tiploc: "CHFN", crs: "CHF", wta: "16:56", wtd: "16:57" }), true);
   assert.equal(isWorkingPass({ tiploc: "YORK", crs: "YRK", sta: "17:08", std: "17:11", wta: "17:08", wtd: "17:11" }), false);
+});
+
+test("working timetable order counts the half minute and ignores a later public time", () => {
+  const rows = [
+    { tiploc: "PASS", seq: 2, wtp: "10:04½" },
+    { tiploc: "STOP", seq: 1, sta: "10:06", std: "10:07", wta: "10:04", wtd: "10:06" },
+    { tiploc: "NEXT", seq: 3, wtp: "10:05" },
+    { tiploc: "EARLY", seq: 4, wtp: "10:04", atp: "09:50" },
+  ];
+  assert.deepEqual(
+    sortCallsByWttTime(rows).map((row) => row.tiploc),
+    ["STOP", "EARLY", "PASS", "NEXT"],
+  );
+});
+
+test("a live report with no working time still sits on the clock", () => {
+  const rows = [
+    { tiploc: "A", seq: 0, wtd: "10:00" },
+    { tiploc: "C", seq: 2, wta: "10:20" },
+    { tiploc: "B", seq: 9, atp: "10:10" },
+  ];
+  assert.deepEqual(
+    sortCallsByWttTime(rows).map((row) => row.tiploc),
+    ["A", "B", "C"],
+  );
+});
+
+test("working timetable order keeps a sleeper after midnight", () => {
+  const rows = [
+    { tiploc: "OXF", seq: 2, wta: "00:45" },
+    { tiploc: "PAD", seq: 0, wtd: "23:50" },
+    { tiploc: "RDG", seq: 1, wtp: "00:20½" },
+  ];
+  assert.deepEqual(
+    sortCallsByWttTime(rows).map((row) => row.tiploc),
+    ["PAD", "RDG", "OXF"],
+  );
 });

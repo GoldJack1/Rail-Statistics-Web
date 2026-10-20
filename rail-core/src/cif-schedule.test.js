@@ -301,6 +301,26 @@ test("CIF does not reinsert a public stop Darwin omitted (Huddersfield diversion
   assert.equal(tpls.includes("HDRSFLD"), false);
 });
 
+test("public 0000 padding does not hide a working pass at a station", () => {
+  const darwin = [
+    { tiploc: "LEEDS", seq: 0, std: "12:45", is_passing: 0 },
+    { tiploc: "MRLY", seq: 1, is_passing: 1, wtp: "12:50", crs: "MLY" },
+    { tiploc: "DWBY", seq: 2, sta: "12:55", std: "12:57", is_passing: 0 },
+  ];
+  const cif = [
+    { tiploc: "LEEDS", ptd: "12:45", wtd: "12:45" },
+    { tiploc: "WHRDJN", passing: true, wtp: "12:46" },
+    { tiploc: "COTNGLY", wtp: "12:49", pta: "00:00", ptd: "00:00" },
+    { tiploc: "MRLY", passing: true, wtp: "12:50" },
+    { tiploc: "HDRSFLD", pta: "13:05", ptd: "13:07" },
+    { tiploc: "DWBY", pta: "12:55", wta: "12:55" },
+  ];
+  const merged = mergeDarwinCallsWithCifPasses(darwin, cif);
+  assert.deepEqual(merged.map((c) => c.tiploc), ["LEEDS", "WHRDJN", "COTNGLY", "MRLY", "DWBY"]);
+  assert.equal(merged.find((c) => c.tiploc === "COTNGLY")?.is_passing, 1);
+  assert.equal(merged.find((c) => c.tiploc === "COTNGLY")?.sta, null);
+});
+
 test("CIF between-anchor still inserts passes when a public extra is skipped", () => {
   const darwin = [
     { tiploc: "NWTNLW", seq: 0, std: "16:10", is_passing: 0 },

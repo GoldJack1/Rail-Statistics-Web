@@ -245,12 +245,22 @@ function cifTpl(loc) {
   return String(loc?.tiploc || "").trim().toUpperCase();
 }
 
+/** CIF/JSON store 0000 in the public fields of a working pass. That is not a call. */
+function cifPublicTime(value) {
+  if (value == null || value === "") return null;
+  const hm = String(value).trim().slice(0, 5);
+  if (hm === "00:00" || hm === "0000") return null;
+  return String(value).trim();
+}
+
 function cifLocIsPublic(loc) {
-  return Boolean(loc?.pta || loc?.ptd);
+  return Boolean(cifPublicTime(loc?.pta) || cifPublicTime(loc?.ptd));
 }
 
 function cifPassRow(loc) {
-  const passing = Boolean(loc.passing) || Boolean(loc.wtp && !loc.wta && !loc.wtd && !loc.pta && !loc.ptd);
+  const pta = cifPublicTime(loc.pta);
+  const ptd = cifPublicTime(loc.ptd);
+  const passing = Boolean(loc.passing) || Boolean(loc.wtp && !loc.wta && !loc.wtd && !pta && !ptd);
   return {
     tiploc: cifTpl(loc),
     crs: loc.crs ?? null,
@@ -259,8 +269,8 @@ function cifPassRow(loc) {
     platform: loc.platform ?? null,
     line: loc.line ?? null,
     path: loc.path ?? null,
-    sta: loc.pta ?? null,
-    std: loc.ptd ?? null,
+    sta: pta,
+    std: ptd,
     wta: loc.wta ?? null,
     wtd: loc.wtd ?? null,
     wtp: passing ? loc.wtp || loc.wtd || null : loc.wtp ?? null,

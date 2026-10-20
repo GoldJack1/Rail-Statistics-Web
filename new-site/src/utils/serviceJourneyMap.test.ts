@@ -4,9 +4,15 @@ import {
   interpolateAlongPath,
   interpolateLatLng,
   journeyMapStops,
+  journeyPointKind,
   liveJourneyPosition,
+  mappedRouteWaypoints,
   matchStationCoord,
+  removeRouteReversals,
+  replaceInflatedLegs,
   snapLiveToRailPath,
+  snapMarkerToPath,
+  tiplocsNeedingCoordinates,
 } from './serviceJourneyMap'
 
 function stop(tpl: string, name: string, slot: string, extra: Partial<ServiceStop> = {}): ServiceStop {
@@ -60,6 +66,210 @@ describe('serviceJourneyMap', () => {
       stations,
     )
     expect(mapped.map((p) => p.tpl)).toEqual(['LEEDS', 'YORK'])
+  })
+
+  it('routes through a pass that is still ahead and skips one listed back behind the train', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('LVRPLSH', 'Liverpool Lime Street', 'OR', { lat: 53.407, lng: -2.976 }),
+        stop('TRFDPEJ', 'Trafford Park East Junction', 'PP', { lat: 53.463, lng: -2.288 }),
+        stop('URMSTON', 'Urmston', 'PP', { lat: 53.448, lng: -2.353 }),
+        stop('MNCROXR', 'Manchester Oxford Road', 'IP', { lat: 53.474, lng: -2.242 }),
+      ],
+      [],
+    )
+    expect(mapped.map((point) => point.tpl)).toEqual(['LVRPLSH', 'TRFDPEJ', 'URMSTON', 'MNCROXR'])
+    expect(mappedRouteWaypoints(mapped)).toEqual([
+      [53.407, -2.976],
+      [53.463, -2.288],
+      [53.474, -2.242],
+    ])
+  })
+
+  it('stands a Doncaster call at the stopping mark, not the platform entrance', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('LEEDS', 'Leeds', 'OR', { lat: 53.795, lng: -1.548 }),
+        stop('DONC', 'Doncaster', 'DT', { lat: 53.522, lng: -1.14, platform: '6' }),
+      ],
+      [],
+    )
+    const route = mappedRouteWaypoints(mapped, {
+      1: {
+        lat: 53.5229,
+        lng: -1.1401,
+        ends: [
+          { lat: 53.52341, lng: -1.14001 },
+          { lat: 53.52237, lng: -1.14017 },
+        ],
+        stand: { lat: 53.52249, lng: -1.1401 },
+      },
+    })
+    expect(route).toEqual([
+      [53.795, -1.548],
+      [53.52249, -1.1401],
+    ])
+  })
+
+  it('starts a bay at the buffer and leaves along the platform', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('LEEDS', 'Leeds', 'OR', { lat: 53.794, lng: -1.549, platform: '13' }),
+        stop('LEEDSWJ', 'Leeds West Junction', 'PP', { lat: 53.79259, lng: -1.55573 }),
+        stop('WIGAN', 'Wigan Wallgate', 'DT', { lat: 53.544, lng: -2.632 }),
+      ],
+      [],
+    )
+    expect(
+      mappedRouteWaypoints(mapped, {
+        0: {
+          lat: 53.7939,
+          lng: -1.5491,
+          ends: [
+            { lat: 53.7939, lng: -1.5482 },
+            { lat: 53.7939, lng: -1.55 },
+          ],
+          bay: { lat: 53.7939, lng: -1.5482 },
+        },
+      }),
+    ).toEqual([
+      [53.7939, -1.5482],
+      [53.79259, -1.55573],
+      [53.544, -2.632],
+    ])
+  })
+
+  it('aims a call at its booked platform so the line can take that road', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('MNCROXR', 'Manchester Oxford Road', 'IP', { lat: 53.474, lng: -2.242, platform: '4' }),
+        stop('STKP', 'Stockport', 'IP', { lat: 53.40556, lng: -2.16301, platform: '0' }),
+        stop('SHEFFLD', 'Sheffield', 'IP', { lat: 53.378, lng: -1.462, platform: '5A' }),
+      ],
+      [],
+    )
+    const stockport = mapped.find((point) => point.tpl === 'STKP')
+    expect(stockport?.index).toBe(1)
+    expect(
+      mappedRouteWaypoints(mapped, { 1: { lat: 53.40584, lng: -2.1627 } }),
+    ).toEqual([
+      [53.474, -2.242],
+      [53.40584, -2.1627],
+      [53.378, -1.462],
+    ])
+  })
+
+  it('routes a pass along its platform and skips a platform back behind the train', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('MNCROXR', 'Manchester Oxford Road', 'IP', { lat: 53.474, lng: -2.243 }),
+        stop('STKP', 'Stockport', 'PP', { lat: 53.40556, lng: -2.163, platform: '0' }),
+        stop('SHEFFLD', 'Sheffield', 'IP', { lat: 53.378, lng: -1.462 }),
+        stop('BACK', 'Back', 'PP', { lat: 53.47, lng: -2.24, platform: '2' }),
+      ],
+      [],
+    )
+    // Back is listed after Stockport, so the next call is already Sheffield and Back is not on that leg.
+    const ordered = journeyMapStops(
+      [
+        stop('MNCROXR', 'Manchester Oxford Road', 'IP', { lat: 53.474, lng: -2.243 }),
+        stop('STKP', 'Stockport', 'IP', { lat: 53.4056, lng: -2.163 }),
+        stop('BACK', 'Back', 'PP', { lat: 53.47, lng: -2.24, platform: '2' }),
+        stop('SHEFFLD', 'Sheffield', 'IP', { lat: 53.378, lng: -1.462 }),
+      ],
+      [],
+    )
+    expect(mappedRouteWaypoints(mapped, { 1: { lat: 53.40584, lng: -2.1627 } })).toEqual([
+      [53.474, -2.243],
+      [53.40584, -2.1627],
+      [53.378, -1.462],
+    ])
+    expect(mappedRouteWaypoints(ordered, { 2: { lat: 53.47, lng: -2.24 } })).toEqual([
+      [53.474, -2.243],
+      [53.4056, -2.163],
+      [53.378, -1.462],
+    ])
+  })
+
+  it('plots a junction from the TIPLOC file ahead of the schedule coordinate', () => {
+    const holbeck = stop('HOLBJCN', 'Holbeck Jn', 'PP', { wtp: '12:01', lat: 53.8, lng: -1.5 })
+    expect(journeyMapStops([holbeck], []).map((p) => p.tpl)).toEqual(['HOLBJCN'])
+    expect(tiplocsNeedingCoordinates([holbeck])).toEqual(['HOLBJCN'])
+    const mapped = journeyMapStops([holbeck], [], { HOLBJCN: { lat: 53.789, lng: -1.555 } })
+    expect(mapped[0]).toMatchObject({ tpl: 'HOLBJCN', lat: 53.789, lng: -1.555, calling: false, kind: 'junction' })
+    const fromSchedule = journeyMapStops([holbeck], [], {})
+    expect(fromSchedule[0]).toMatchObject({ lat: 53.8, lng: -1.5 })
+  })
+
+  it('uses the station catalogue ahead of a TIPLOC lookup', () => {
+    const mapped = journeyMapStops(
+      [stop('LEEDS', 'Leeds', 'OR', { crs: 'LDS' })],
+      stations,
+      { LEEDS: { lat: 51, lng: -1 } },
+    )
+    expect(mapped[0]).toMatchObject({ lat: 53.795, lng: -1.548, kind: 'stop' })
+  })
+
+  it('keeps a booked platform on a call and on a pass', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('LEEDS', 'Leeds', 'OR', { crs: 'LDS', platform: '15' }),
+        stop('HOLBJCN', 'Holbeck Jn', 'PP', { platform: '1', lat: 53.79, lng: -1.55 }),
+      ],
+      stations,
+    )
+    expect(mapped.find((point) => point.tpl === 'LEEDS')?.platform).toBe('15')
+    expect(mapped.find((point) => point.tpl === 'HOLBJCN')?.platform).toBe('1')
+  })
+
+  it('drops a multi-kilometre out-and-back and straightens a detour between timing points', () => {
+    const path: [number, number][] = []
+    for (let i = 0; i <= 4; i++) path.push([53.49, -2.24 + i * 0.008])
+    for (let i = 1; i <= 25; i++) path.push([53.49 + i * 0.0014, -2.208])
+    for (let i = 24; i >= 0; i--) path.push([53.49 + i * 0.0014, -2.2077])
+    for (let i = 5; i <= 8; i++) path.push([53.49, -2.24 + i * 0.008])
+    const cleaned = removeRouteReversals(path)
+    expect(Math.max(...cleaned.map((p) => p[0]))).toBeLessThan(53.5)
+    const waypoints: [number, number][] = [
+      [53.4963, -2.2126],
+      [53.4954, -2.2043],
+    ]
+    const detour: [number, number][] = [
+      [53.4963, -2.2126],
+      [53.51, -2.19],
+      [53.518, -2.173],
+      [53.51, -2.195],
+      [53.4954, -2.2043],
+    ]
+    const shortened = replaceInflatedLegs(detour, waypoints)
+    expect(Math.max(...shortened.map((p) => p[0]))).toBeLessThan(53.5)
+    expect(shortened[0]).toEqual(waypoints[0])
+    expect(shortened[shortened.length - 1]).toEqual(waypoints[waypoints.length - 1])
+  })
+
+  it('drops a reversal spur and snaps a nearby marker onto the through line', () => {
+    const path: [number, number][] = [
+      [53.49633, -2.2126],
+      [53.496, -2.214],
+      [53.49523, -2.21551],
+      [53.496, -2.214],
+      [53.49633, -2.2126],
+      [53.4967, -2.2105],
+      [53.4954, -2.20431],
+    ]
+    const cleaned = removeRouteReversals(path)
+    expect(cleaned[0]).toEqual(path[0])
+    expect(cleaned[cleaned.length - 1]).toEqual(path[path.length - 1])
+    expect(cleaned.some((p) => p[0] === 53.49523)).toBe(false)
+    const snapped = snapMarkerToPath({ lat: 53.49523, lng: -2.21551 }, cleaned, 800)
+    expect(snapped.lng).toBeGreaterThan(-2.213)
+  })
+
+  it('colours stops, passes and junctions as separate kinds', () => {
+    expect(journeyPointKind(stop('LEEDS', 'Leeds', 'OR', { crs: 'LDS' }))).toBe('stop')
+    expect(journeyPointKind(stop('SBYD', 'Stalybridge', 'PP', { crs: 'SYB' }))).toBe('pass')
+    expect(journeyPointKind(stop('MILESPL', 'Miles Platting Junction', 'PP', { crs: 'MLP' }))).toBe('junction')
+    expect(journeyPointKind(stop('HOLBJCN', 'Holbeck Jn', 'PP'))).toBe('junction')
   })
 
   it('interpolates a midpoint', () => {

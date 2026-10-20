@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseBrouterRailGeoJson, straightLineBetween, buildBrouterRailUrl } from './brouterRailRoute'
+import {
+  parseBrouterRailGeoJson,
+  parseOpenRailRoute,
+  straightLineBetween,
+  buildBrouterRailUrl,
+  buildOpenRailRouteUrl,
+  routeLimited,
+  routedCoordinates,
+} from './brouterRailRoute'
 
 describe('parseBrouterRailGeoJson', () => {
   it('reads a LineString as lat/lng points', () => {
@@ -55,6 +63,46 @@ describe('straightLineBetween', () => {
       [51.4, -0.1],
       [51.5, -0.2],
     ])
+  })
+})
+
+describe('routedCoordinates', () => {
+  it('keeps a routed line and drops a straight-line fallback', () => {
+    expect(routedCoordinates({ coordinates: [[53.1, -1.5], [53.2, -1.4]], fallback: false })).toEqual([
+      [53.1, -1.5],
+      [53.2, -1.4],
+    ])
+    expect(routedCoordinates({ coordinates: [[53.1, -1.5], [53.2, -1.4]], fallback: true })).toBeNull()
+    expect(routeLimited({ fallback: true, limited: true })).toBe(true)
+    expect(routeLimited({ fallback: true })).toBe(false)
+  })
+})
+
+describe('parseOpenRailRoute', () => {
+  it('reads GraphHopper coordinates as lat/lng', () => {
+    expect(
+      parseOpenRailRoute({
+        paths: [{ points: { coordinates: [[-2.24, 53.48], [-2.21, 53.49]] } }],
+      }),
+    ).toEqual([
+      [53.48, -2.24],
+      [53.49, -2.21],
+    ])
+    expect(parseOpenRailRoute({ message: 'no path' })).toEqual([])
+  })
+})
+
+describe('buildOpenRailRouteUrl', () => {
+  it('sends every timing point in lat,lng order on the standard-gauge profile', () => {
+    const url = buildOpenRailRouteUrl([
+      [53.48748, -2.2426],
+      [53.49631, -2.21258],
+    ])
+    expect(url).toContain('https://routing.openrailrouting.org/route?')
+    expect(url).toContain('point=53.48748%2C-2.2426')
+    expect(url).toContain('point=53.49631%2C-2.21258')
+    expect(url).toContain('profile=all_tracks_1435')
+    expect(url).toContain('points_encoded=false')
   })
 })
 

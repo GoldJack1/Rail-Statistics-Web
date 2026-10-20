@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { applyLiveToInferred, carryRunningLateness, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, reportsOnServiceTiploc, settleUnreportedPasses } from "./query-enrich.js";
+import { applyLiveToInferred, carryRunningLateness, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, reportsOnServiceTiploc, retimeInferredPasses, settleUnreportedPasses } from "./query-enrich.js";
 import { openDayDb } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
 import { mkdtempSync } from "node:fs";
@@ -175,6 +175,57 @@ test("a named junction on the straight line between two calls is shown once", ()
   assert.equal(out.filter((c) => c.tiploc === "LEEDSWJ").length, 1);
   assert.equal(out[1].actual_source, "inferred");
   assert.equal(out[1].wtp, "16:15");
+});
+
+test("an inferred junction moved before a station gets a time between its new neighbours", () => {
+  const out = retimeInferredPasses([
+    { tiploc: "TEESYSB", wtp: "11:18", atp: "11:18:19", actual_source: "inferred" },
+    { tiploc: "TABYEJN", wtp: "11:21", atp: "11:20:44", actual_source: "inferred" },
+    { tiploc: "TABY", wtd: "11:20", atd: "11:20:38", actual_source: "trust" },
+  ]);
+  assert.equal(out[1].wtp, "11:19");
+  assert.equal(out[1].atp > "11:18:19" && out[1].atp < "11:20:38", true);
+  assert.equal(out[0].wtp, "11:18");
+});
+
+test("a junction just after a half-minute call is not given an earlier time", () => {
+  const coords = new Map([
+    ["HDRSFLD", { e: 0, n: 0 }],
+    ["SPWDJN", { e: 50, n: 0 }],
+    ["MRSN", { e: 1000, n: 0 }],
+  ]);
+  const out = insertSegmentJunctions(
+    [
+      { tiploc: "HDRSFLD", wtd: "13:07½" },
+      { tiploc: "MRSN", wtp: "13:14½" },
+    ],
+    [],
+    coords,
+    [{ tiploc: "SPWDJN", e: 50, n: 0 }],
+  );
+  assert.deepEqual(out.map((c) => c.tiploc), ["HDRSFLD", "SPWDJN", "MRSN"]);
+  assert.equal(out[1].wtp, "13:08");
+});
+
+test("a station plotted on a junction already on the train is not invented", () => {
+  const coords = new Map([
+    ["ARDWCKJ", { e: 0, n: 0 }],
+    ["ARDWICK", { e: 200, n: 0 }],
+    ["LNGSTN", { e: 900, n: 0 }],
+  ]);
+  const out = insertSegmentJunctions(
+    [
+      { tiploc: "ARDWCKJ", wtp: "13:52" },
+      { tiploc: "LNGSTN", wtp: "13:53" },
+    ],
+    [
+      ["ARDWCKJ", "ARDWICK", "LNGSTN"],
+      ["ARDWCKJ", "ARDWICK", "LNGSTN"],
+      ["ARDWCKJ", "ARDWICK", "LNGSTN"],
+    ],
+    coords,
+  );
+  assert.deepEqual(out.map((c) => c.tiploc), ["ARDWCKJ", "LNGSTN"]);
 });
 
 test("a junction off the chord, or the same signalling place, is not added", () => {

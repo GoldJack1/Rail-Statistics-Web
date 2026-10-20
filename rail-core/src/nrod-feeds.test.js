@@ -8,6 +8,20 @@ import { isCifOnlyBoardWorking, mergeJsonAndCifWorkings, scheduleJsonLocation, w
 import { applyTdFrame, tdForHeadcode, tdMessages } from "./td-apply.js";
 import { vstpMessages } from "./vstp-apply.js";
 
+test("SCHEDULE JSON public 0000 is padding on a pass", () => {
+  const loc = scheduleJsonLocation({
+    tiploc_code: "COTNGLY",
+    pass: "1249H",
+    public_arrival: "0000",
+    public_departure: "0000",
+  });
+  assert.equal(loc.tiploc, "COTNGLY");
+  assert.equal(loc.wtp, "12:49½");
+  assert.equal(loc.pta, null);
+  assert.equal(loc.ptd, null);
+  assert.equal(loc.passing, true);
+});
+
 test("SCHEDULE JSON location maps pass/public times", () => {
   const loc = scheduleJsonLocation({
     tiploc_code: "HOLBJCN",

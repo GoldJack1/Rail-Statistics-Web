@@ -23,6 +23,9 @@ type RailCoreCall = {
   coachLoading?: ServiceStop['coachLoading']
   legMiles?: number | null
   cumMiles?: number | null
+  cumM?: number | null
+  lat?: number | null
+  lng?: number | null
   path?: string | null
   line?: string | null
 }
@@ -241,6 +244,9 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
         actualSource: c.actualSource ?? null,
         legMiles: typeof c.legMiles === 'number' ? c.legMiles : null,
         cumMiles: typeof c.cumMiles === 'number' ? c.cumMiles : null,
+        cumM: typeof c.cumM === 'number' ? c.cumM : null,
+        lat: typeof c.lat === 'number' ? c.lat : null,
+        lng: typeof c.lng === 'number' ? c.lng : null,
         path: c.path ?? null,
         line: c.line ?? null,
       }

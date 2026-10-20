@@ -90,9 +90,18 @@
 .svc-stops-key__item--delay-60 { background: var(--cp-delay-60-bg); color: var(--cp-delay-60-fg); }
 .svc-stops-key__item--cancelled { background: var(--cp-cancelled-bg); color: var(--cp-cancelled-fg); }
 
+.svc-stops-table .svc-stop-notes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
+  margin-top: 2px;
+}
+
 .svc-stops-table .svc-stop-note {
   display: block;
-  margin-top: 2px;
+  max-width: 100%;
   font-size: var(--text-xs);
   line-height: 1.35;
   color: var(--text-secondary);
@@ -225,7 +234,8 @@
 }
 
 .svc-stops-table tbody tr.stations-table__row > td {
-  height: 3.25rem;
+  height: auto;
+  min-height: 3.25rem;
   vertical-align: middle;
 }
 
@@ -332,14 +342,29 @@
 }
 
 .svc-stops-table .svc-stop-name-lockup {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
   min-width: 0;
   max-width: 100%;
   flex: 1 1 auto;
   flex-wrap: nowrap;
   overflow: hidden;
+}
+
+.svc-stops-table .svc-stop-name-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.svc-stops-table .svc-stop-name-line .svc-stop-name-crs {
+  margin-left: 0;
 }
 
 .svc-stops-table .svc-stop-name-text {
@@ -363,8 +388,7 @@
 
 .svc-stops-table .svc-stop-leg-miles {
   display: block;
-  flex: 0 0 auto;
-  margin-top: 0.1rem;
+  max-width: 100%;
   font-size: 0.75em;
   font-variant-numeric: tabular-nums;
   font-weight: 500;
@@ -812,11 +836,19 @@
     white-space: normal;
   }
 
-  .svc-stops-table .svc-stops-table__name-btn,
-  .svc-stops-table .svc-stop-name-lockup {
+  .svc-stops-table .svc-stops-table__name-btn {
     flex-wrap: wrap;
     overflow: visible;
     align-items: center;
+  }
+
+  .svc-stops-table .svc-stop-name-lockup {
+    align-items: flex-start;
+    overflow: visible;
+  }
+
+  .svc-stops-table .svc-stop-name-line {
+    display: block;
   }
 
   .svc-stops-table .svc-stop-name-text {
@@ -932,7 +964,9 @@
   }
 
   .stations-table.svc-stops-table.svc-stops-table--detailed .svc-stop-name-lockup {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
     overflow: visible;
   }
 
@@ -1172,9 +1206,14 @@
     flex-wrap: nowrap;
   }
 
-  .stations-table.svc-stops-table .svc-stop-name-text {
-    flex: 1 1 auto;
+  .stations-table.svc-stops-table .svc-stop-name-lockup {
+    align-items: flex-start;
+  }
+
+  .stations-table.svc-stops-table .svc-stop-name-line .svc-stop-name-text {
+    flex: 0 1 auto;
     min-width: 0;
+    max-width: 100%;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1232,5 +1271,60 @@
 
 .svc-stop-assoc-link:hover {
   text-decoration: underline;
+}
+
+.svc-stops-table .svc-stops-table__status-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.25;
+}
+
+.svc-stops-table .svc-stops-table__status-event {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.svc-stops-table .svc-stops-table__status-event .svc-stops-table__status-main,
+.svc-stops-table .svc-stops-table__status-event .svc-stops-table__status-meta,
+.svc-stops-table .svc-stops-table__status-event .svc-stops-table__status-delay {
+  display: inline;
+  white-space: nowrap;
+}
+
+@media (max-width: 639px) {
+  .svc-stops-table .svc-stops-table__status-event,
+  .svc-stops-table .svc-stops-table__status-event .svc-stops-table__status-main,
+  .svc-stops-table .svc-stops-table__status-event .svc-stops-table__status-meta,
+  .svc-stops-table .svc-stops-table__status-event .svc-stops-table__status-delay {
+    white-space: normal;
+  }
+}
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  .svc-stops-table .svc-stops-table__status,
+  .svc-stops-table .svc-stops-table__status--note {
+    width: 12.25rem;
+  }
+
+  .svc-stops-table thead th:last-child.svc-stops-table__status,
+  .svc-stops-table tbody td:last-child.svc-stops-table__status {
+    width: calc(12.25rem + var(--stations-panel-text-inset, var(--space-2xl)));
+  }
+
+  .stations-table.svc-stops-table.svc-stops-table--detailed thead tr,
+  .stations-table.svc-stops-table.svc-stops-table--detailed tbody tr.stations-table__row {
+    grid-template-columns:
+      calc(3.75rem + var(--stations-panel-text-inset, var(--space-2xl)))
+      minmax(0, 1fr)
+      2.15rem
+      12.25rem
+      calc(2.5rem + var(--stations-panel-text-inset, var(--space-2xl)));
+  }
 }
 

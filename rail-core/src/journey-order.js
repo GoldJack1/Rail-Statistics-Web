@@ -113,28 +113,73 @@ export function collapseCallsByTiploc(rows) {
   return sortCallsByJourneyTime([...by.values()]);
 }
 
-function bookedVisitKey(c) {
-  return [c?.wtp, c?.wtd, c?.wta, c?.std, c?.sta].map((value) => (value ? String(value).slice(0, 8) : "")).join("|");
+function bookedInstant(c) {
+  const raw = c?.wtp || c?.wtd || c?.wta || c?.std || c?.sta;
+  if (raw == null || raw === "") return null;
+  const text = String(raw).trim();
+  const m = /^(\d{1,2}):(\d{2})/.exec(text);
+  if (!m) return null;
+  let secs = Number(m[1]) * 3600 + Number(m[2]) * 60;
+  if (/½/.test(text)) secs += 30;
+  return secs;
+}
+
+/** A rounded copy (13:07 against 13:07½) is the same visit. A later return is not. */
+function sameBookedVisit(a, b) {
+  const ta = bookedInstant(a);
+  const tb = bookedInstant(b);
+  if (ta == null || tb == null) return ta == null && tb == null;
+  let delta = Math.abs(ta - tb);
+  if (delta > 12 * 3600) delta = 86400 - delta;
+  return delta <= 60;
+}
+
+function hasHalfMinute(value) {
+  return /½/.test(String(value || ""));
+}
+
+function mergeVisit(a, b) {
+  const merged = richerCall(a, b);
+  const seqA = Number(a?.seq);
+  const seqB = Number(b?.seq);
+  const seq = Math.min(
+    Number.isFinite(seqA) ? seqA : Infinity,
+    Number.isFinite(seqB) ? seqB : Infinity,
+  );
+  const pick = (key) => {
+    if (hasHalfMinute(a?.[key]) && !hasHalfMinute(b?.[key])) return a[key];
+    if (hasHalfMinute(b?.[key]) && !hasHalfMinute(a?.[key])) return b[key];
+    return merged[key];
+  };
+  return {
+    ...merged,
+    seq: Number.isFinite(seq) ? seq : merged.seq,
+    wtp: pick("wtp"),
+    wtd: pick("wtd"),
+    wta: pick("wta"),
+    std: pick("std"),
+    sta: pick("sta"),
+  };
 }
 
 /**
  * A junction the train passes, calls beyond, then passes again on the way
- * back is two visits. Collapse only a copy of the same booked time.
+ * back is two visits. Collapse a rounded copy of the same booked time.
  */
 export function collapseRevisits(rows) {
   const out = [];
-  const indexByKey = new Map();
   for (const c of rows || []) {
     const tpl = String(c.tiploc || "").toUpperCase();
     if (!tpl) continue;
-    const key = `${tpl}|${bookedVisitKey(c)}`;
-    const prev = indexByKey.get(key);
-    if (prev == null) {
-      indexByKey.set(key, out.length);
-      out.push(c);
-    } else {
-      out[prev] = richerCall(out[prev], c);
+    let prev = -1;
+    for (let i = 0; i < out.length; i++) {
+      if (String(out[i].tiploc || "").toUpperCase() !== tpl) continue;
+      if (!sameBookedVisit(out[i], c)) continue;
+      prev = i;
+      break;
     }
+    if (prev < 0) out.push(c);
+    else out[prev] = mergeVisit(out[prev], c);
   }
   return sortCallsByBookedTime(out);
 }
@@ -156,6 +201,63 @@ export function sortCallsByJourneyTime(rows) {
 
 export function sortCallsByBookedTime(rows) {
   return sortByMinutes(rows, bookedCallMinutes);
+}
+
+function wttClockSeconds(value) {
+  if (value == null || value === "") return null;
+  const text = String(value).trim();
+  const match = /^(\d{1,2}):(\d{2})/.exec(text);
+  if (!match) return null;
+  const hh = Number(match[1]);
+  const mm = Number(match[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh > 47 || mm > 59) return null;
+  return (hh % 24) * 3600 + mm * 60 + (/½/.test(text) ? 30 : 0);
+}
+
+/**
+ * Earliest working-timetable clock at this place. A half minute counts.
+ * Public and live times are used only when the working time is missing,
+ * so an estimate cannot pull a booked call out of the timetable.
+ */
+export function wttCallSeconds(call) {
+  const working = ["wta", "wtd", "wtp"].map((key) => wttClockSeconds(call?.[key])).filter((n) => n != null);
+  if (working.length) return Math.min(...working);
+  const published = ["sta", "std", "pta", "ptd"]
+    .map((key) => wttClockSeconds(publicCallTime(call?.[key], call)))
+    .filter((n) => n != null);
+  if (published.length) return Math.min(...published);
+  const live = ["atp", "atd", "ata", "etp", "etd", "eta"]
+    .map((key) => wttClockSeconds(call?.[key]))
+    .filter((n) => n != null);
+  if (live.length) return Math.min(...live);
+  return null;
+}
+
+function wttSortSeconds(seconds, overnightLong) {
+  if (seconds == null) return null;
+  const dayMinutes = railwayDayMinutes(Math.floor(seconds / 60), overnightLong);
+  return dayMinutes * 60 + (seconds % 60);
+}
+
+/** Calling order is the working timetable. The same second keeps schedule order. */
+export function sortCallsByWttTime(rows) {
+  const list = rows || [];
+  const overnightLong = isOvernightLongRun(list, (row) => {
+    const seconds = wttCallSeconds(row);
+    return seconds == null ? null : Math.floor(seconds / 60);
+  });
+  return list
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => {
+      const left = wttSortSeconds(wttCallSeconds(a.row), overnightLong);
+      const right = wttSortSeconds(wttCallSeconds(b.row), overnightLong);
+      if (left == null && right == null) return a.index - b.index;
+      if (left == null) return 1;
+      if (right == null) return -1;
+      if (left !== right) return left - right;
+      return (Number(a.row.seq) || 0) - (Number(b.row.seq) || 0) || a.index - b.index;
+    })
+    .map((item) => item.row);
 }
 
 /** CIF often appends another working after Darwin's public terminus (seq jumps backward in time). */
@@ -191,15 +293,24 @@ export function dropCifTailAfterPublicTerminus(rows) {
   const ordered = [...(rows || [])].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
   let lastAdvMins = null;
   let lastAdvIdx = -1;
+  const seenTpl = new Set();
   for (let i = 0; i < ordered.length; i++) {
     const c = ordered[i];
     if (!isAdvertisedCall(c)) continue;
+    const tpl = String(c.tiploc || "").toUpperCase();
     const m = callScheduledMinutes(c);
     if (lastAdvMins != null && m != null) {
       let delta = m - lastAdvMins;
       if (delta < -12 * 60) delta += 1440;
-      if (delta < -40) return ordered.slice(0, lastAdvIdx + 1);
+      if (delta < -40) {
+        // Another working starts at a stop this train has not called at.
+        // A repeat of a stop already on the train is a second copy of the
+        // same journey, and the passes filed with it belong on this train.
+        if (!tpl || !seenTpl.has(tpl)) return ordered.slice(0, lastAdvIdx + 1);
+        continue;
+      }
     }
+    if (tpl) seenTpl.add(tpl);
     if (m != null) lastAdvMins = m;
     lastAdvIdx = i;
   }

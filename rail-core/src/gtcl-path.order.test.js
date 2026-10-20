@@ -113,6 +113,135 @@ test("a report in the wrong gap moves back to the stretch of track it lies on", 
   assert.deepEqual(order(calls, graph, locs), ["A", "F", "B", "C"]);
 });
 
+test("an inferred junction does not stay in front of the report it was inserted before", () => {
+  const graph = line([
+    [0, 0],
+    [400, 0],
+    [800, 0],
+    [1200, 0],
+  ]);
+  const locs = [
+    { tiploc: "MIRFEJN", e: 0, n: 0 },
+    { tiploc: "MIRFILD", e: 400, n: 0 },
+    { tiploc: "HETNLEJ", e: 800, n: 0 },
+    { tiploc: "HETNLJN", e: 1200, n: 0 },
+  ];
+  const calls = [
+    { tiploc: "MIRFEJN", wtp: "12:59" },
+    { tiploc: "HETNLEJ", wtp: "13:00", actual_source: "inferred" },
+    { tiploc: "MIRFILD", atp: "13:02" },
+    { tiploc: "HETNLJN", wtp: "13:01" },
+  ];
+  assert.deepEqual(order(calls, graph, locs), ["MIRFEJN", "MIRFILD", "HETNLEJ", "HETNLJN"]);
+});
+
+test("booked passes between advertised calls follow the track", () => {
+  const graph = line([
+    [0, 0],
+    [0, 500],
+    [0, 1000],
+    [0, 2000],
+  ]);
+  const locs = [
+    { tiploc: "A", e: 0, n: 0 },
+    { tiploc: "B", e: 0, n: 500 },
+    { tiploc: "C", e: 0, n: 1000 },
+    { tiploc: "D", e: 0, n: 2000 },
+  ];
+  const calls = [
+    { tiploc: "A", std: "10:00", wtd: "10:00" },
+    { tiploc: "C", wtp: "10:10" },
+    { tiploc: "B", wtp: "10:05" },
+    { tiploc: "D", sta: "10:20", wta: "10:20" },
+  ];
+  assert.deepEqual(order(calls, graph, locs), ["A", "B", "C", "D"]);
+});
+
+test("a pass just beyond the next station is not clamped in front of it", () => {
+  const graph = line([
+    [0, 0],
+    [0, 1000],
+    [0, 2000],
+  ]);
+  const locs = [
+    { tiploc: "A", e: 0, n: 0 },
+    { tiploc: "B", e: 0, n: 1000 },
+    { tiploc: "J", e: 0, n: 1040 },
+    { tiploc: "C", e: 0, n: 2000 },
+  ];
+  const calls = [
+    { tiploc: "A", std: "10:00", wtd: "10:00" },
+    { tiploc: "J", wtp: "10:09", actual_source: "inferred" },
+    { tiploc: "B", std: "10:10", wtd: "10:10" },
+    { tiploc: "C", sta: "10:20", wta: "10:20" },
+  ];
+  assert.deepEqual(order(calls, graph, locs), ["A", "B", "J", "C"]);
+});
+
+test("an edge stored against the direction of travel keeps pass order", () => {
+  const graph = line([
+    [0, 0],
+    [0, 2000],
+  ]);
+  const locs = [
+    { tiploc: "A", e: 0, n: 2000 },
+    { tiploc: "B", e: 0, n: 1500 },
+    { tiploc: "C", e: 0, n: 500 },
+    { tiploc: "D", e: 0, n: 0 },
+  ];
+  const calls = [
+    { tiploc: "A", std: "10:00", wtd: "10:00" },
+    { tiploc: "C", wtp: "10:12" },
+    { tiploc: "B", wtp: "10:08" },
+    { tiploc: "D", sta: "10:20", wta: "10:20" },
+  ];
+  assert.deepEqual(order(calls, graph, locs), ["A", "B", "C", "D"]);
+});
+
+test("a reversal keeps the outward pass and the return pass on their own legs", () => {
+  const graph = line([
+    [0, 0],
+    [0, 500],
+    [0, 1000],
+  ]);
+  const locs = [
+    { tiploc: "A", e: 0, n: 0 },
+    { tiploc: "J", e: 0, n: 500 },
+    { tiploc: "B", e: 0, n: 1000 },
+    { tiploc: "C", e: 0, n: 0 },
+  ];
+  const calls = [
+    { tiploc: "A", std: "10:00", wtd: "10:00" },
+    { tiploc: "J", wtp: "10:15" },
+    { tiploc: "B", std: "10:10", wtd: "10:10" },
+    { tiploc: "J", wtp: "10:05" },
+    { tiploc: "C", sta: "10:20", wta: "10:20" },
+  ];
+  assert.deepEqual(
+    orderByTrack(calls, graph, locs).map((row) => row.wtp || row.std || row.sta),
+    ["10:00", "10:05", "10:10", "10:15", "10:20"],
+  );
+});
+
+test("a junction just off a corner is kept on that leg", () => {
+  const graph = line([
+    [0, 0],
+    [0, 1000],
+    [1000, 1000],
+  ]);
+  const locs = [
+    { tiploc: "A", e: 0, n: 0 },
+    { tiploc: "J", e: -30, n: 1030 },
+    { tiploc: "C", e: 1000, n: 1000 },
+  ];
+  const calls = [
+    { tiploc: "A", std: "10:00", wtd: "10:00" },
+    { tiploc: "C", sta: "10:20", wta: "10:20" },
+    { tiploc: "J", wtp: "10:18", actual_source: "inferred" },
+  ];
+  assert.deepEqual(order(calls, graph, locs), ["A", "J", "C"]);
+});
+
 test("booked calls stay in timetable order", () => {
   const graph = line([
     [0, 1000],
@@ -229,6 +358,40 @@ test("a junction plotted a kilometre from all of its neighbours uses those neigh
   ]);
   const south = locs.find((loc) => loc.tiploc === "SOUTH");
   assert.ok(south.n > 1500 && south.n < 1750);
+});
+
+test("a place plotted off the railway still sits beside the station it belongs to", () => {
+  const graph = line([
+    [0, 0],
+    [0, 3000],
+  ]);
+  const locs = [
+    { tiploc: "A", e: 0, n: 0 },
+    { tiploc: "B", e: 0, n: 1000 },
+    { tiploc: "C", e: 1200, n: 1000 },
+    { tiploc: "D", e: 0, n: 3000 },
+  ];
+  const calls = [
+    { tiploc: "A", std: "10:00", wtd: "10:00" },
+    { tiploc: "C", wtp: "10:19" },
+    { tiploc: "B", wtp: "10:05" },
+    { tiploc: "D", sta: "10:20", wta: "10:20" },
+  ];
+  assert.deepEqual(order(calls, graph, locs), ["A", "C", "B", "D"]);
+});
+
+test("a coal yard north of the north junction stays north of it", () => {
+  const locs = [
+    { tiploc: "WNSFD", name: "Winsford", e: 0, n: 3000 },
+    { tiploc: "YARD", name: "Crewe Coal Yard", e: 0, n: 1900 },
+    { tiploc: "NORTH", name: "Crewe North Junction", e: 0, n: 1000 },
+    { tiploc: "CREWE", name: "Crewe", e: 0, n: 0 },
+  ];
+  const out = orderClosePlaces(
+    ["WNSFD", "YARD", "NORTH", "CREWE"].map((tiploc) => ({ tiploc })),
+    locs,
+  ).map((row) => row.tiploc);
+  assert.deepEqual(out, ["WNSFD", "YARD", "NORTH", "CREWE"]);
 });
 
 test("a point off the route is left where it was", () => {

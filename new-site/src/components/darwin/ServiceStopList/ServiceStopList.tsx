@@ -13,6 +13,7 @@ import { buildStopNameLookup, displayStopName, sortStopsByJourneyTime } from '@/
 import type { ServiceViewMode } from '@/components/darwin/serviceViewMode'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
 import { betweenStationsLabel, inferProgressIndex } from '@/utils/serviceProgress'
+import { formatMilesAndChains, milesAndChainsTitle } from '@/utils/milesAndChains'
 import { formatQuarterClock } from '@/utils/quarterClock'
 import { railwayDayMinutesFromHhmm } from '@/utils/railwayOperatingDayUk'
 import { isBetaSite } from '@/utils/localDevFlags'
@@ -412,7 +413,6 @@ function ServiceStopRow({
   const clocks = rowClocks(kind, stop)
   const deltaMinutes = delayMinutesProp ?? delayFromStop(stop, kind)
   const time = primaryTime(stop, kind)
-  const arrivedNote = historical ? arrivalAside(stop, kind) : null
   const arrivalFirst = historical ? null : stationArrivalFirst(stop, kind)
   const status = buildStopStatus(
     stop,
@@ -454,10 +454,23 @@ function ServiceStopRow({
   const statusVerb = arrivalFirst ? 'Arrived' : status.verb
   const statusTime = shownClock(arrivalFirst ? arrivalFirst.time : status.time, detailed)
   const statusDelay = arrivalFirst ? arrivalFirst.delay : status.delay
-  const departedNote = arrivalFirst?.departedTime
-    ? `Departed at ${shownClock(arrivalFirst.departedTime, detailed)}${arrivalFirst.departedDelay}`
+  const movements = movementDelays(stop, kind)
+  const arrivedClock = kind === 'stop' && !stop.cancelledAtStop ? shownClock(stop.ata, detailed) : ''
+  const departedClock = kind === 'stop' && !stop.cancelledAtStop ? shownClock(stop.atd, detailed) : ''
+  const bothMovements = arrivedClock && departedClock
+    ? [
+        { verb: 'Arrived', time: arrivedClock, delay: formatDelayLabel(movements.arrival) },
+        { verb: 'Departed', time: departedClock, delay: formatDelayLabel(movements.departure) },
+      ]
     : null
   const statusEta = status.eta ? shownClock(status.eta, detailed) : status.eta
+  const noteLines = [
+    stop.pathedAs || '',
+    stop.allowances?.length ? stop.allowances.join(' · ') : '',
+  ].filter(Boolean)
+  const distanceInput = { miles: stop.cumMiles, metres: stop.cumM }
+  const distanceLabel = detailed ? formatMilesAndChains(distanceInput) : null
+  const distanceTitle = detailed ? milesAndChainsTitle(distanceInput) : null
   const colCount = detailed ? 6 : 4
   const dash = (value: string) => value || '—'
 
@@ -489,14 +502,21 @@ function ServiceStopRow({
             aria-label={`Open departures at ${label}`}
           >
             <span className="svc-stop-name-lockup">
-              <span className="svc-stop-name-text">{label}</span>
-              {stop.crs ? <span className="svc-stop-name-crs">{stop.crs}</span> : null}
-              {kind !== 'pass' && <ActivityPill activity={stop.activity} />}
-              {stop.pathedAs ? <span className="svc-stop-note">{stop.pathedAs}</span> : null}
-              {stop.allowances?.length ? <span className="svc-stop-note">{stop.allowances.join(' · ')}</span> : null}
-              {detailed && stop.legMiles != null && Number.isFinite(stop.legMiles) ? (
-                <span className="svc-stop-leg-miles" title={stop.cumMiles != null ? `${stop.cumMiles} mi from origin` : undefined}>
-                  +{stop.legMiles.toFixed(1)} mi
+              <span className="svc-stop-name-line">
+                <span className="svc-stop-name-text">{label}</span>
+                {stop.crs ? <span className="svc-stop-name-crs">{stop.crs}</span> : null}
+                {kind !== 'pass' && <ActivityPill activity={stop.activity} />}
+              </span>
+              {noteLines.length || distanceLabel ? (
+                <span className="svc-stop-notes">
+                  {noteLines.map((note) => (
+                    <span key={note} className="svc-stop-note">{note}</span>
+                  ))}
+                  {distanceLabel ? (
+                    <span className="svc-stop-leg-miles" title={distanceTitle || undefined}>
+                      {distanceLabel}
+                    </span>
+                  ) : null}
                 </span>
               ) : null}
             </span>
@@ -507,8 +527,24 @@ function ServiceStopRow({
             <span className="svc-mono">{platformValue}</span>
           </span>
         </td>
-        <td className={`svc-stops-table__status${status.note || status.eta ? ' svc-stops-table__status--note' : ''}`}>
-          {statusTime ? (
+        <td className={`svc-stops-table__status${status.note || status.eta ? ' svc-stops-table__status--note' : ''}${bothMovements ? ' svc-stops-table__status--stack' : ''}`}>
+          {bothMovements ? (
+            <span className="svc-stops-table__status-stack">
+              {bothMovements.map((line) => (
+                <span key={line.verb} className="svc-stops-table__status-event">
+                  <span className="svc-stops-table__status-main">
+                    {line.verb}
+                    <span className="svc-stops-table__status-at"> at</span>
+                  </span>
+                  {' '}
+                  <span className="svc-stops-table__status-meta">
+                    {line.time}
+                    {line.delay ? <span className="svc-stops-table__status-delay">{line.delay}</span> : null}
+                  </span>
+                </span>
+              ))}
+            </span>
+          ) : statusTime ? (
             <>
               {statusVerb ? (
                 <span className="svc-stops-table__status-main">
@@ -520,8 +556,6 @@ function ServiceStopRow({
               <span className="svc-stops-table__status-meta">
                 {statusTime}
                 {statusDelay ? <span className="svc-stops-table__status-delay">{statusDelay}</span> : null}
-                {departedNote ? <span className="svc-stops-table__status-delay"> {departedNote}</span> : null}
-                {arrivedNote ? <span className="svc-stops-table__status-delay">{arrivedNote}</span> : null}
               </span>
             </>
           ) : status.note || statusEta ? (

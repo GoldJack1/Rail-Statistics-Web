@@ -96,6 +96,22 @@ export function getTocOperatorChipColors(
   return { bg, text: getContrastingTextColor(bg) }
 }
 
+/** Brand colour for a service route. Tries the published name, then the TOC code. */
+export function resolveTocRouteColor(
+  operators: TocOperator[],
+  tocCode: string | null | undefined,
+  tocName: string | null | undefined,
+): string {
+  const names = [tocName, lookupNreTocCodeName(String(tocCode || '')), tocCode]
+  for (const raw of names) {
+    const name = String(raw || '').trim()
+    if (!name) continue
+    const bg = getTocOperatorChipColors(operators, name).bg
+    if (bg.toLowerCase() !== TOC_OPERATOR_FALLBACK_COLORS.bg.toLowerCase()) return bg
+  }
+  return TOC_OPERATOR_FALLBACK_COLORS.bg
+}
+
 /** Canonical display name from the operators catalog when an exact match exists. */
 export function resolveTocOperatorDisplayName(
   operators: TocOperator[],

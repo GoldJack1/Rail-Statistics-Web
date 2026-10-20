@@ -59,6 +59,62 @@ export function straightLineBetween(from: LatLngTuple, to: LatLngTuple): LatLngT
   return [from, to]
 }
 
+/** The public router asked us to back off. Splitting the request would make that worse. */
+export function routeLimited(payload: unknown): boolean {
+  return Boolean(payload && typeof payload === 'object' && (payload as { limited?: unknown }).limited === true)
+}
+
+/** A rail-router path, or null when the proxy fell back to a straight chord. */
+export function routedCoordinates(payload: unknown): LatLngTuple[] | null {
+  if (!payload || typeof payload !== 'object') return null
+  const doc = payload as { coordinates?: unknown; fallback?: unknown }
+  if (doc.fallback === true || !Array.isArray(doc.coordinates) || doc.coordinates.length < 2) return null
+  const path: LatLngTuple[] = []
+  for (const point of doc.coordinates) {
+    if (!Array.isArray(point) || point.length < 2) return null
+    const lat = Number(point[0])
+    const lng = Number(point[1])
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+    path.push([lat, lng])
+  }
+  return path
+}
+
+const OPEN_RAIL_ROUTE = 'https://routing.openrailrouting.org/route'
+
+/** Standard-gauge tracks, including the branches a working timetable actually uses. */
+export function buildOpenRailRouteUrl(points: LatLngTuple[]): string {
+  const url = new URL(OPEN_RAIL_ROUTE)
+  for (const [lat, lng] of points) url.searchParams.append('point', `${lat},${lng}`)
+  url.searchParams.set('profile', 'all_tracks_1435')
+  url.searchParams.set('points_encoded', 'false')
+  url.searchParams.set('instructions', 'false')
+  url.searchParams.set('elevation', 'false')
+  return url.toString()
+}
+
+/** GraphHopper-style rail route: points.coordinates are [lng, lat]. */
+export function parseOpenRailRoute(payload: unknown): LatLngTuple[] {
+  if (!payload || typeof payload !== 'object') return []
+  const paths = (payload as { paths?: unknown }).paths
+  if (!Array.isArray(paths) || paths.length === 0) return []
+  const first = paths[0]
+  if (!first || typeof first !== 'object') return []
+  const points = (first as { points?: unknown }).points
+  if (!points || typeof points !== 'object') return []
+  const coordinates = (points as { coordinates?: unknown }).coordinates
+  if (!Array.isArray(coordinates)) return []
+  const path: LatLngTuple[] = []
+  for (const pair of coordinates) {
+    if (!Array.isArray(pair) || pair.length < 2) return []
+    const lng = Number(pair[0])
+    const lat = Number(pair[1])
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return []
+    path.push([lat, lng])
+  }
+  return path
+}
+
 export function buildBrouterRailUrl(points: LatLngTuple[]): string {
   const url = new URL('https://brouter.de/brouter')
   url.searchParams.set(

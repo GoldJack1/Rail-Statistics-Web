@@ -26,6 +26,7 @@ import {
   parseCifBxAtoc,
   parseCifChange,
   parseCifLocation,
+  parseCifPublicTime,
 } from "./cif-schedule.js";
 import { scheduleDocument } from "./schedule-notes.js";
 
@@ -259,8 +260,9 @@ export function scheduleJsonLocation(loc) {
   const pass = hhmmFromSchedule(loc.pass);
   const wta = hhmmFromSchedule(loc.arrival);
   const wtd = hhmmFromSchedule(loc.departure);
-  const pta = hhmmFromSchedule(loc.public_arrival);
-  const ptd = hhmmFromSchedule(loc.public_departure);
+  // JSON writes 0000 into public times on a pass. That is padding, as in CIF.
+  const pta = parseCifPublicTime(loc.public_arrival);
+  const ptd = parseCifPublicTime(loc.public_departure);
   const passing = Boolean(pass && !pta && !ptd);
   return {
     tiploc,

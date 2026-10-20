@@ -273,6 +273,11 @@ export interface ServiceStop {
   legMiles?: number | null;
   /** Cumulative along-track miles from journey origin. */
   cumMiles?: number | null;
+  /** Cumulative along-track metres from journey origin. Preferred for miles and chains. */
+  cumM?: number | null;
+  /** WGS84 position when the service payload includes one. */
+  lat?: number | null;
+  lng?: number | null;
   /** CIF/ITPS route path code. */
   path?: string | null;
   /** CIF/ITPS line code. */

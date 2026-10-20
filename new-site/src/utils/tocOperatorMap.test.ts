@@ -3,6 +3,7 @@ import {
   getContrastingTextColor,
   getTocOperatorChipColors,
   mapTocOperatorDoc,
+  resolveTocRouteColor,
   resolveNreTocCodeDisplayName,
   resolveTocOperatorDisplayName,
 } from '@/utils/tocOperatorMap'
@@ -46,6 +47,12 @@ describe('getTocOperatorChipColors', () => {
 
   it('falls back when TOC is unknown', () => {
     expect(getTocOperatorChipColors(operators, 'Unknown TOC').bg).toBe('#64748b')
+  })
+
+  it('resolves a route colour from the TOC name or code', () => {
+    expect(resolveTocRouteColor(operators, 'VT', 'Avanti West Coast')).toBe('#004354')
+    expect(resolveTocRouteColor(operators, 'VT', null)).toBe('#004354')
+    expect(resolveTocRouteColor([], 'ZZ', 'Unknown TOC')).toBe('#64748b')
   })
 })
 
