@@ -108,7 +108,8 @@ function isTransientNetworkError(err: Error): boolean {
     msg.includes('fetch failed') ||
     msg.includes('enotfound') ||
     msg.includes('eai_again') ||
-    msg.includes('failed to fetch')
+    msg.includes('failed to fetch') ||
+    msg.includes('load failed')
   )
 }
 
@@ -175,19 +176,25 @@ export function useServiceDetail({
   const pollRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
   const ageTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const hspWaitStartedRef = useRef<number | null>(null)
+  const inflightRef = useRef(false)
+  const fetchGenRef = useRef(0)
   const [awaitingHsp, setAwaitingHsp] = useState(false)
 
-  const fetchOnce = useCallback(async () => {
+  const fetchOnce = useCallback(async (force = false) => {
     if (!rid) return
+    // A poll must not cancel a refresh that is already on the wire.
+    if (inflightRef.current && !force) return
     const cacheKey = serviceCacheKey(rid, date, at)
     const cached = getCachedService(cacheKey)
     if (isArchivedServiceDate(date) && cached && !cached.hspPending) {
       applyCachedDetail(cached, staleAfterMs, setData, setError, setAgeMs, setStatus)
       return
     }
-    abortRef.current?.abort()
+    const generation = ++fetchGenRef.current
+    if (force) abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
+    inflightRef.current = true
     try {
       const url = serviceUrl(rid, date, at)
       let res: Response | null = null
@@ -221,19 +228,27 @@ export function useServiceDetail({
       applyCachedDetail(detail, staleAfterMs, setData, setError, setAgeMs, setStatus)
     } catch (e) {
       if ((e as Error)?.name === 'AbortError') return
-      setError((e as Error)?.message || 'Could not load service detail.')
-      setStatus(prev => (prev === 'idle' || prev === 'loading' ? 'error' : prev))
+      const message = (e as Error)?.message || 'Could not load service detail.'
+      setError(message)
+      setStatus(prev => (prev === 'idle' || prev === 'loading' ? 'error' : 'stale'))
+    } finally {
+      if (fetchGenRef.current === generation) inflightRef.current = false
     }
   }, [rid, staleAfterMs, date, at])
 
   const schedulePoll = useCallback(() => {
     if (pollRef.current) clearTimeout(pollRef.current)
     if (!rid || pollMs <= 0) return
-    pollRef.current = setTimeout(async () => {
-      if (document.visibilityState === 'visible') await fetchOnce()
-      schedulePoll()
+    pollRef.current = setTimeout(() => {
+      const run = document.visibilityState === 'visible' ? fetchOnce(false) : Promise.resolve()
+      void run.finally(() => schedulePoll())
     }, pollMs)
   }, [rid, fetchOnce, pollMs])
+
+  const refetch = useCallback(() => {
+    if (pollRef.current) clearTimeout(pollRef.current)
+    void fetchOnce(true).finally(() => schedulePoll())
+  }, [fetchOnce, schedulePoll])
 
   useEffect(() => {
     if (!rid) { setStatus('idle'); setData(null); setError(null); return }
@@ -290,7 +305,7 @@ export function useServiceDetail({
     return () => { ageTickRef.current && clearInterval(ageTickRef.current) }
   }, [data, staleAfterMs])
 
-  return { status, data, error, ageMs, refetch: fetchOnce }
+  return { status, data, error, ageMs, refetch }
 }
 
 export async function loadServiceDetail(

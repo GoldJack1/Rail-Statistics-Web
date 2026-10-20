@@ -426,8 +426,9 @@ const ServiceDetailPage: React.FC = () => {
       : futureTimetableMode
         ? 'Timetable'
         : `Last update ${formatAge(ageMs)}`
-    if (status === 'ok')        return `${liveLine}${dateText ? `\n${dateText}` : ''}`
-    if (status === 'stale')     return `${staleLine}${dateText ? `\n${dateText}` : ''}`
+    const withFailure = (line: string) => (error ? `${line}\n${error}` : line)
+    if (status === 'ok')        return withFailure(`${liveLine}${dateText ? `\n${dateText}` : ''}`)
+    if (status === 'stale')     return withFailure(`${staleLine}${dateText ? `\n${dateText}` : ''}`)
     if (status === 'loading')   return `Loading…${dateText ? `\n${dateText}` : ''}`
     if (status === 'error')     return error ? `Error: ${error}` : 'Service unavailable'
     if (status === 'not-found') return 'Service not found'
