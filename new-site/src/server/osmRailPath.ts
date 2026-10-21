@@ -541,16 +541,20 @@ export function keepLeftHandTrack(
       return { score: gain }
     }
     if (alongside && current != null && dir) {
-      let hop: { way: number; through: Point[]; score: number } | null = null
-      const consider = (way: number, through: Point[]) => {
+      let hopWay = -1
+      let hopThrough: Point[] = []
+      let hopScore = -Infinity
+      const takeHop = (way: number, through: Point[]) => {
         const candidate = lefter(way)
-        if (!candidate) return
-        if (!hop || candidate.score > hop.score) hop = { way, through, score: candidate.score }
+        if (!candidate || candidate.score <= hopScore) return
+        hopWay = way
+        hopThrough = through
+        hopScore = candidate.score
       }
       for (const other of links[current]) {
         const joint = joinNear(current, other, here)
         if (!joint) continue
-        consider(other, [joint])
+        takeHop(other, [joint])
         if (chainLengthM(usable[other].map((point) => [point.lat, point.lng])) > 90) continue
         for (const id of wayNodes[other]) {
           const end = at.get(id)
@@ -558,14 +562,14 @@ export function keepLeftHandTrack(
           for (const beyond of nodeWays.get(id) || []) {
             if (beyond === other || beyond === current) continue
             const landing = joinNear(other, beyond, here)
-            if (landing) consider(beyond, [joint, landing])
+            if (landing) takeHop(beyond, [joint, landing])
           }
         }
       }
-      if (hop) {
+      if (hopWay >= 0) {
         leftFrom = current
-        for (const point of hop.through) emit(point, dir)
-        current = hop.way
+        for (const point of hopThrough) emit(point, dir)
+        current = hopWay
       }
     } else if (current != null && dir) {
       let follow: { way: number; joint: Point; distance: number } | null = null
