@@ -414,7 +414,7 @@ export function matchStationCoord(
 
 export type TiplocCoordMap = Readonly<Record<string, { lat: number; lng: number }>>
 
-function coordFromStop(stop: ServiceStop): { lat: number; lng: number } | null {
+function coordFromStop(stop: Pick<ServiceStop, 'lat' | 'lng'>): { lat: number; lng: number } | null {
   const lat = stop.lat
   const lng = stop.lng
   if (typeof lat !== 'number' || typeof lng !== 'number' || !isValidStationCoordinate(lat, lng)) return null
