@@ -7,6 +7,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import '../../maps/leafletDarkTiles.css'
 import { MapZoomControls } from '../../maps/MapZoomControls'
+import { MapUserLocation } from '../../maps/MapUserLocation'
 import { BUTCircleButton } from '../../buttons'
 import { useTheme, readThemeFromDocument } from '../../../hooks/useTheme'
 import { addThemeTileLayersToMap, swapThemeTileLayers, type MapTileLayerRefs } from '../../../utils/mapTileLayers'
@@ -64,7 +65,6 @@ const LIVE_MARKER: L.CircleMarkerOptions = {
   pane: ROUTE_LIVE_PANE,
 }
 
-const ROUTE_CHUNK = 8
 const NO_PLATFORMS: Record<string, RoutePlatform> = {}
 
 function readCoordPair(value: unknown): { lat: number; lng: number } | null {
@@ -161,59 +161,31 @@ async function routeAlong(points: LatLngTuple[], signal: AbortSignal): Promise<L
   return drawn.length >= 2 ? joined : []
 }
 
-function joinRouteParts(parts: Array<LatLngTuple[] | undefined>): LatLngTuple[] {
-  const joined: LatLngTuple[] = []
-  let open = false
-  for (const part of parts) {
-    if (!part) {
-      if (open) {
-        joined.push([Number.NaN, Number.NaN])
-        open = false
-      }
-      continue
-    }
-    if (part.length < 2) {
-      if (joined.length > 0) joined.push([Number.NaN, Number.NaN])
-      open = false
-      continue
-    }
-    appendPath(joined, part)
-    open = true
+function routeSpan(path: LatLngTuple[]): number {
+  let south = Infinity
+  let north = -Infinity
+  let west = Infinity
+  let east = -Infinity
+  let count = 0
+  for (const [lat, lng] of path) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
+    count += 1
+    south = Math.min(south, lat)
+    north = Math.max(north, lat)
+    west = Math.min(west, lng)
+    east = Math.max(east, lng)
   }
-  while (joined.length > 0 && !Number.isFinite(joined[joined.length - 1][0])) joined.pop()
-  return joined.some((point) => Number.isFinite(point[0])) ? joined : []
+  if (count < 2) return 0
+  return (north - south) + (east - west)
 }
 
+/** The whole journey, drawn once it is on the railway from end to end. */
 async function fetchRailRouteAlongTrack(
   points: LatLngTuple[],
   signal: AbortSignal,
-  onUpdate?: (path: LatLngTuple[]) => void,
 ): Promise<LatLngTuple[]> {
   if (points.length < 2) return points
-  const chunks: LatLngTuple[][] = []
-  for (let i = 0; i < points.length - 1; i += ROUTE_CHUNK - 1) {
-    const slice = points.slice(i, i + ROUTE_CHUNK)
-    if (slice.length >= 2) chunks.push(slice)
-  }
-  const parts: Array<LatLngTuple[] | undefined> = new Array(chunks.length)
-  let cursor = 0
-  const publish = () => {
-    const joined = joinRouteParts(parts)
-    if (onUpdate && joined.length > 0) onUpdate(joined)
-    return joined
-  }
-  async function worker() {
-    while (cursor < chunks.length) {
-      if (signal.aborted) return
-      const index = cursor
-      cursor += 1
-      parts[index] = await routeAlong(chunks[index], signal)
-      if (!signal.aborted) publish()
-    }
-  }
-  const workers = Math.min(3, chunks.length)
-  await Promise.all(Array.from({ length: workers }, () => worker()))
-  return publish()
+  return routeAlong(points, signal)
 }
 
 async function fetchTiplocCoords(
@@ -406,6 +378,7 @@ export function ServiceJourneyMap({
   waypointsRef.current = waypoints
   const routeEpochRef = useRef(0)
   const fineRouteDoneRef = useRef(false)
+  const [stationRouteSettledKey, setStationRouteSettledKey] = useState<string | null>(null)
   const railPath = waypoints.length < 2 ? null : trackPath
   const hasPoints = mapped.length >= 1
 
@@ -446,7 +419,14 @@ export function ServiceJourneyMap({
   }, [neededKey])
 
   const applyRoutedPath = (path: LatLngTuple[]) => {
-    setTrackPath(path)
+    if (railSegments(path).length < 1) return
+    setTrackPath((current) => {
+      if (!current) return path
+      // A section that has just arrived must not wipe a line that already
+      // runs further along the journey.
+      if (routeSpan(path) + 0.02 < routeSpan(current)) return current
+      return path
+    })
   }
 
   useEffect(() => {
@@ -457,16 +437,21 @@ export function ServiceJourneyMap({
     const epoch = routeEpochRef.current + 1
     routeEpochRef.current = epoch
     fineRouteDoneRef.current = false
+    setStationRouteSettledKey(null)
     const controller = new AbortController()
     let cancelled = false
     const publish = (path: LatLngTuple[]) => {
       if (cancelled || routeEpochRef.current !== epoch || fineRouteDoneRef.current) return
       applyRoutedPath(path)
     }
-    void fetchRailRouteAlongTrack(points, controller.signal, publish)
+    void fetchRailRouteAlongTrack(points, controller.signal)
       .then(publish)
       .catch(() => {
         if (cancelled || routeEpochRef.current !== epoch || fineRouteDoneRef.current) return
+      })
+      .finally(() => {
+        if (cancelled || routeEpochRef.current !== epoch) return
+        setStationRouteSettledKey(stationWaypointKey)
       })
     return () => {
       cancelled = true
@@ -475,32 +460,28 @@ export function ServiceJourneyMap({
   }, [geoReady, stationWaypointKey])
 
   useEffect(() => {
-    if (!geoReady || platformQueryReady !== platformQuery) return
+    if (!geoReady || stationRouteSettledKey !== stationWaypointKey || platformQueryReady !== platformQuery) return
     const points = waypointsRef.current
     const base = stationWaypointsRef.current
     if (points.length < 2 || !routeWaypointsDiffer(base, points)) return
     const epoch = routeEpochRef.current
     const controller = new AbortController()
     let cancelled = false
-    const publish = (path: LatLngTuple[]) => {
-      if (cancelled || routeEpochRef.current !== epoch) return
-      applyRoutedPath(path)
-    }
-    void fetchRailRouteAlongTrack(points, controller.signal, publish)
+    void fetchRailRouteAlongTrack(points, controller.signal)
       .then((path) => {
         if (cancelled || routeEpochRef.current !== epoch) return
+        if (railSegments(path).length < 1) return
         fineRouteDoneRef.current = true
         applyRoutedPath(path)
       })
       .catch(() => {
-        if (cancelled || routeEpochRef.current !== epoch) return
-        fineRouteDoneRef.current = true
+        /* Keep the station line. A failed refinement must not block it. */
       })
     return () => {
       cancelled = true
       controller.abort()
     }
-  }, [geoReady, platformQuery, platformQueryReady, waypointKey])
+  }, [geoReady, platformQuery, platformQueryReady, waypointKey, stationRouteSettledKey, stationWaypointKey])
 
   useEffect(() => {
     if (!platformQuery) {
@@ -562,9 +543,18 @@ export function ServiceJourneyMap({
     liveMarkerRef.current = liveMarker
     shownRef.current = { lat: opened.center[0], lng: opened.center[1] }
     mapInstanceRef.current = map
+    const redrawRoute = () => {
+      layersRef.current?.eachLayer((layer) => {
+        const path = layer as L.Path
+        if (typeof path.redraw === 'function') path.redraw()
+      })
+      liveMarkerRef.current?.redraw()
+    }
+    map.on('zoomend', redrawRoute)
     const ready = window.requestAnimationFrame(() => setMapInstance(map))
     return () => {
       window.cancelAnimationFrame(ready)
+      map.off('zoomend', redrawRoute)
       map.remove()
       mapInstanceRef.current = null
       layersRef.current = null
@@ -621,6 +611,14 @@ export function ServiceJourneyMap({
       marker.bindTooltip(label, { direction: 'top', opacity: 0.95 })
       marker.addTo(group)
     }
+    const frame = window.requestAnimationFrame(() => {
+      if (!mapStillMounted(map, container)) return
+      group.eachLayer((layer) => {
+        const path = layer as L.Path
+        if (typeof path.redraw === 'function') path.redraw()
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
   }, [railPath, mapped, routeColor, platformCoords, mapInstance])
 
   useEffect(() => {
@@ -678,6 +676,11 @@ export function ServiceJourneyMap({
     const refresh = () => {
       try {
         map.invalidateSize({ pan: false, debounceMoveend: true })
+        layersRef.current?.eachLayer((layer) => {
+          const path = layer as L.Path
+          if (typeof path.redraw === 'function') path.redraw()
+        })
+        liveMarkerRef.current?.redraw()
       } catch {
         /* layout race */
       }
@@ -747,6 +750,7 @@ export function ServiceJourneyMap({
         aria-label="Service journey map"
       />
       <MapZoomControls map={mapInstance} />
+      <MapUserLocation map={mapInstance} />
       {mapInstance
         ? createPortal(
             <div className="svc-journey-map__fullscreen">

@@ -4,6 +4,7 @@ import {
   eurostarEndCoordinate,
 } from './eurostarContinental'
 import { isValidStationCoordinate } from './stationCoordinates'
+import { railwayDaySecondsFromClock } from './railwayOperatingDayUk'
 import { inferProgressIndex, nextProgressIndex } from './serviceProgress'
 
 export type StationCoordInput = {
@@ -72,52 +73,15 @@ function stillAhead(from: MapPoint, point: MapPoint, next: MapPoint): boolean {
   return haversineM(point, next) < haversineM(from, next) - 15
 }
 
-/** A junction this far off a short leg is on another route. */
-const JUNCTION_ON_LEG_M = 200
-
-function legProjection(from: MapPoint, to: MapPoint, point: MapPoint): { offset: number; t: number } {
-  const lat = (from.lat * Math.PI) / 180
-  const mx = (lng: number) => (lng - from.lng) * 111320 * Math.cos(lat)
-  const my = (lat2: number) => (lat2 - from.lat) * 110540
-  const bx = mx(to.lng)
-  const by = my(to.lat)
-  const px = mx(point.lng)
-  const py = my(point.lat)
-  const len2 = bx * bx + by * by
-  if (len2 < 1) return { offset: Math.hypot(px, py), t: 0 }
-  const raw = (px * bx + py * by) / len2
-  const clamped = Math.min(1, Math.max(0, raw))
-  return { offset: Math.hypot(px - bx * clamped, py - by * clamped), t: raw }
-}
-
 /**
- * A scheduled junction is part of the route, including a dogleg the chord
- * between calls would miss. It is not part of the route when it steps off a
- * short leg onto another line, or when it sits beside one end rather than
- * between its neighbours.
- */
-function junctionOnRoute(prev: MapPoint, here: MapPoint, next: MapPoint): boolean {
-  const leg = haversineM(prev, next)
-  if (leg < 40) return false
-  const extra = haversineM(prev, here) + haversineM(here, next) - leg
-  if (extra > 4000) return false
-  const { offset, t } = legProjection(prev, next, here)
-  if (t <= 0.02 || t >= 0.98) return false
-  if (leg < 3000 && offset > JUNCTION_ON_LEG_M && extra < 250) return false
-  return true
-}
-
-/**
- * Route through the timetable. Stops and station passes are vias when they
- * still lie ahead. A junction is a via when it sits on the leg between those
- * points. A junction between its neighbours is a via, including where the
- * timetable doglegs off the straight line between calls. A junction that steps
- * off a short leg onto another route stays a marker only. A point listed back
- * behind the train is left out, because sending the router there and back
- * draws a spur. A booked platform moves that via onto the rail beside the
- * platform. One point per place: a bay starts at the buffer, and a call
- * stands on the stopping mark. A second point on the same platform makes the
- * line reverse.
+ * Route between stations. Calling stops and passing stations are vias when
+ * they still lie ahead. Junctions are markers only: they are drawn, and the
+ * live marker can track to them, but they are not sent to the router.
+ * A point listed back behind the train is left out, because sending the
+ * router there and back draws a spur. A booked platform moves that via onto
+ * the rail beside the platform. One point per place: a bay starts at the
+ * buffer, and a call stands on the stopping mark. A second point on the same
+ * platform makes the line reverse.
  */
 export function mappedRouteWaypoints(
   mapped: JourneyMapStop[],
@@ -145,68 +109,6 @@ export function mappedRouteWaypoints(
       if (!stillAhead(placeAt(from), placeAt(stop), placeAt(next))) continue
       chosen.push(stop)
     }
-  }
-
-  const junctions = mapped.filter((stop) => !stop.cancelled && stop.kind === 'junction')
-  const legJunctions = new Map<number, { stop: JourneyMapStop; along: number }[]>()
-  const placed = new Set<JourneyMapStop>()
-  for (const junction of junctions) {
-    const here = placeAt(junction)
-    let bestLeg = -1
-    let bestExtra = 600
-    let bestAlong = 0
-    for (let i = 0; i < chosen.length - 1; i++) {
-      const from = placeAt(chosen[i])
-      const next = placeAt(chosen[i + 1])
-      const along = haversineM(from, here)
-      const extra = along + haversineM(here, next) - haversineM(from, next)
-      const { offset } = legProjection(from, next, here)
-      if (extra < bestExtra && along > 25 && offset <= JUNCTION_ON_LEG_M) {
-        bestExtra = extra
-        bestLeg = i
-        bestAlong = along
-      }
-    }
-    if (bestLeg < 0) continue
-    const list = legJunctions.get(bestLeg) || []
-    list.push({ stop: junction, along: bestAlong })
-    legJunctions.set(bestLeg, list)
-    placed.add(junction)
-  }
-  if (legJunctions.size > 0) {
-    const withJunctions: JourneyMapStop[] = []
-    for (let i = 0; i < chosen.length; i++) {
-      withJunctions.push(chosen[i])
-      const here = legJunctions.get(i)
-      if (!here) continue
-      here.sort((a, b) => a.along - b.along)
-      for (const item of here) withJunctions.push(item.stop)
-    }
-    chosen.splice(0, chosen.length, ...withJunctions)
-  }
-
-  const doglegs = junctions.filter((junction) => !placed.has(junction))
-  doglegs.sort((a, b) => a.index - b.index)
-  for (const junction of doglegs) {
-    const at = mapped.indexOf(junction)
-    let prev: JourneyMapStop | null = null
-    for (let p = at - 1; p >= 0; p--) {
-      if (!mapped[p].cancelled) {
-        prev = mapped[p]
-        break
-      }
-    }
-    let next: JourneyMapStop | null = null
-    for (let n = at + 1; n < mapped.length; n++) {
-      if (!mapped[n].cancelled) {
-        next = mapped[n]
-        break
-      }
-    }
-    if (!prev || !next || !junctionOnRoute(placeAt(prev), placeAt(junction), placeAt(next))) continue
-    let insertAt = chosen.findIndex((stop) => stop.index > junction.index)
-    if (insertAt < 0) insertAt = chosen.length
-    chosen.splice(insertAt, 0, junction)
   }
 
   const points: LatLngTuple[] = []
@@ -702,11 +604,64 @@ function indexOfTiploc(stops: ServiceStop[], tiploc: string | null | undefined):
   return i >= 0 ? i : null
 }
 
+function clockSeconds(raw: string | null | undefined): number | null {
+  if (!raw) return null
+  return railwayDaySecondsFromClock(raw)
+}
+
+function firstClock(values: Array<string | null | undefined>): number | null {
+  for (const value of values) {
+    const secs = clockSeconds(value)
+    if (secs != null) return secs
+  }
+  return null
+}
+
+/** Darwin's live clock, when it is a forecast or an actual rather than the timetable. */
+function liveReportClock(stop: ServiceStop | undefined): string | null {
+  if (!stop?.liveTime) return null
+  const kind = stop.liveKind
+  if (kind === 'est' || kind === 'est-arr' || kind === 'actual' || kind === 'actual-arr') return stop.liveTime
+  return null
+}
+
+/**
+ * How far the train is from the last report toward the next point.
+ * Actuals and forecasts come before the working and public timetable,
+ * so a late train stays on the real-time clock.
+ */
+function legProgress(from: ServiceStop | undefined, to: ServiceStop | undefined, nowSecs: number | null): number {
+  if (nowSecs == null || !from || !to) return 0
+  const depart = firstClock([
+    from.atd,
+    from.atp,
+    from.etd,
+    from.etp,
+    liveReportClock(from),
+    from.wtd,
+    from.wtp,
+    from.ptd,
+  ])
+  const arrive = firstClock([
+    to.eta,
+    to.etp,
+    to.etd,
+    to.ata,
+    to.atp,
+    liveReportClock(to),
+    to.wta,
+    to.wtp,
+    to.pta,
+  ])
+  if (depart == null || arrive == null || arrive <= depart) return 0
+  return Math.min(1, Math.max(0, (nowSecs - depart) / (arrive - depart)))
+}
+
 export function liveJourneyPosition(
   stops: ServiceStop[],
   mapped: JourneyMapStop[],
   location: ServiceLocation | null | undefined,
-  _nowSecs: number | null,
+  nowSecs: number | null,
 ): LiveJourneyPosition | null {
   const path = mapped.filter((p) => !p.cancelled)
   if (!path.length) return null
@@ -749,13 +704,15 @@ export function liveJourneyPosition(
   if (!nextPt || nextPt.index === here.index) {
     return { lat: here.lat, lng: here.lng, label: location?.label || here.name, atStation: false, from: here, to: here, t: 0 }
   }
+  const t = legProgress(stops[here.index], stops[nextPt.index], nowSecs)
+  const along = interpolateLatLng(here, nextPt, t)
   return {
-    lat: here.lat,
-    lng: here.lng,
+    lat: along.lat,
+    lng: along.lng,
     label: location?.label || `Between ${here.name} and ${nextPt.name}`,
     atStation: false,
     from: here,
     to: nextPt,
-    t: 0,
+    t,
   }
 }

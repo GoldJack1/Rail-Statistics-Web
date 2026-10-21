@@ -73,6 +73,7 @@ import {
   type MapAddStationContextMenuState,
 } from './MapAddStationContextMenu'
 import { MapZoomControls } from './MapZoomControls'
+import { MapUserLocation } from './MapUserLocation'
 import './StationsOsmMap.css'
 import './leafletDarkTiles.css'
 
@@ -1875,6 +1876,7 @@ export function StationsOsmMap({
       <div ref={mapStageRef} className="stations-osm-map__stage">
         <div ref={mapContainerRef} className="stations-osm-map__canvas" aria-label="Map" />
         <MapZoomControls map={mapInstance} />
+        <MapUserLocation map={mapInstance} />
         {addStationMode && (
           <p className="stations-osm-map__add-mode-hint" role="status">
             Click the map to add a station · Esc to exit

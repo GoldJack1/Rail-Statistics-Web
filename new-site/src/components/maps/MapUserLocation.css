@@ -1,0 +1,36 @@
+.leaflet-container .map-user-location {
+  position: absolute;
+  top: calc(max(var(--space-md), env(safe-area-inset-top, 0px)) + 2.75rem + var(--space-sm));
+  right: max(var(--space-md), env(safe-area-inset-right, 0px));
+  z-index: 1100;
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: var(--space-sm);
+  pointer-events: none;
+  /* WebKit paints map tiles over controls that stay in the default layer. */
+  transform: translate3d(0, 0, 0);
+  -webkit-transform: translate3d(0, 0, 0);
+}
+
+.leaflet-container .map-user-location__note {
+  margin: 0;
+  max-width: 18rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 1.3;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
+}
+
+.leaflet-container .map-user-location .rs-button {
+  pointer-events: auto;
+}
+
+.leaflet-container .map-user-location .rs-button__icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}

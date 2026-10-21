@@ -101,7 +101,7 @@ describe('serviceJourneyMap', () => {
     expect(mapped.map((p) => p.tpl)).toEqual(['LEEDS', 'YORK'])
   })
 
-  it('routes through a station pass that is still ahead and through a junction on that leg', () => {
+  it('routes through a station pass that is still ahead and leaves the junction as a marker', () => {
     const mapped = journeyMapStops(
       [
         stop('LVRPLSH', 'Liverpool Lime Street', 'OR', { lat: 53.407, lng: -2.976 }),
@@ -116,7 +116,6 @@ describe('serviceJourneyMap', () => {
     expect(mappedRouteWaypoints(mapped)).toEqual([
       [53.407, -2.976],
       [53.448, -2.353],
-      [53.463, -2.288],
       [53.474, -2.242],
     ])
   })
@@ -134,12 +133,11 @@ describe('serviceJourneyMap', () => {
     expect(mapped.find((point) => point.tpl === 'ARDWKEJ')?.kind).toBe('junction')
     expect(mappedRouteWaypoints(mapped)).toEqual([
       [53.47434, -2.22032],
-      [53.47254, -2.21573],
       [53.46727, -2.2065],
     ])
   })
 
-  it('follows the Methley dogleg instead of the straight line to Wakefield', () => {
+  it('routes between the stations and leaves the junction dogleg as markers', () => {
     const mapped = journeyMapStops(
       [
         stop('LEEDS', 'Leeds', 'OR', { lat: 53.79537, lng: -1.54644 }),
@@ -150,11 +148,9 @@ describe('serviceJourneyMap', () => {
       ],
       [],
     )
+    expect(mapped.filter((point) => point.kind === 'junction')).toHaveLength(3)
     expect(mappedRouteWaypoints(mapped)).toEqual([
       [53.79537, -1.54644],
-      [53.76683, -1.4986],
-      [53.72982, -1.40092],
-      [53.70958, -1.41324],
       [53.67839, -1.48698],
     ])
   })
@@ -223,7 +219,6 @@ describe('serviceJourneyMap', () => {
       }),
     ).toEqual([
       [53.7939, -1.5482],
-      [53.79259, -1.55573],
       [53.544, -2.632],
     ])
   })
@@ -433,41 +428,46 @@ describe('serviceJourneyMap', () => {
     expect(live?.label).toBe('At Leeds')
   })
 
-  it('stays on the last report instead of sliding toward the next stop as time passes', () => {
+  it('moves from the last report toward the next stop as time passes', () => {
     const stops = [
       stop('LEEDS', 'Leeds', 'OR', { crs: 'LDS', ptd: '12:00', atd: '12:00', liveKind: 'actual' }),
       stop('YORK', 'York', 'DT', { crs: 'YRK', pta: '12:20' }),
     ]
     const mapped = journeyMapStops(stops, stations)
-    const halfway = liveJourneyPosition(
-      stops,
-      mapped,
-      {
-        phase: 'between',
-        last: { tiploc: 'LEEDS', crs: 'LDS', kind: 'stop', at: '12:00' },
-        next: { tiploc: 'YORK', crs: 'YRK', kind: 'stop' },
-        label: 'Between Leeds and York',
-      },
-      12 * 3600 + 10 * 60 + 30,
-    )
-    const later = liveJourneyPosition(
-      stops,
-      mapped,
-      {
-        phase: 'between',
-        last: { tiploc: 'LEEDS', crs: 'LDS', kind: 'stop', at: '12:00' },
-        next: { tiploc: 'YORK', crs: 'YRK', kind: 'stop' },
-        label: 'Between Leeds and York',
-      },
-      12 * 3600 + 18 * 60,
-    )
+    const location = {
+      phase: 'between' as const,
+      last: { tiploc: 'LEEDS', crs: 'LDS', kind: 'stop' as const, at: '12:00' },
+      next: { tiploc: 'YORK', crs: 'YRK', kind: 'stop' as const },
+      label: 'Between Leeds and York',
+    }
+    const halfway = liveJourneyPosition(stops, mapped, location, 12 * 3600 + 10 * 60 + 30)
+    const later = liveJourneyPosition(stops, mapped, location, 12 * 3600 + 18 * 60)
     expect(halfway?.atStation).toBe(false)
-    expect(halfway?.t).toBe(0)
-    expect(halfway?.lat).toBe(53.795)
-    expect(later?.lat).toBe(halfway?.lat)
-    expect(later?.lng).toBe(halfway?.lng)
+    expect(halfway?.t).toBeCloseTo(0.525, 5)
+    expect(halfway?.lat).toBeGreaterThan(53.795)
+    expect(halfway?.lat).toBeLessThan(53.958)
+    expect(later?.t).toBeCloseTo(0.9, 5)
+    expect(later?.lat).toBeGreaterThan(halfway?.lat ?? 0)
     expect(halfway?.label).toBe('Between Leeds and York')
     expect(halfway?.to?.name).toBe('York')
+  })
+
+  it('moves on the live forecast rather than the public arrival', () => {
+    const stops = [
+      stop('LEEDS', 'Leeds', 'OR', { crs: 'LDS', ptd: '12:00', atd: '12:10', liveKind: 'actual', liveTime: '12:10' }),
+      stop('YORK', 'York', 'DT', { crs: 'YRK', pta: '12:20', liveKind: 'est-arr', liveTime: '12:30' }),
+    ]
+    const mapped = journeyMapStops(stops, stations)
+    const location = {
+      phase: 'between' as const,
+      last: { tiploc: 'LEEDS', crs: 'LDS', kind: 'stop' as const, at: '12:10' },
+      next: { tiploc: 'YORK', crs: 'YRK', kind: 'stop' as const },
+      label: 'Between Leeds and York',
+    }
+    const atPublicArrival = liveJourneyPosition(stops, mapped, location, 12 * 3600 + 20 * 60)
+    const atForecast = liveJourneyPosition(stops, mapped, location, 12 * 3600 + 30 * 60)
+    expect(atPublicArrival?.t).toBeCloseTo(0.5, 5)
+    expect(atForecast?.t).toBeCloseTo(1, 5)
   })
 
   it('walks a rail path by distance instead of a straight line', () => {

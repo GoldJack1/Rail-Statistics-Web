@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { osmRailPath, railwayRoute, routeLeavesTheRailway, shapeOntoLeftHandTrack } from '@/server/osmRailPath'
+import { osmRailPath, railwayRouteJoined, routeLeavesTheRailway, shapeOntoLeftHandTrack } from '@/server/osmRailPath'
 import { isValidStationCoordinate } from '@/utils/stationCoordinates'
 import {
   buildOpenRailRouteUrl,
@@ -15,7 +15,7 @@ const routeCache = new Map<string, { at: number; coordinates: LatLngTuple[] }>()
 const ROUTE_CACHE_MS = 30 * 60 * 1000
 
 function routeCacheKey(points: LatLngTuple[]): string {
-  return `geom10|${points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')}`
+  return `geom12|${points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')}`
 }
 
 function readCoord(value: string | null): number | null {
@@ -74,8 +74,17 @@ export async function GET(request: NextRequest) {
     } catch {
       shaped = coordinates
     }
-    if (shaped === coordinates) {
-      return NextResponse.json({ coordinates: fallback, fallback: true })
+    // Shaping is optional. These coordinates are already a rail path. Substituting
+    // the straight chord made the map drop the line and ask for the route again.
+    if (shaped === coordinates || shaped.length < 2) {
+      if (routeLeavesTheRailway(points, coordinates)) {
+        return NextResponse.json({ coordinates: fallback, fallback: true })
+      }
+      routeCache.set(cacheKey, { at: Date.now(), coordinates })
+      return NextResponse.json(
+        { coordinates, fallback: false },
+        { headers: { 'Cache-Control': 'private, max-age=300' } },
+      )
     }
     routeCache.set(cacheKey, { at: Date.now(), coordinates: shaped })
     return NextResponse.json(
@@ -91,7 +100,7 @@ export async function GET(request: NextRequest) {
     return null
   }
 
-  const alongRails = await railwayRoute(points).catch(() => null)
+  const alongRails = await railwayRouteJoined(points).catch(() => null)
   if (alongRails && alongRails.length >= 2 && !routeLeavesTheRailway(points, alongRails)) {
     routeCache.set(cacheKey, { at: Date.now(), coordinates: alongRails })
     return NextResponse.json(
@@ -106,7 +115,7 @@ export async function GET(request: NextRequest) {
         Accept: 'application/json',
         'User-Agent': 'RailStatisticsWebsite/1.0 (+https://railstatistics.co.uk); rail route proxy',
       },
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(8000),
       cache: 'no-store',
     })
     if (!upstream.ok) {

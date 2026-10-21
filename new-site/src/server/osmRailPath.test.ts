@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { densifyAlongWays, keepLeftHandTrack, railPathFromWays, routeLeavesTheRailway, routeOnRailWays } from './osmRailPath'
+import { densifyAlongWays, keepLeftHandTrack, railPathFromWays, routeLeavesTheRailway, routeOnRailWays, shapeLeftHandRuns, splitAtReversals } from './osmRailPath'
 
 describe('osm rail path', () => {
   it('follows the railway curve instead of the chord when the router has left the corridor', () => {
@@ -250,6 +250,60 @@ describe('osm rail path', () => {
       ],
     )
     expect(filled.some((point) => !Number.isFinite(point[0]))).toBe(true)
+  })
+
+  it('crosses a ladder once onto the left-hand road and stays there', () => {
+    const east = [
+      { lat: 53.4, lng: -2.2 },
+      { lat: 53.41, lng: -2.2 },
+      { lat: 53.42, lng: -2.2 },
+    ]
+    const west = [
+      { lat: 53.4, lng: -2.20008 },
+      { lat: 53.41, lng: -2.20008 },
+      { lat: 53.42, lng: -2.20008 },
+    ]
+    const ladder = [
+      { lat: 53.41, lng: -2.2 },
+      { lat: 53.41, lng: -2.20008 },
+    ]
+    const path: [number, number][] = [
+      [53.402, -2.2],
+      [53.409, -2.2],
+      [53.411, -2.20008],
+      [53.415, -2.2],
+      [53.419, -2.2],
+    ]
+    const shaped = shapeLeftHandRuns(path, [east, west, ladder])
+    const later = shaped.filter((point) => point[0] > 53.412)
+    expect(later.length).toBeGreaterThan(0)
+    for (const point of later) expect(point[1]).toBeLessThan(-2.20004)
+  })
+
+  it('runs left-handed on the way back after a station reverse', () => {
+    const platform = { lat: 53.42, lng: -2.20004 }
+    const west = [
+      { lat: 53.4, lng: -2.20008 },
+      platform,
+    ]
+    const east = [
+      { lat: 53.4, lng: -2.2 },
+      platform,
+    ]
+    const path: [number, number][] = [
+      [53.402, -2.20008],
+      [53.41, -2.20008],
+      [platform.lat, platform.lng],
+      [53.41, -2.2],
+      [53.402, -2.2],
+    ]
+    expect(splitAtReversals(path)).toHaveLength(2)
+    const shaped = shapeLeftHandRuns(path, [west, east], [[platform.lat, platform.lng]])
+    const inbound = shaped.find((point) => point[0] > 53.405 && point[0] < 53.415 && point[1] < -2.20006)
+    const outbound = shaped.find((point) => point[0] > 53.405 && point[0] < 53.415 && point[1] > -2.20002)
+    expect(inbound).toBeTruthy()
+    expect(outbound).toBeTruthy()
+    expect(shaped.some((point) => Math.abs(point[0] - platform.lat) < 0.0003)).toBe(true)
   })
 
   it('does not invent a line where the tracks do not connect', () => {
