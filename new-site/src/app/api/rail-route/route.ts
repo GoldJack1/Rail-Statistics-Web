@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { osmRailPath, routeLeavesTheRailway } from '@/server/osmRailPath'
+import { osmRailPath, railwayRoute, routeLeavesTheRailway, shapeOntoLeftHandTrack } from '@/server/osmRailPath'
 import { isValidStationCoordinate } from '@/utils/stationCoordinates'
 import {
   buildOpenRailRouteUrl,
@@ -15,7 +15,7 @@ const routeCache = new Map<string, { at: number; coordinates: LatLngTuple[] }>()
 const ROUTE_CACHE_MS = 30 * 60 * 1000
 
 function routeCacheKey(points: LatLngTuple[]): string {
-  return points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')
+  return `geom10|${points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')}`
 }
 
 function readCoord(value: string | null): number | null {
@@ -67,10 +67,19 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  const respond = (coordinates: LatLngTuple[]) => {
-    routeCache.set(cacheKey, { at: Date.now(), coordinates })
+  const respond = async (coordinates: LatLngTuple[]) => {
+    let shaped = coordinates
+    try {
+      shaped = await shapeOntoLeftHandTrack(points, coordinates)
+    } catch {
+      shaped = coordinates
+    }
+    if (shaped === coordinates) {
+      return NextResponse.json({ coordinates: fallback, fallback: true })
+    }
+    routeCache.set(cacheKey, { at: Date.now(), coordinates: shaped })
     return NextResponse.json(
-      { coordinates, fallback: false },
+      { coordinates: shaped, fallback: false },
       { headers: { 'Cache-Control': 'private, max-age=300' } },
     )
   }
@@ -78,8 +87,17 @@ export async function GET(request: NextRequest) {
   const alongTracksOr = async (routed: LatLngTuple[]): Promise<LatLngTuple[] | null> => {
     if (routed.length >= 2 && !routeLeavesTheRailway(points, routed)) return routed
     const alongTracks = await osmRailPath(points)
-    if (alongTracks && alongTracks.length >= 2) return alongTracks
-    return routed.length >= 2 ? routed : null
+    if (alongTracks && alongTracks.length >= 2 && !routeLeavesTheRailway(points, alongTracks)) return alongTracks
+    return null
+  }
+
+  const alongRails = await railwayRoute(points).catch(() => null)
+  if (alongRails && alongRails.length >= 2 && !routeLeavesTheRailway(points, alongRails)) {
+    routeCache.set(cacheKey, { at: Date.now(), coordinates: alongRails })
+    return NextResponse.json(
+      { coordinates: alongRails, fallback: false },
+      { headers: { 'Cache-Control': 'private, max-age=300' } },
+    )
   }
 
   try {

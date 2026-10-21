@@ -1,10 +1,13 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { CornersIn, CornersOut } from '@phosphor-icons/react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import '../../maps/leafletDarkTiles.css'
 import { MapZoomControls } from '../../maps/MapZoomControls'
+import { BUTCircleButton } from '../../buttons'
 import { useTheme, readThemeFromDocument } from '../../../hooks/useTheme'
 import { addThemeTileLayersToMap, swapThemeTileLayers, type MapTileLayerRefs } from '../../../utils/mapTileLayers'
 import { railwayDaySecondsFromClock } from '../../../utils/railwayOperatingDayUk'
@@ -15,8 +18,7 @@ import {
   journeyMapStops,
   liveJourneyPosition,
   mappedRouteWaypoints,
-  removeRouteReversals,
-  replaceInflatedLegs,
+  routeWaypointsDiffer,
   snapLiveToRailPath,
   snapMarkerToPath,
   tiplocsNeedingCoordinates,
@@ -26,6 +28,8 @@ import { useTocOperators } from '../../../hooks/useTocOperators'
 import { resolveTocRouteColor } from '../../../utils/tocOperatorMap'
 import type { ServiceDetail } from '../../../types/darwin'
 import type { Station } from '../../../types'
+import { mapLocationBanner, type MapLocationBanner } from './mapLocationBanner'
+import '@/components/darwin/callingPatternTones.css'
 import './ServiceJourneyMap.css'
 
 const ROUTE_LINE_PANE = 'svcJourneyLine'
@@ -103,7 +107,9 @@ function chunkPlatformQuery(query: string, size = 40): string[] {
 
 function appendPath(joined: LatLngTuple[], part: LatLngTuple[]) {
   if (!part.length) return
-  const start = joined.length > 0 ? 1 : 0
+  const last = joined[joined.length - 1]
+  const broken = Boolean(last && !Number.isFinite(last[0]))
+  const start = joined.length > 0 && !broken ? 1 : 0
   for (let i = start; i < part.length; i++) joined.push(part[i])
 }
 
@@ -131,10 +137,9 @@ async function fetchOneRailRoute(
   return routedCoordinates(payload)
 }
 
-/** Follow the railway. A failed chunk is split so one miss does not draw a long chord. */
+/** Follow the railway. A miss stays a gap. It is never filled with a straight line. */
 async function routeAlong(points: LatLngTuple[], signal: AbortSignal): Promise<LatLngTuple[]> {
-  if (points.length < 2) return points
-  if (signal.aborted) return points
+  if (points.length < 2 || signal.aborted) return []
   let routed: LatLngTuple[] | 'limited' | null = null
   try {
     routed = await fetchOneRailRoute(points, signal)
@@ -142,40 +147,73 @@ async function routeAlong(points: LatLngTuple[], signal: AbortSignal): Promise<L
     if (signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error
     routed = null
   }
-  if (routed === 'limited') return points
+  if (routed === 'limited') return []
   if (routed && routed.length >= 2) return routed
-  if (points.length <= 2 || signal.aborted) return points
+  if (points.length <= 2 || signal.aborted) return []
   const mid = Math.ceil(points.length / 2)
   const left = await routeAlong(points.slice(0, mid), signal)
   const right = await routeAlong(points.slice(mid - 1), signal)
   const joined: LatLngTuple[] = []
   appendPath(joined, left)
+  if (!left.length || !right.length) joined.push([Number.NaN, Number.NaN])
   appendPath(joined, right)
-  return joined.length >= 2 ? joined : points
+  const drawn = joined.filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
+  return drawn.length >= 2 ? joined : []
 }
 
-async function fetchRailRouteAlongTrack(points: LatLngTuple[], signal: AbortSignal): Promise<LatLngTuple[]> {
+function joinRouteParts(parts: Array<LatLngTuple[] | undefined>): LatLngTuple[] {
+  const joined: LatLngTuple[] = []
+  let open = false
+  for (const part of parts) {
+    if (!part) {
+      if (open) {
+        joined.push([Number.NaN, Number.NaN])
+        open = false
+      }
+      continue
+    }
+    if (part.length < 2) {
+      if (joined.length > 0) joined.push([Number.NaN, Number.NaN])
+      open = false
+      continue
+    }
+    appendPath(joined, part)
+    open = true
+  }
+  while (joined.length > 0 && !Number.isFinite(joined[joined.length - 1][0])) joined.pop()
+  return joined.some((point) => Number.isFinite(point[0])) ? joined : []
+}
+
+async function fetchRailRouteAlongTrack(
+  points: LatLngTuple[],
+  signal: AbortSignal,
+  onUpdate?: (path: LatLngTuple[]) => void,
+): Promise<LatLngTuple[]> {
   if (points.length < 2) return points
   const chunks: LatLngTuple[][] = []
   for (let i = 0; i < points.length - 1; i += ROUTE_CHUNK - 1) {
     const slice = points.slice(i, i + ROUTE_CHUNK)
     if (slice.length >= 2) chunks.push(slice)
   }
-  const parts: LatLngTuple[][] = new Array(chunks.length)
+  const parts: Array<LatLngTuple[] | undefined> = new Array(chunks.length)
   let cursor = 0
+  const publish = () => {
+    const joined = joinRouteParts(parts)
+    if (onUpdate && joined.length > 0) onUpdate(joined)
+    return joined
+  }
   async function worker() {
     while (cursor < chunks.length) {
       if (signal.aborted) return
       const index = cursor
       cursor += 1
       parts[index] = await routeAlong(chunks[index], signal)
+      if (!signal.aborted) publish()
     }
   }
   const workers = Math.min(3, chunks.length)
   await Promise.all(Array.from({ length: workers }, () => worker()))
-  const joined: LatLngTuple[] = []
-  for (const part of parts) appendPath(joined, part || [])
-  return joined.length >= 2 ? joined : points
+  return publish()
 }
 
 async function fetchTiplocCoords(
@@ -233,6 +271,25 @@ function mapStillMounted(map: L.Map | null, container: HTMLElement | null): map 
   return map.getContainer() === container
 }
 
+function railSegments(path: LatLngTuple[] | null): LatLngTuple[][] {
+  if (!path) return []
+  const segments: LatLngTuple[][] = []
+  let current: LatLngTuple[] = []
+  const flush = () => {
+    if (current.length >= 2) segments.push(current)
+    current = []
+  }
+  for (const point of path) {
+    if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) {
+      flush()
+      continue
+    }
+    current.push(point)
+  }
+  flush()
+  return segments
+}
+
 function validLatLngs(points: Array<LatLngTuple | L.LatLngTuple>): LatLngTuple[] {
   const out: LatLngTuple[] = []
   for (const p of points) {
@@ -245,22 +302,25 @@ function validLatLngs(points: Array<LatLngTuple | L.LatLngTuple>): LatLngTuple[]
   return out
 }
 
-function fitJourneyBounds(map: L.Map, points: LatLngTuple[]) {
-  const latlngs = validLatLngs(points)
-  if (latlngs.length < 1) return
-  try {
-    map.invalidateSize({ pan: false, debounceMoveend: true })
-    const size = map.getSize()
-    if (!size || size.x < 8 || size.y < 8) return
-    if (latlngs.length === 1) {
-      map.setView(latlngs[0], 10, { animate: false })
-      return
-    }
-    const bounds = L.latLngBounds(latlngs)
-    if (!bounds.isValid()) return
-    map.fitBounds(bounds.pad(0.18), { animate: false, maxZoom: 12 })
-  } catch {
-    /* Leaflet throws bounds.min when the map has no pixel origin yet. */
+const LIVE_OPEN_ZOOM = 13
+
+/** Open on the train. A later movement of that marker does not move the map. */
+function openingView(input: {
+  stops: ServiceDetail['stops']
+  mapped: ReturnType<typeof journeyMapStops>
+  location: ServiceDetail['location']
+  railPath: LatLngTuple[] | null
+}): { center: LatLngTuple; zoom: number; locked: boolean } {
+  const raw = liveJourneyPosition(input.stops || [], input.mapped, input.location, londonNowRailwaySeconds())
+  const live = raw ? snapLiveToRailPath(raw, input.railPath) : null
+  if (live && isValidStationCoordinate(live.lat, live.lng)) {
+    return { center: [live.lat, live.lng], zoom: LIVE_OPEN_ZOOM, locked: true }
+  }
+  const first = input.mapped[0]
+  return {
+    center: [first?.lat ?? 54.5, first?.lng ?? -2],
+    zoom: 8,
+    locked: false,
   }
 }
 
@@ -277,15 +337,17 @@ export function ServiceJourneyMap({
   const layersRef = useRef<L.LayerGroup | null>(null)
   const liveMarkerRef = useRef<L.CircleMarker | null>(null)
   const shownRef = useRef<{ lat: number; lng: number } | null>(null)
-  const fittedKeyRef = useRef('')
+  const viewLockedRef = useRef(false)
   const liveInputRef = useRef({
     stops: service.stops,
     mapped: [] as ReturnType<typeof journeyMapStops>,
     location: service.location,
     railPath: null as LatLngTuple[] | null,
+    cancelled: service.cancelled,
   })
+  const bannerKeyRef = useRef('')
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null)
-  const [liveLabel, setLiveLabel] = useState<string | null>(null)
+  const [banner, setBanner] = useState<MapLocationBanner | null>(null)
   const [trackPath, setTrackPath] = useState<LatLngTuple[] | null>(null)
   const [extraCoords, setExtraCoords] = useState<Record<string, { lat: number; lng: number }>>({})
   const [platformCoords, setPlatformCoords] = useState<Record<string, RoutePlatform>>({})
@@ -307,10 +369,6 @@ export function ServiceJourneyMap({
     () => journeyMapStops(service.stops || [], stations, extraCoords),
     [service.stops, stations, extraCoords],
   )
-  const routeKey = useMemo(
-    () => mapped.map((p) => `${p.tpl}:${p.lat.toFixed(5)}:${p.lng.toFixed(5)}`).join('|'),
-    [mapped],
-  )
   const platformQuery = useMemo(
     () =>
       mapped
@@ -329,24 +387,27 @@ export function ServiceJourneyMap({
     }
     return next
   }, [mapped, platformCoords, platformQuery, platformQueryReady])
-  const routeStops = useMemo(
-    () => mapped.filter((point) => point.kind !== 'junction'),
-    [mapped],
-  )
+  const stationWaypoints = useMemo(() => mappedRouteWaypoints(mapped), [mapped])
   const waypoints = useMemo(
-    () => mappedRouteWaypoints(routeStops, activePlatforms),
-    [routeStops, activePlatforms],
+    () => mappedRouteWaypoints(mapped, activePlatforms),
+    [mapped, activePlatforms],
+  )
+  const stationWaypointKey = useMemo(
+    () => stationWaypoints.map((point) => `${point[0].toFixed(5)},${point[1].toFixed(5)}`).join('|'),
+    [stationWaypoints],
   )
   const waypointKey = useMemo(
     () => waypoints.map((point) => `${point[0].toFixed(5)},${point[1].toFixed(5)}`).join('|'),
     [waypoints],
   )
+  const stationWaypointsRef = useRef(stationWaypoints)
+  stationWaypointsRef.current = stationWaypoints
   const waypointsRef = useRef(waypoints)
   waypointsRef.current = waypoints
+  const routeEpochRef = useRef(0)
+  const fineRouteDoneRef = useRef(false)
   const railPath = waypoints.length < 2 ? null : trackPath
   const hasPoints = mapped.length >= 1
-  const startLat = mapped[0]?.lat
-  const startLng = mapped[0]?.lng
 
   useEffect(() => {
     liveInputRef.current = {
@@ -354,8 +415,9 @@ export function ServiceJourneyMap({
       mapped,
       location: service.location,
       railPath,
+      cancelled: service.cancelled,
     }
-  }, [service.stops, mapped, service.location, railPath])
+  }, [service.stops, mapped, service.location, railPath, service.cancelled])
 
   useEffect(() => {
     if (!neededKey) {
@@ -383,21 +445,56 @@ export function ServiceJourneyMap({
     }
   }, [neededKey])
 
+  const applyRoutedPath = (path: LatLngTuple[]) => {
+    setTrackPath(path)
+  }
+
   useEffect(() => {
-    // Junction markers are drawn with the other timing points. They are not
-    // waypoints: only stops and station passes are sent to the router.
-    const points = waypointsRef.current
-    if (!geoReady || platformQueryReady !== platformQuery || points.length < 2) return
+    // Snap onto the tracks from the station pins immediately. Platform vias
+    // refine this afterwards; they must not hold the first snap.
+    const points = stationWaypointsRef.current
+    if (!geoReady || points.length < 2) return
+    const epoch = routeEpochRef.current + 1
+    routeEpochRef.current = epoch
+    fineRouteDoneRef.current = false
     const controller = new AbortController()
     let cancelled = false
-    void fetchRailRouteAlongTrack(points, controller.signal)
+    const publish = (path: LatLngTuple[]) => {
+      if (cancelled || routeEpochRef.current !== epoch || fineRouteDoneRef.current) return
+      applyRoutedPath(path)
+    }
+    void fetchRailRouteAlongTrack(points, controller.signal, publish)
+      .then(publish)
+      .catch(() => {
+        if (cancelled || routeEpochRef.current !== epoch || fineRouteDoneRef.current) return
+      })
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [geoReady, stationWaypointKey])
+
+  useEffect(() => {
+    if (!geoReady || platformQueryReady !== platformQuery) return
+    const points = waypointsRef.current
+    const base = stationWaypointsRef.current
+    if (points.length < 2 || !routeWaypointsDiffer(base, points)) return
+    const epoch = routeEpochRef.current
+    const controller = new AbortController()
+    let cancelled = false
+    const publish = (path: LatLngTuple[]) => {
+      if (cancelled || routeEpochRef.current !== epoch) return
+      applyRoutedPath(path)
+    }
+    void fetchRailRouteAlongTrack(points, controller.signal, publish)
       .then((path) => {
-        // Drop a short out-and-back. A real reversal, such as Sheffield, is longer
-        // than this and stays. A leg the router has inflated is still straightened.
-        if (!cancelled) setTrackPath(replaceInflatedLegs(removeRouteReversals(path, 30, 45, 350), points))
+        if (cancelled || routeEpochRef.current !== epoch) return
+        fineRouteDoneRef.current = true
+        applyRoutedPath(path)
       })
       .catch(() => {
-        if (!cancelled) setTrackPath(points)
+        if (cancelled || routeEpochRef.current !== epoch) return
+        fineRouteDoneRef.current = true
       })
     return () => {
       cancelled = true
@@ -448,18 +545,22 @@ export function ServiceJourneyMap({
   }, [platformQuery])
 
   useEffect(() => {
-    if (!geoReady || !mapRef.current || !hasPoints || startLat == null || startLng == null) return
+    if (!geoReady || !mapRef.current || !hasPoints) return
+    const opened = openingView(liveInputRef.current)
     const map = L.map(mapRef.current, { zoomControl: false, scrollWheelZoom: true }).setView(
-      [startLat, startLng],
-      7,
+      opened.center,
+      opened.zoom,
+      { animate: false },
     )
+    viewLockedRef.current = opened.locked
     ensureJourneyPanes(map)
     tileLayersRef.current = addThemeTileLayersToMap(map, readThemeFromDocument())
     layersRef.current = L.layerGroup().addTo(map)
-    const liveMarker = L.circleMarker([startLat, startLng], LIVE_MARKER)
+    const liveMarker = L.circleMarker(opened.center, LIVE_MARKER)
     liveMarker.bindTooltip('', { direction: 'top', opacity: 0.95 })
     liveMarker.addTo(map)
     liveMarkerRef.current = liveMarker
+    shownRef.current = { lat: opened.center[0], lng: opened.center[1] }
     mapInstanceRef.current = map
     const ready = window.requestAnimationFrame(() => setMapInstance(map))
     return () => {
@@ -469,11 +570,11 @@ export function ServiceJourneyMap({
       layersRef.current = null
       liveMarkerRef.current = null
       tileLayersRef.current = null
-      fittedKeyRef.current = ''
+      viewLockedRef.current = false
       shownRef.current = null
       setMapInstance(null)
     }
-  }, [geoReady, hasPoints, startLat, startLng])
+  }, [geoReady, hasPoints])
 
   useEffect(() => {
     if (!mapInstanceRef.current || !tileLayersRef.current) return
@@ -488,19 +589,16 @@ export function ServiceJourneyMap({
     group.clearLayers()
     if (mapped.length < 1) return
 
-    const latlngs = validLatLngs(
-      railPath && railPath.length >= 2
-        ? railPath
-        : mapped.map((p) => [p.lat, p.lng] as LatLngTuple),
-    )
-    if (latlngs.length >= 2) {
-      const lineOptions = {
-        lineJoin: 'round' as const,
-        lineCap: 'round' as const,
-        interactive: false,
-        smoothFactor: 0,
-        pane: ROUTE_LINE_PANE,
-      }
+    const lineOptions = {
+      lineJoin: 'round' as const,
+      lineCap: 'round' as const,
+      interactive: false,
+      smoothFactor: 0,
+      pane: ROUTE_LINE_PANE,
+    }
+    for (const segment of railSegments(railPath)) {
+      const latlngs = validLatLngs(segment)
+      if (latlngs.length < 2) continue
       L.polyline(latlngs, { ...lineOptions, color: '#ffffff', weight: 8, opacity: 0.92 }).addTo(group)
       L.polyline(latlngs, { ...lineOptions, color: routeColor, weight: 5, opacity: 0.95 }).addTo(group)
     }
@@ -514,7 +612,7 @@ export function ServiceJourneyMap({
         ? onPlatform.bay
         : (p.calling && onPlatform?.stand)
           ? onPlatform.stand
-          : onPlatform ?? (placeOnTrack ? snapMarkerToPath(p, railPath) : p)
+          : onPlatform ?? (placeOnTrack ? snapMarkerToPath(p, railPath, p.kind === 'junction' ? 80 : 250) : p)
       const marker = L.circleMarker(
         [at.lat, at.lng],
         markerOptions(POINT_COLOR[p.kind], p.kind === 'stop' ? 7 : 5, ROUTE_MARKER_PANE),
@@ -523,15 +621,7 @@ export function ServiceJourneyMap({
       marker.bindTooltip(label, { direction: 'top', opacity: 0.95 })
       marker.addTo(group)
     }
-
-    if (fittedKeyRef.current !== routeKey) {
-      fittedKeyRef.current = routeKey
-      window.requestAnimationFrame(() => {
-        if (!mapStillMounted(mapInstanceRef.current, mapRef.current)) return
-        fitJourneyBounds(mapInstanceRef.current, latlngs)
-      })
-    }
-  }, [routeKey, railPath, mapped, routeColor, platformCoords])
+  }, [railPath, mapped, routeColor, platformCoords, mapInstance])
 
   useEffect(() => {
     let raf = 0
@@ -542,7 +632,7 @@ export function ServiceJourneyMap({
       const dt = Math.min(0.08, Math.max(0, (ts - lastTs) / 1000))
       lastTs = ts
       const marker = liveMarkerRef.current
-      const { stops, mapped: pts, location, railPath: path } = liveInputRef.current
+      const { stops, mapped: pts, location, railPath: path, cancelled } = liveInputRef.current
       if (!marker || !pts.length) return
       const raw = liveJourneyPosition(stops || [], pts, location, londonNowRailwaySeconds())
       const live = raw ? snapLiveToRailPath(raw, path) : null
@@ -562,9 +652,19 @@ export function ServiceJourneyMap({
       }
       marker.setLatLng([shownRef.current.lat, shownRef.current.lng])
       marker.setTooltipContent(live.label)
+      const map = mapInstanceRef.current
+      if (!viewLockedRef.current && map) {
+        map.setView([shownRef.current.lat, shownRef.current.lng], LIVE_OPEN_ZOOM, { animate: false })
+        viewLockedRef.current = true
+      }
       if (ts - lastCaptionAt > 400) {
         lastCaptionAt = ts
-        setLiveLabel(live.label)
+        const next = mapLocationBanner(stops || [], raw, { cancelled })
+        const key = next ? `${next.tone}|${next.text}` : ''
+        if (key !== bannerKeyRef.current) {
+          bannerKeyRef.current = key
+          setBanner(next)
+        }
       }
     }
     raf = window.requestAnimationFrame(tick)
@@ -590,6 +690,38 @@ export function ServiceJourneyMap({
     }
   }, [geoReady, hasPoints])
 
+  const shellRef = useRef<HTMLDivElement>(null)
+  const [fullscreen, setFullscreen] = useState(false)
+
+  useEffect(() => {
+    const shell = shellRef.current
+    if (!shell) return
+    const sync = () => {
+      setFullscreen(document.fullscreenElement === shell)
+      const map = mapInstanceRef.current
+      if (!map) return
+      window.requestAnimationFrame(() => {
+        try {
+          map.invalidateSize({ pan: false, debounceMoveend: true })
+        } catch {
+          /* layout race */
+        }
+      })
+    }
+    document.addEventListener('fullscreenchange', sync)
+    return () => document.removeEventListener('fullscreenchange', sync)
+  }, [geoReady, hasPoints])
+
+  const toggleFullscreen = () => {
+    const shell = shellRef.current
+    if (!shell) return
+    if (document.fullscreenElement === shell) {
+      void document.exitFullscreen()
+      return
+    }
+    void shell.requestFullscreen()
+  }
+
   if (!geoReady) {
     return <p className="edit-hint kb-source-hint">Plotting the route…</p>
   }
@@ -603,14 +735,35 @@ export function ServiceJourneyMap({
   }
 
   return (
-    <div className="svc-journey-map">
+    <div className="svc-journey-map" ref={shellRef}>
+      {banner ? (
+        <p className={`svc-journey-map__where svc-journey-map__where--${banner.tone}`} role="status">
+          {banner.text}
+        </p>
+      ) : null}
       <div
         ref={mapRef}
         className="location-map-preview location-map-preview-osm svc-journey-map__canvas"
         aria-label="Service journey map"
       />
       <MapZoomControls map={mapInstance} />
-      {liveLabel ? <p className="svc-journey-map__caption">{liveLabel}</p> : null}
+      {mapInstance
+        ? createPortal(
+            <div className="svc-journey-map__fullscreen">
+              <BUTCircleButton
+                type="button"
+                ariaLabel={fullscreen ? 'Exit full screen' : 'Full screen'}
+                icon={
+                  fullscreen
+                    ? <CornersIn size={16} weight="bold" aria-hidden />
+                    : <CornersOut size={16} weight="bold" aria-hidden />
+                }
+                onClick={toggleFullscreen}
+              />
+            </div>,
+            mapInstance.getContainer(),
+          )
+        : null}
       <p className="svc-journey-map__caption svc-journey-map__caption--licence">
         Railway tracks from{' '}
         <a href="https://www.openrailwaymap.org/" target="_blank" rel="noreferrer">

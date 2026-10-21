@@ -383,6 +383,25 @@ test("?at= hides later actuals", () => {
   assert.equal(trust.actual_source, null);
 });
 
+test("a later reported pass stays live when an earlier place has no booked time", () => {
+  const loc = computeServiceLocation(
+    [
+      { tiploc: "LNGSGHT", seq: 1, atp: "15:09:54", is_passing: 1, actual_source: "td" },
+      { tiploc: "SLDLJN", seq: 2, wtp: "14:54", atp: "15:10:12", is_passing: 1, actual_source: "trust" },
+      { tiploc: "HLDG", seq: 3, wtp: "15:04", atp: "15:16:13", is_passing: 1, actual_source: "trust" },
+      { tiploc: "MNCRIAP", seq: 4, crs: "MIA", sta: "15:24", is_passing: 0 },
+    ],
+    {
+      ymd: "2026-10-21",
+      now: new Date("2026-10-21T14:18:00Z"),
+      stationName: (_crs, tpl) => tpl,
+    },
+  );
+  assert.equal(loc.last.tiploc, "HLDG");
+  assert.equal(loc.next.tiploc, "MNCRIAP");
+  assert.equal(loc.label, "Between HLDG and MNCRIAP");
+});
+
 test("an early unbooked report does not jump the train to the destination", () => {
   const loc = computeServiceLocation(
     [

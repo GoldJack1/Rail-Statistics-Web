@@ -72,6 +72,26 @@
   gap: var(--space-lg);
 }
 
+.darwin-details-page .station-details-main:has(.svc-map-section) {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.darwin-details-page .station-details-main:has(.svc-map-section) .station-details-card,
+.darwin-details-page .station-details-main:has(.svc-map-section) .darwin-details-body,
+.darwin-details-page .svc-map-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  width: 100%;
+  max-width: none;
+}
+
 .darwin-details-page .modal-section > .modal-section-title {
   margin-bottom: 0;
 }

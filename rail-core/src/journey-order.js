@@ -239,18 +239,48 @@ function wttSortSeconds(seconds, overnightLong) {
   return dayMinutes * 60 + (seconds % 60);
 }
 
-/** Calling order is the working timetable. The same second keeps schedule order. */
+/** Booked clock only. A live time must not decide where a timed call sits. */
+function timetableSeconds(call) {
+  const working = ["wta", "wtd", "wtp"].map((key) => wttClockSeconds(call?.[key])).filter((n) => n != null);
+  if (working.length) return Math.min(...working);
+  const published = ["sta", "std", "pta", "ptd"]
+    .map((key) => wttClockSeconds(publicCallTime(call?.[key], call)))
+    .filter((n) => n != null);
+  if (published.length) return Math.min(...published);
+  return null;
+}
+
+function liveSeconds(call) {
+  const live = ["ata", "atd", "atp", "eta", "etd", "etp"]
+    .map((key) => wttClockSeconds(call?.[key]))
+    .filter((n) => n != null);
+  if (!live.length) return null;
+  return Math.min(...live);
+}
+
+/**
+ * Calling order is the working timetable. The same second keeps schedule order.
+ * A report with no booked time is placed by its live clock against the live
+ * clocks around it, so a late actual is not compared with the next station's
+ * earlier booked time.
+ */
 export function sortCallsByWttTime(rows) {
   const list = rows || [];
+  const booked = [];
+  const floating = [];
+  list.forEach((row, index) => {
+    if (timetableSeconds(row) != null) booked.push({ row, index });
+    else floating.push({ row, index });
+  });
   const overnightLong = isOvernightLongRun(list, (row) => {
     const seconds = wttCallSeconds(row);
     return seconds == null ? null : Math.floor(seconds / 60);
   });
-  return list
-    .map((row, index) => ({ row, index }))
+  const rank = (seconds) => wttSortSeconds(seconds, overnightLong);
+  const ordered = booked
     .sort((a, b) => {
-      const left = wttSortSeconds(wttCallSeconds(a.row), overnightLong);
-      const right = wttSortSeconds(wttCallSeconds(b.row), overnightLong);
+      const left = rank(timetableSeconds(a.row));
+      const right = rank(timetableSeconds(b.row));
       if (left == null && right == null) return a.index - b.index;
       if (left == null) return 1;
       if (right == null) return -1;
@@ -258,6 +288,25 @@ export function sortCallsByWttTime(rows) {
       return (Number(a.row.seq) || 0) - (Number(b.row.seq) || 0) || a.index - b.index;
     })
     .map((item) => item.row);
+  floating.sort((a, b) => (rank(liveSeconds(a.row)) ?? 1e15) - (rank(liveSeconds(b.row)) ?? 1e15) || a.index - b.index);
+  for (const item of floating) {
+    const at = rank(liveSeconds(item.row));
+    if (at == null) {
+      ordered.push(item.row);
+      continue;
+    }
+    let index = ordered.length;
+    for (let i = 0; i < ordered.length; i++) {
+      const ref = rank(liveSeconds(ordered[i]) ?? timetableSeconds(ordered[i]));
+      if (ref == null) continue;
+      if (ref > at) {
+        index = i;
+        break;
+      }
+    }
+    ordered.splice(index, 0, item.row);
+  }
+  return ordered;
 }
 
 /** CIF often appends another working after Darwin's public terminus (seq jumps backward in time). */

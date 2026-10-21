@@ -770,8 +770,7 @@ const ServiceDetailPage: React.FC = () => {
         )}
 
         {data && section === 'map' && (
-          <section className="modal-section" aria-label="Journey map">
-            <StationSectionTitle title="Journey map" icon={MapTrifold} pageHeading />
+          <section className="modal-section svc-map-section" aria-label="Journey map">
             <ServiceJourneyMap service={data} stations={stations} />
           </section>
         )}

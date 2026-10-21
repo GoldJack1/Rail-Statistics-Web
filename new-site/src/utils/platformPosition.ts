@@ -252,6 +252,24 @@ function longAxis(shape: { lat: number; lng: number }[]): [{ lat: number; lng: n
   return [endA, endB]
 }
 
+/**
+ * The rail a booked platform number actually uses. A stopping mark sits on
+ * that road; the platform polygon can be closer to the next road over.
+ */
+function railAtStop(ref: string, stands: OsmStand[], rails: OsmRail[]): OsmRail | null {
+  const want = normalizePlatformRef(ref)
+  let best: { rail: OsmRail; distance: number } | null = null
+  for (const stand of stands) {
+    if (!stand.refs.includes(want)) continue
+    for (const rail of rails) {
+      const hit = nearestOnLine(stand, rail.geometry)
+      if (!hit || hit.distance > 12) continue
+      if (!best || hit.distance < best.distance) best = { rail, distance: hit.distance }
+    }
+  }
+  return best?.rail ?? null
+}
+
 /** The rail that runs beside the platform, not one that only crosses the throat. */
 function railAlongside(shape: { lat: number; lng: number }[], rails: OsmRail[]): OsmRail | null {
   const [endA, endB] = longAxis(shape)
@@ -397,7 +415,10 @@ export function platformTrackPoints(
     const placed = (rail: OsmRail | null, ref: string) =>
       trackOnRail(centre, axis, rail, buffers, shape, others, standOnRail(ref, stands, axis, rail))
     if (refs.length < 2 || rails.length < 2) {
-      for (const ref of refs) remember(ref, placed(beside, ref), haversineM(anchor, centre))
+      for (const ref of refs) {
+        const rail = railAtStop(ref, stands, rails) ?? beside
+        remember(ref, placed(rail, ref), haversineM(anchor, centre))
+      }
       continue
     }
     const axisMetres = localMetres(axis[0], axis[1])

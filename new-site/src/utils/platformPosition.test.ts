@@ -122,6 +122,36 @@ describe('platformTrackPoints', () => {
     expect(points['0'].bay?.lat).toBeGreaterThan(53.4059)
   })
 
+  it('uses the stopping mark road when the platform polygon is nearer the next track', () => {
+    const correct = {
+      geometry: [
+        { lat: 53.6478, lng: -1.785 },
+        { lat: 53.6486, lng: -1.785 },
+      ],
+    }
+    const nextRoad = {
+      geometry: [
+        { lat: 53.6478, lng: -1.78488 },
+        { lat: 53.6486, lng: -1.78488 },
+      ],
+    }
+    const polygon = [
+      { lat: 53.6482, lng: -1.78493 },
+      { lat: 53.6485, lng: -1.78493 },
+      { lat: 53.6485, lng: -1.78486 },
+      { lat: 53.6482, lng: -1.78486 },
+    ]
+    const points = platformTrackPoints(
+      { lat: 53.6484, lng: -1.7851 },
+      [{ lat: 53.64835, lng: -1.7849, refs: ['2'], geometry: polygon }],
+      [nextRoad, correct],
+      [],
+      [{ lat: 53.6483, lng: -1.785, refs: ['2'] }],
+    )
+    expect(points['2'].lng).toBeCloseTo(-1.785, 4)
+    expect(points['2'].stand?.lng).toBeCloseTo(-1.785, 4)
+  })
+
   it('stands on the stopping mark and ignores a buffer on the next platform', () => {
     const rail = {
       geometry: [

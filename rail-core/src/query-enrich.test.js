@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
+import { sortCallsByWttTime } from "./journey-order.js";
 import { applyLiveToInferred, carryRunningLateness, dropForeignTdActuals, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, reportsOnServiceTiploc, retimeInferredPasses, settleUnreportedPasses } from "./query-enrich.js";
 import { openDayDb } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
@@ -174,7 +175,32 @@ test("a named junction on the straight line between two calls is shown once", ()
   assert.deepEqual(out.map((c) => c.tiploc), ["SLTHWTE", "SPWDJN", "HDRSFLD", "LEEDSWJ"]);
   assert.equal(out.filter((c) => c.tiploc === "LEEDSWJ").length, 1);
   assert.equal(out[1].actual_source, "inferred");
-  assert.equal(out[1].wtp, "16:15");
+  assert.equal(out[1].wtp, "16:14");
+});
+
+test("an approach junction is timed to the arrival and stays before the station", () => {
+  const coords = new Map([
+    ["MILESPL", { e: 0, n: 0 }],
+    ["MNCRVIC", { e: 2000, n: 0 }],
+    ["MNCRDST", { e: 3000, n: 0 }],
+  ]);
+  const out = insertSegmentJunctions(
+    [
+      { tiploc: "MILESPL", wtp: "14:33", atp: "14:37:01" },
+      { tiploc: "MNCRVIC", wta: "14:35", wtd: "14:40", ata: "14:39", atd: "14:41:23" },
+      { tiploc: "MNCRDST", wtp: "14:41½", atp: "14:42" },
+    ],
+    [],
+    coords,
+    [{ tiploc: "MNCRVEJ", e: 1800, n: 0 }],
+  );
+  assert.equal(out[1].tiploc, "MNCRVEJ");
+  assert.equal(out[1].wtp, "14:34");
+  assert.ok(out[1].atp < "14:39");
+  assert.deepEqual(
+    sortCallsByWttTime(out).map((row) => row.tiploc),
+    ["MILESPL", "MNCRVEJ", "MNCRVIC", "MNCRDST"],
+  );
 });
 
 test("an inferred junction moved before a station gets a time between its new neighbours", () => {

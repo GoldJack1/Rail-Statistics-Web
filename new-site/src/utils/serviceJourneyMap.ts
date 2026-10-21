@@ -5,7 +5,6 @@ import {
 } from './eurostarContinental'
 import { isValidStationCoordinate } from './stationCoordinates'
 import { inferProgressIndex, nextProgressIndex } from './serviceProgress'
-import { railwayDaySecondsFromClock } from './railwayOperatingDayUk'
 
 export type StationCoordInput = {
   crsCode?: string | null
@@ -73,13 +72,50 @@ function stillAhead(from: MapPoint, point: MapPoint, next: MapPoint): boolean {
   return haversineM(point, next) < haversineM(from, next) - 15
 }
 
+/** A junction this far off a short leg is on another route. */
+const JUNCTION_ON_LEG_M = 200
+
+function legProjection(from: MapPoint, to: MapPoint, point: MapPoint): { offset: number; t: number } {
+  const lat = (from.lat * Math.PI) / 180
+  const mx = (lng: number) => (lng - from.lng) * 111320 * Math.cos(lat)
+  const my = (lat2: number) => (lat2 - from.lat) * 110540
+  const bx = mx(to.lng)
+  const by = my(to.lat)
+  const px = mx(point.lng)
+  const py = my(point.lat)
+  const len2 = bx * bx + by * by
+  if (len2 < 1) return { offset: Math.hypot(px, py), t: 0 }
+  const raw = (px * bx + py * by) / len2
+  const clamped = Math.min(1, Math.max(0, raw))
+  return { offset: Math.hypot(px - bx * clamped, py - by * clamped), t: raw }
+}
+
+/**
+ * A scheduled junction is part of the route, including a dogleg the chord
+ * between calls would miss. It is not part of the route when it steps off a
+ * short leg onto another line, or when it sits beside one end rather than
+ * between its neighbours.
+ */
+function junctionOnRoute(prev: MapPoint, here: MapPoint, next: MapPoint): boolean {
+  const leg = haversineM(prev, next)
+  if (leg < 40) return false
+  const extra = haversineM(prev, here) + haversineM(here, next) - leg
+  if (extra > 4000) return false
+  const { offset, t } = legProjection(prev, next, here)
+  if (t <= 0.02 || t >= 0.98) return false
+  if (leg < 3000 && offset > JUNCTION_ON_LEG_M && extra < 250) return false
+  return true
+}
+
 /**
  * Route through the timetable. Stops and station passes are vias when they
- * still lie ahead. Junction markers stay on the map, but they are not vias:
- * a junction coordinate pulls the router off the through line. A point listed
- * back behind the train is left out, because sending the router there and
- * back draws a spur. A booked platform moves that via onto the rail beside
- * the platform. One point per place: a bay starts at the buffer, and a call
+ * still lie ahead. A junction is a via when it sits on the leg between those
+ * points. A junction between its neighbours is a via, including where the
+ * timetable doglegs off the straight line between calls. A junction that steps
+ * off a short leg onto another route stays a marker only. A point listed back
+ * behind the train is left out, because sending the router there and back
+ * draws a spur. A booked platform moves that via onto the rail beside the
+ * platform. One point per place: a bay starts at the buffer, and a call
  * stands on the stopping mark. A second point on the same platform makes the
  * line reverse.
  */
@@ -111,6 +147,68 @@ export function mappedRouteWaypoints(
     }
   }
 
+  const junctions = mapped.filter((stop) => !stop.cancelled && stop.kind === 'junction')
+  const legJunctions = new Map<number, { stop: JourneyMapStop; along: number }[]>()
+  const placed = new Set<JourneyMapStop>()
+  for (const junction of junctions) {
+    const here = placeAt(junction)
+    let bestLeg = -1
+    let bestExtra = 600
+    let bestAlong = 0
+    for (let i = 0; i < chosen.length - 1; i++) {
+      const from = placeAt(chosen[i])
+      const next = placeAt(chosen[i + 1])
+      const along = haversineM(from, here)
+      const extra = along + haversineM(here, next) - haversineM(from, next)
+      const { offset } = legProjection(from, next, here)
+      if (extra < bestExtra && along > 25 && offset <= JUNCTION_ON_LEG_M) {
+        bestExtra = extra
+        bestLeg = i
+        bestAlong = along
+      }
+    }
+    if (bestLeg < 0) continue
+    const list = legJunctions.get(bestLeg) || []
+    list.push({ stop: junction, along: bestAlong })
+    legJunctions.set(bestLeg, list)
+    placed.add(junction)
+  }
+  if (legJunctions.size > 0) {
+    const withJunctions: JourneyMapStop[] = []
+    for (let i = 0; i < chosen.length; i++) {
+      withJunctions.push(chosen[i])
+      const here = legJunctions.get(i)
+      if (!here) continue
+      here.sort((a, b) => a.along - b.along)
+      for (const item of here) withJunctions.push(item.stop)
+    }
+    chosen.splice(0, chosen.length, ...withJunctions)
+  }
+
+  const doglegs = junctions.filter((junction) => !placed.has(junction))
+  doglegs.sort((a, b) => a.index - b.index)
+  for (const junction of doglegs) {
+    const at = mapped.indexOf(junction)
+    let prev: JourneyMapStop | null = null
+    for (let p = at - 1; p >= 0; p--) {
+      if (!mapped[p].cancelled) {
+        prev = mapped[p]
+        break
+      }
+    }
+    let next: JourneyMapStop | null = null
+    for (let n = at + 1; n < mapped.length; n++) {
+      if (!mapped[n].cancelled) {
+        next = mapped[n]
+        break
+      }
+    }
+    if (!prev || !next || !junctionOnRoute(placeAt(prev), placeAt(junction), placeAt(next))) continue
+    let insertAt = chosen.findIndex((stop) => stop.index > junction.index)
+    if (insertAt < 0) insertAt = chosen.length
+    chosen.splice(insertAt, 0, junction)
+  }
+
   const points: LatLngTuple[] = []
   const push = (lat: number, lng: number) => {
     const prev = points[points.length - 1]
@@ -133,9 +231,34 @@ export function mappedRouteWaypoints(
       push(place.bay.lat, place.bay.lng)
       continue
     }
+    if (place?.ends) {
+      const prev = i > 0 ? placeAt(chosen[i - 1]) : null
+      const next = i + 1 < chosen.length ? placeAt(chosen[i + 1]) : null
+      const [a, b] = place.ends
+      let first = a
+      if (prev) first = haversineM(prev, a) <= haversineM(prev, b) ? a : b
+      else if (next) first = haversineM(a, next) >= haversineM(b, next) ? a : b
+      const second = first === a ? b : a
+      push(first.lat, first.lng)
+      push(second.lat, second.lng)
+      continue
+    }
     push(here.lat, here.lng)
   }
   return points
+}
+
+/** A platform via has moved far enough that the track should be routed again. */
+export function routeWaypointsDiffer(a: LatLngTuple[], b: LatLngTuple[], metres = 8): boolean {
+  if (a.length !== b.length) return true
+  for (let i = 0; i < a.length; i++) {
+    const moved = haversineM(
+      { lat: a[i][0], lng: a[i][1] },
+      { lat: b[i][0], lng: b[i][1] },
+    )
+    if (moved > metres) return true
+  }
+  return false
 }
 
 export function nearestPathIndex(path: LatLngTuple[], lat: number, lng: number): number {
@@ -185,13 +308,38 @@ export function interpolateAlongPath(path: LatLngTuple[], t: number): { lat: num
 /**
  * Drop out-and-back spikes. A junction coordinate that sits off the through
  * line makes the router run up to it and reverse; that spur is not the route.
+ * A loop that is the only visit to a timing point stays: that is a real
+ * reversal, such as a train that arrives and leaves back the way it came.
  */
 export function removeRouteReversals(
   path: LatLngTuple[],
   closeM = 40,
   minLoopM = 70,
   maxLoopM = 8000,
+  keepNear?: LatLngTuple[],
 ): LatLngTuple[] {
+  const loopStillServesStops = (pts: LatLngTuple[], from: number, to: number): boolean => {
+    if (!keepNear?.length) return true
+    for (const stop of keepNear) {
+      const here = { lat: stop[0], lng: stop[1] }
+      let onLoop = false
+      for (let k = from + 1; k < to; k++) {
+        if (haversineM(here, { lat: pts[k][0], lng: pts[k][1] }) <= closeM) {
+          onLoop = true
+          break
+        }
+      }
+      if (!onLoop) continue
+      let onKept = haversineM(here, { lat: pts[from][0], lng: pts[from][1] }) <= 80
+        || haversineM(here, { lat: pts[to][0], lng: pts[to][1] }) <= 80
+      for (let k = 0; k < pts.length && !onKept; k++) {
+        if (k > from && k < to) continue
+        if (haversineM(here, { lat: pts[k][0], lng: pts[k][1] }) <= 80) onKept = true
+      }
+      if (!onKept) return false
+    }
+    return true
+  }
   let pts = path
   for (let pass = 0; pass < 8; pass++) {
     if (pts.length < 4) break
@@ -208,7 +356,12 @@ export function removeRouteReversals(
           { lat: pts[j][0], lng: pts[j][1] },
         )
         if (walked > maxLoopM) break
-        if (j >= i + 2 && walked >= minLoopM && haversineM(origin, { lat: pts[j][0], lng: pts[j][1] }) <= closeM) {
+        if (
+          j >= i + 2 &&
+          walked >= minLoopM &&
+          haversineM(origin, { lat: pts[j][0], lng: pts[j][1] }) <= closeM &&
+          loopStillServesStops(pts, i, j)
+        ) {
           cut = j
         }
       }
@@ -290,11 +443,18 @@ export function replaceInflatedLegs(
 }
 
 /** Move a marker onto the rail line when it sits just off the through route. */
+function onRailPath(path: LatLngTuple[] | null): LatLngTuple[] | null {
+  if (!path) return null
+  const finite = path.filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
+  return finite.length >= 2 ? finite : null
+}
+
 export function snapMarkerToPath(
   point: { lat: number; lng: number },
   path: LatLngTuple[] | null,
   maxM = 250,
 ): { lat: number; lng: number } {
+  path = onRailPath(path)
   if (!path || path.length < 2) return point
   let best = { lat: path[0][0], lng: path[0][1] }
   let bestD = Infinity
@@ -323,19 +483,20 @@ export function snapLiveToRailPath(
   live: LiveJourneyPosition,
   railPath: LatLngTuple[] | null,
 ): LiveJourneyPosition {
-  if (!railPath || railPath.length < 2) return live
+  const rail = onRailPath(railPath)
+  if (!rail || rail.length < 2) return live
   if (live.atStation || live.from == null || live.to == null) {
-    const i = nearestPathIndex(railPath, live.lat, live.lng)
-    return { ...live, lat: railPath[i][0], lng: railPath[i][1] }
+    const i = nearestPathIndex(rail, live.lat, live.lng)
+    return { ...live, lat: rail[i][0], lng: rail[i][1] }
   }
-  let i0 = nearestPathIndex(railPath, live.from.lat, live.from.lng)
-  let i1 = nearestPathIndex(railPath, live.to.lat, live.to.lng)
+  let i0 = nearestPathIndex(rail, live.from.lat, live.from.lng)
+  let i1 = nearestPathIndex(rail, live.to.lat, live.to.lng)
   if (i1 < i0) {
     const swap = i0
     i0 = i1
     i1 = swap
   }
-  const slice = railPath.slice(i0, i1 + 1)
+  const slice = rail.slice(i0, i1 + 1)
   const pos = interpolateAlongPath(slice, live.t ?? 0.45)
   return { ...live, lat: pos.lat, lng: pos.lng }
 }
@@ -351,15 +512,6 @@ export function journeyPointKind(stop: Pick<ServiceStop, 'slot' | 'name'>): Jour
   if (!isPassSlot(stop.slot)) return 'stop'
   if (JUNCTION_NAME.test(String(stop.name || ''))) return 'junction'
   return 'pass'
-}
-
-function stopClock(stop: ServiceStop, role: 'from' | 'to'): string {
-  if (isPassSlot(stop.slot)) {
-    if (role === 'from') return String(stop.atp || stop.etp || stop.wtp || stop.wtd || stop.wta || '')
-    return String(stop.etp || stop.atp || stop.wtp || stop.eta || stop.wta || '')
-  }
-  if (role === 'from') return String(stop.atd || stop.ata || stop.etd || stop.ptd || stop.wtd || stop.wta || '')
-  return String(stop.eta || stop.etd || stop.pta || stop.ptd || stop.wta || stop.wtd || '')
 }
 
 /**
@@ -430,9 +582,34 @@ function coordFromLookup(stop: ServiceStop, extra?: TiplocCoordMap): { lat: numb
   return hit
 }
 
+function stopTiploc(stop: { tpl?: string | null }): string {
+  return String(stop.tpl || '').trim().toUpperCase()
+}
+
+function catalogueTiploc(station: StationCoordInput | null): string {
+  return String(station?.tiploc || '').trim().toUpperCase()
+}
+
 /**
- * TIPLOCs with no station-catalogue pin. The schedule's own lat/lng is an
- * OSGB conversion that sits off the rail, so these still need the track fix.
+ * The catalogue row is this calling point. A different TIPLOC on the same CRS
+ * code is the other network at that station, such as the DC lines at Bushey.
+ */
+function catalogueIsThisStop(station: StationCoordInput | null, stop: { tpl?: string | null }): boolean {
+  const catalogue = catalogueTiploc(station)
+  const tip = stopTiploc(stop)
+  return Boolean(catalogue && tip && catalogue === tip)
+}
+
+function catalogueIsOtherStop(station: StationCoordInput | null, stop: { tpl?: string | null }): boolean {
+  const catalogue = catalogueTiploc(station)
+  const tip = stopTiploc(stop)
+  return Boolean(catalogue && tip && catalogue !== tip)
+}
+
+/**
+ * TIPLOCs whose catalogue pin is missing or belongs to a different location
+ * on the same CRS code. The schedule's own lat/lng is an OSGB conversion that
+ * sits off the rail, so these still need the track fix.
  */
 export function tiplocsNeedingCoordinates(
   stops: ServiceStop[],
@@ -442,8 +619,10 @@ export function tiplocsNeedingCoordinates(
   const seen = new Set<string>()
   for (const stop of stops || []) {
     if (continentalEurostarCoordinate(stop)) continue
-    if (matchStationCoord(stop, stations)) continue
-    const tpl = String(stop.tpl || '').trim().toUpperCase()
+    const station = matchStationCoord(stop, stations)
+    if (station && catalogueIsThisStop(station, stop)) continue
+    if (station && !catalogueIsOtherStop(station, stop)) continue
+    const tpl = stopTiploc(stop)
     if (!tpl || seen.has(tpl)) continue
     seen.add(tpl)
     out.push(tpl)
@@ -460,15 +639,15 @@ export function journeyMapStops(
   for (let i = 0; i < (stops || []).length; i++) {
     const stop = stops[i]
     const stn = matchStationCoord(stop, stations)
-    // Paris, Lille, Brussels, Rotterdam and Amsterdam are not on the UK grid.
-    // The bundled TIPLOC pin for some of them is the Folkestone NaPTAN
-    // placeholder, so the continental table wins for those stations only.
-    // Everywhere else, a catalogue pin at this calling point beats the TIPLOC
-    // file, and the TIPLOC file beats the schedule's OS grid conversion.
-    // A pin kilometres away is a different station that shares the code.
+    const lookup = coordFromLookup(stop, extra)
+    const catalogue = stn ? { lat: stn.latitude, lng: stn.longitude } : null
+    // A catalogue pin for this TIPLOC wins. A pin for another TIPLOC on the
+    // same CRS code is a different set of lines, so the calling TIPLOC is used.
+    let placed = catalogue
+    if (lookup && catalogue && catalogueIsOtherStop(stn, stop)) placed = lookup
+    else if (!catalogue) placed = lookup
     const coord = continentalEurostarCoordinate(stop)
-      || (stn ? { lat: stn.latitude, lng: stn.longitude } : null)
-      || coordFromLookup(stop, extra)
+      || placed
       || coordFromStop(stop)
       || eurostarEndCoordinate(stop)
     if (!coord) continue
@@ -516,15 +695,6 @@ function mappedAtOrAfter(mapped: JourneyMapStop[], stopIndex: number): JourneyMa
   return mapped.find((p) => !p.cancelled && p.index >= stopIndex) || null
 }
 
-function fractionAlong(from: ServiceStop, to: ServiceStop, nowSecs: number | null): number {
-  const a = railwayDaySecondsFromClock(stopClock(from, 'from'))
-  const b = railwayDaySecondsFromClock(stopClock(to, 'to'))
-  if (a != null && b != null && b > a && nowSecs != null) {
-    return Math.min(1, Math.max(0, (nowSecs - a) / (b - a)))
-  }
-  return 0.45
-}
-
 function indexOfTiploc(stops: ServiceStop[], tiploc: string | null | undefined): number | null {
   const u = String(tiploc || '').trim().toUpperCase()
   if (!u) return null
@@ -536,11 +706,10 @@ export function liveJourneyPosition(
   stops: ServiceStop[],
   mapped: JourneyMapStop[],
   location: ServiceLocation | null | undefined,
-  nowSecs: number | null,
+  _nowSecs: number | null,
 ): LiveJourneyPosition | null {
   const path = mapped.filter((p) => !p.cancelled)
   if (!path.length) return null
-  const nowMins = nowSecs == null ? null : nowSecs / 60
   if (location?.phase === 'not_started') {
     const first = path[0]
     return { lat: first.lat, lng: first.lng, label: location.label || `At ${first.name}`, atStation: true, from: first, to: first, t: 0 }
@@ -551,7 +720,7 @@ export function liveJourneyPosition(
   }
 
   const locLast = indexOfTiploc(stops, location?.last?.tiploc)
-  const reported = locLast ?? inferProgressIndex(stops, nowMins)
+  const reported = locLast ?? inferProgressIndex(stops, null)
   if (reported == null) {
     const first = path[0]
     return { lat: first.lat, lng: first.lng, label: location?.label || first.name, atStation: true }
@@ -580,17 +749,13 @@ export function liveJourneyPosition(
   if (!nextPt || nextPt.index === here.index) {
     return { lat: here.lat, lng: here.lng, label: location?.label || here.name, atStation: false, from: here, to: here, t: 0 }
   }
-  const fromStop = stops[here.index]
-  const toStop = stops[nextPt.index]
-  const t = fractionAlong(fromStop, toStop, nowSecs)
-  const pos = interpolateLatLng(here, nextPt, t)
   return {
-    lat: pos.lat,
-    lng: pos.lng,
+    lat: here.lat,
+    lng: here.lng,
     label: location?.label || `Between ${here.name} and ${nextPt.name}`,
     atStation: false,
     from: here,
     to: nextPt,
-    t,
+    t: 0,
   }
 }

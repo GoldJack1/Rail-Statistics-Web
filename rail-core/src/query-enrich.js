@@ -6,7 +6,7 @@ import { hhmmss } from "./db.js";
 import { tdClockPrecise } from "./td-apply.js";
 import { resolveSmartTiploc } from "./import-smart.js";
 import { isNonPassengerLocation, isSignalOrElocTiploc } from "./geometry-densify.js";
-import { callClock, interpolateHm } from "./tiploc-graph.js";
+import { interpolateHm } from "./tiploc-graph.js";
 
 function corpusMeta(catalog, tiploc) {
   if (!catalog || !tiploc) return { name: "", crs: "" };
@@ -310,17 +310,17 @@ export function retimeInferredPasses(calls) {
   for (let i = 0; i < rows.length; i++) {
     const call = rows[i];
     if (String(call.actual_source || "") !== "inferred") continue;
-    const prev = [...rows.slice(0, i)].reverse().find((row) => callClock(row) || reportedClock(row));
-    const next = rows.slice(i + 1).find((row) => callClock(row) || reportedClock(row));
+    const prev = [...rows.slice(0, i)].reverse().find((row) => leaveClock(row) || reportedLeave(row));
+    const next = rows.slice(i + 1).find((row) => arriveClock(row) || reportedArrive(row));
     if (!prev || !next) continue;
     const guess = guessBetween(prev, next, 0.5);
-    if (call.wtp && callClock(prev) && callClock(next) && !strictlyInside(call.wtp, callClock(prev), callClock(next)) && guess.wtp) {
+    if (call.wtp && leaveClock(prev) && arriveClock(next) && !strictlyInside(call.wtp, leaveClock(prev), arriveClock(next)) && guess.wtp) {
       call.wtp = guess.wtp;
-      if (!reportedClock(call)) call.etp = guess.etp || guess.wtp;
+      if (!reportedLeave(call) && !reportedArrive(call)) call.etp = guess.etp || guess.wtp;
     }
     const live = reportedClock(call);
-    const prevLive = reportedClock(prev);
-    const nextLive = reportedClock(next);
+    const prevLive = reportedLeave(prev);
+    const nextLive = reportedArrive(next);
     if (live && prevLive && nextLive && !strictlyInside(live, prevLive, nextLive) && guess.atp) {
       if (call.atp) call.atp = guess.atp;
       else if (call.atd) call.atd = guess.atp;
@@ -338,12 +338,38 @@ function notBefore(value, previous) {
   return formatClock(prev + 60, false);
 }
 
-/** Working time and pass time are each taken from the calls on either side. */
+/** The train leaves a call at its departure. A pass has only one clock. */
+function leaveClock(call) {
+  return call?.wtd || call?.wtp || call?.std || call?.wta || call?.sta || null;
+}
+
+/** The train reaches the next call at its arrival. A pass has only one clock. */
+function arriveClock(call) {
+  return call?.wta || call?.wtp || call?.sta || call?.wtd || call?.std || null;
+}
+
+function reportedLeave(call) {
+  return call?.atd || call?.atp || call?.ata || null;
+}
+
+function reportedArrive(call) {
+  return call?.ata || call?.atp || call?.atd || null;
+}
+
+/**
+ * A junction between two calls is timed from the departure behind it to the
+ * arrival ahead of it. Using the departure ahead pulls an approach junction
+ * past the station it is running into.
+ */
 function guessBetween(before, after, t) {
   const fraction = Number.isFinite(t) ? t : 0.5;
-  const wtp = notBefore(interpolateClock(callClock(before), callClock(after), fraction), callClock(before));
-  const passed = Boolean(reportedClock(before) && reportedClock(after));
-  const live = interpolateClock(reportedClock(before), reportedClock(after), fraction);
+  const from = leaveClock(before);
+  const to = arriveClock(after);
+  const wtp = notBefore(interpolateClock(from, to, fraction), from);
+  const left = reportedLeave(before);
+  const right = reportedArrive(after);
+  const passed = Boolean(left && right);
+  const live = interpolateClock(left, right, fraction);
   return { wtp, atp: passed ? live : null, etp: passed ? null : wtp };
 }
 
@@ -462,8 +488,8 @@ export function insertSchedulePasses(calls, sequences) {
       const mids = modalMids(sequences, tips[i - 1], tips[i], tips[i + 1] || null).filter(
         (tpl) => !present.has(tpl),
       );
-      const t0 = callClock(spine[i - 1]);
-      const t1 = callClock(spine[i]);
+      const t0 = leaveClock(spine[i - 1]);
+      const t1 = arriveClock(spine[i]);
       mids.forEach((tpl, j) => {
         present.add(tpl);
         const wtp = interpolateHm(t0, t1, j, mids.length);

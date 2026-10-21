@@ -77,6 +77,18 @@ describe('serviceJourneyMap', () => {
     expect(journeyMapStops([burnage], onlyElsewhere)[0]).toMatchObject({ lat: 53.42088, lng: -2.21419 })
   })
 
+  it('uses the calling TIPLOC when the catalogue CRS pin is the other lines', () => {
+    const dc = [
+      { crsCode: 'BSH', tiploc: 'BUSHYDC', stationName: 'Bushey', latitude: 51.64575, longitude: -0.38532 },
+    ]
+    const bushey = stop('BUSHEY', 'Bushey', 'PP', { crs: 'BSH', lat: 51.64508, lng: -0.38315, platform: '3' })
+    expect(tiplocsNeedingCoordinates([bushey], dc)).toEqual(['BUSHEY'])
+    expect(journeyMapStops([bushey], dc, { BUSHEY: { lat: 51.64558, lng: -0.38475 } })[0]).toMatchObject({
+      lat: 51.64558,
+      lng: -0.38475,
+    })
+  })
+
   it('builds mapped calling points in journey order', () => {
     const mapped = journeyMapStops(
       [
@@ -89,7 +101,7 @@ describe('serviceJourneyMap', () => {
     expect(mapped.map((p) => p.tpl)).toEqual(['LEEDS', 'YORK'])
   })
 
-  it('routes through a station pass that is still ahead and does not use a junction as a via', () => {
+  it('routes through a station pass that is still ahead and through a junction on that leg', () => {
     const mapped = journeyMapStops(
       [
         stop('LVRPLSH', 'Liverpool Lime Street', 'OR', { lat: 53.407, lng: -2.976 }),
@@ -104,6 +116,60 @@ describe('serviceJourneyMap', () => {
     expect(mappedRouteWaypoints(mapped)).toEqual([
       [53.407, -2.976],
       [53.448, -2.353],
+      [53.463, -2.288],
+      [53.474, -2.242],
+    ])
+  })
+
+  it('leaves Ardwick East Junction off the route to Longsight', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('MNCRLRD', 'Manchester London Road', 'PP', { lat: 53.47434, lng: -2.22032 }),
+        stop('ARDWCKJ', 'Ardwick Junction', 'PP', { lat: 53.47254, lng: -2.21573 }),
+        stop('ARDWKEJ', 'Ardwick East Junction', 'PP', { lat: 53.47087, lng: -2.20739 }),
+        stop('LNGSTN', 'Longsight North', 'PP', { lat: 53.46727, lng: -2.2065 }),
+      ],
+      [],
+    )
+    expect(mapped.find((point) => point.tpl === 'ARDWKEJ')?.kind).toBe('junction')
+    expect(mappedRouteWaypoints(mapped)).toEqual([
+      [53.47434, -2.22032],
+      [53.47254, -2.21573],
+      [53.46727, -2.2065],
+    ])
+  })
+
+  it('follows the Methley dogleg instead of the straight line to Wakefield', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('LEEDS', 'Leeds', 'OR', { lat: 53.79537, lng: -1.54644 }),
+        stop('STRTJN', 'Stourton Junction', 'PP', { lat: 53.76683, lng: -1.4986 }),
+        stop('METHLYJ', 'Methley Junction', 'PP', { lat: 53.72982, lng: -1.40092 }),
+        stop('ALTFTJN', 'Altofts Junction', 'PP', { lat: 53.70958, lng: -1.41324 }),
+        stop('WKFLDKG', 'Wakefield Kirkgate', 'IP', { lat: 53.67839, lng: -1.48698 }),
+      ],
+      [],
+    )
+    expect(mappedRouteWaypoints(mapped)).toEqual([
+      [53.79537, -1.54644],
+      [53.76683, -1.4986],
+      [53.72982, -1.40092],
+      [53.70958, -1.41324],
+      [53.67839, -1.48698],
+    ])
+  })
+
+  it('leaves a junction off the route when it is not on the leg', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('LVRPLSH', 'Liverpool Lime Street', 'OR', { lat: 53.407, lng: -2.976 }),
+        stop('SIDEJN', 'Side Junction', 'PP', { lat: 53.55, lng: -2.6 }),
+        stop('MNCROXR', 'Manchester Oxford Road', 'IP', { lat: 53.474, lng: -2.242 }),
+      ],
+      [],
+    )
+    expect(mappedRouteWaypoints(mapped)).toEqual([
+      [53.407, -2.976],
       [53.474, -2.242],
     ])
   })
@@ -157,6 +223,7 @@ describe('serviceJourneyMap', () => {
       }),
     ).toEqual([
       [53.7939, -1.5482],
+      [53.79259, -1.55573],
       [53.544, -2.632],
     ])
   })
@@ -210,6 +277,32 @@ describe('serviceJourneyMap', () => {
       [53.474, -2.243],
       [53.4056, -2.163],
       [53.378, -1.462],
+    ])
+  })
+
+  it('runs a pass along the booked platform in the direction of travel', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('HROW', 'Harrow', 'PP', { lat: 51.592, lng: -0.335 }),
+        stop('BUSHEY', 'Bushey', 'PP', { lat: 51.64558, lng: -0.38475, platform: '3' }),
+        stop('KLGL', 'Kings Langley', 'PP', { lat: 51.706, lng: -0.438 }),
+      ],
+      [],
+    )
+    expect(mappedRouteWaypoints(mapped, {
+      1: {
+        lat: 51.6455342,
+        lng: -0.3849352,
+        ends: [
+          { lat: 51.6455342, lng: -0.3849352 },
+          { lat: 51.6451057, lng: -0.3850758 },
+        ],
+      },
+    })).toEqual([
+      [51.592, -0.335],
+      [51.6451057, -0.3850758],
+      [51.6455342, -0.3849352],
+      [51.706, -0.438],
     ])
   })
 
@@ -269,6 +362,26 @@ describe('serviceJourneyMap', () => {
     expect(shortened[shortened.length - 1]).toEqual(waypoints[waypoints.length - 1])
   })
 
+  it('drops a retrace when the line reaches that station again, and keeps a real reversal', () => {
+    const through: [number, number][] = []
+    for (let i = 0; i <= 8; i++) through.push([53.48 - i * 0.004, -2.2])
+    const spur: [number, number][] = []
+    for (let i = 1; i <= 6; i++) spur.push([53.464 + i * 0.003, -2.19])
+    for (let i = 5; i >= 0; i--) spur.push([53.464 + i * 0.003, -2.1904])
+    const path = [...through.slice(0, 5), ...spur, ...through.slice(4)]
+    const station: [number, number] = [53.464, -2.2]
+    const cleaned = removeRouteReversals(path, 40, 70, 8000, [through[0], station, through[8]])
+    expect(Math.max(...cleaned.map((point) => point[1]))).toBeLessThan(-2.195)
+    expect(cleaned.some((point) => Math.abs(point[0] - station[0]) < 0.002)).toBe(true)
+
+    const reversal: [number, number][] = []
+    for (let i = 0; i <= 6; i++) reversal.push([53.4 + i * 0.004, -1.46])
+    for (let i = 5; i >= 0; i--) reversal.push([53.4 + i * 0.004, -1.4603])
+    const terminus: [number, number] = [53.424, -1.46]
+    const kept = removeRouteReversals(reversal, 40, 70, 8000, [reversal[0], terminus])
+    expect(Math.max(...kept.map((point) => point[0]))).toBeGreaterThan(53.42)
+  })
+
   it('drops a reversal spur and snaps a nearby marker onto the through line', () => {
     const path: [number, number][] = [
       [53.49633, -2.2126],
@@ -320,13 +433,13 @@ describe('serviceJourneyMap', () => {
     expect(live?.label).toBe('At Leeds')
   })
 
-  it('places the live marker between stations after departure', () => {
+  it('stays on the last report instead of sliding toward the next stop as time passes', () => {
     const stops = [
       stop('LEEDS', 'Leeds', 'OR', { crs: 'LDS', ptd: '12:00', atd: '12:00', liveKind: 'actual' }),
       stop('YORK', 'York', 'DT', { crs: 'YRK', pta: '12:20' }),
     ]
     const mapped = journeyMapStops(stops, stations)
-    const live = liveJourneyPosition(
+    const halfway = liveJourneyPosition(
       stops,
       mapped,
       {
@@ -337,10 +450,24 @@ describe('serviceJourneyMap', () => {
       },
       12 * 3600 + 10 * 60 + 30,
     )
-    expect(live?.atStation).toBe(false)
-    expect(live?.t).toBeCloseTo(10.5 / 20, 5)
-    expect(live?.lat).toBeCloseTo(53.795 + (53.958 - 53.795) * (10.5 / 20), 5)
-    expect(live?.label).toBe('Between Leeds and York')
+    const later = liveJourneyPosition(
+      stops,
+      mapped,
+      {
+        phase: 'between',
+        last: { tiploc: 'LEEDS', crs: 'LDS', kind: 'stop', at: '12:00' },
+        next: { tiploc: 'YORK', crs: 'YRK', kind: 'stop' },
+        label: 'Between Leeds and York',
+      },
+      12 * 3600 + 18 * 60,
+    )
+    expect(halfway?.atStation).toBe(false)
+    expect(halfway?.t).toBe(0)
+    expect(halfway?.lat).toBe(53.795)
+    expect(later?.lat).toBe(halfway?.lat)
+    expect(later?.lng).toBe(halfway?.lng)
+    expect(halfway?.label).toBe('Between Leeds and York')
+    expect(halfway?.to?.name).toBe('York')
   })
 
   it('walks a rail path by distance instead of a straight line', () => {

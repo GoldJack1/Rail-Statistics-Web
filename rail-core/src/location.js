@@ -1,5 +1,5 @@
 import { londonInstant } from "./calendar-day.js";
-import { bookedCallMinutes, isWorkingPass, parseHmMinutes, railwayDayMinutes } from "./journey-order.js";
+import { isWorkingPass, parseHmMinutes } from "./journey-order.js";
 
 function isPass(c) {
   return isWorkingPass(c);
@@ -25,21 +25,15 @@ function point(c) {
   };
 }
 
-function locationMinutes(call) {
-  return bookedCallMinutes(call) ?? parseHmMinutes(call?.atd || call?.ata || call?.atp);
-}
-
-/** Booked order, with an unbooked report placed by its actual clock. */
+/** Journey order. A report is live at its calling point, not at its clock, so a pass that has already reported is not hidden behind an earlier place with a later timestamp. */
 function sortForLocation(calls) {
   const list = calls || [];
   return list
     .map((call, index) => ({ call, index }))
     .sort((a, b) => {
-      const am = locationMinutes(a.call);
-      const bm = locationMinutes(b.call);
-      const ak = am == null ? 10_000_000 + a.index : railwayDayMinutes(am) * 1000 + (Number(a.call.seq) || a.index);
-      const bk = bm == null ? 10_000_000 + b.index : railwayDayMinutes(bm) * 1000 + (Number(b.call.seq) || b.index);
-      return ak - bk || a.index - b.index;
+      const as = Number.isFinite(Number(a.call.seq)) ? Number(a.call.seq) : a.index;
+      const bs = Number.isFinite(Number(b.call.seq)) ? Number(b.call.seq) : b.index;
+      return as - bs || a.index - b.index;
     })
     .map((row) => row.call);
 }

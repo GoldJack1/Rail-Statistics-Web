@@ -263,6 +263,19 @@ test("working timetable order counts the half minute and ignores a later public 
   );
 });
 
+test("a live report is placed against live times, not an earlier booked time", () => {
+  const rows = [
+    { tiploc: "DIGGLEJ", wtp: "14:18", atp: "14:21" },
+    { tiploc: "GFLD", wtp: "14:20", atp: "14:23" },
+    { tiploc: "UPRMLJN", atp: "14:22" },
+    { tiploc: "MOSSLEY", wtp: "14:22", atp: "14:26" },
+  ];
+  assert.deepEqual(
+    sortCallsByWttTime(rows).map((row) => row.tiploc),
+    ["DIGGLEJ", "UPRMLJN", "GFLD", "MOSSLEY"],
+  );
+});
+
 test("a live report with no working time still sits on the clock", () => {
   const rows = [
     { tiploc: "A", seq: 0, wtd: "10:00" },
