@@ -35,6 +35,7 @@
 
 [context.beta.environment]
   NEXT_PUBLIC_BETA_SITE = "true"
+  NEXT_PUBLIC_ACCOUNT_ENABLED = "true"
   NEXT_PUBLIC_SITE_URL = "https://beta.railstatistics.co.uk"
   DARWIN_API_ORIGIN = "https://api-dev.railstatistics.co.uk"
   DARWIN_API_ORIGIN_LIVE = "https://api-raildata.railstatistics.co.uk"
