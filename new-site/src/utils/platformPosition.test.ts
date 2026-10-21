@@ -3,6 +3,7 @@ import {
   indexPlatformsAt,
   matchPlatforms,
   normalizePlatformRef,
+  platformSitsAtStation,
   platformTrackPoints,
   resolvePlatform,
   osmPlatformsFromOverpass,
@@ -21,6 +22,28 @@ describe('normalizePlatformRef', () => {
 
   it('splits a shared island ref', () => {
     expect(platformRefParts('1;2')).toEqual(['1', '2'])
+  })
+})
+
+describe('platformSitsAtStation', () => {
+  it('drops a platform that belongs to a different station', () => {
+    const redcar = { lat: 54.61623, lng: -1.07087 }
+    const southport = {
+      lat: 53.64592,
+      lng: -3.00174,
+      ends: [
+        { lat: 53.64553, lng: -3.00113 },
+        { lat: 53.64672, lng: -3.00303 },
+      ] as [{ lat: number; lng: number }, { lat: number; lng: number }],
+    }
+    expect(platformSitsAtStation(redcar, southport)).toBe(false)
+    expect(
+      platformSitsAtStation(redcar, {
+        lat: 54.6161,
+        lng: -1.0705,
+        stand: { lat: 54.6162, lng: -1.0706 },
+      }),
+    ).toBe(true)
   })
 })
 

@@ -64,6 +64,19 @@ describe('serviceJourneyMap', () => {
     expect(matchStationCoord({ crs: 'XXX', tpl: 'NOWHERE' }, stations)).toBeNull()
   })
 
+  it('keeps a shared CRS code on the calling point, not the other network', () => {
+    const shared = [
+      { crsCode: 'BNA', tiploc: '', stationName: 'Bellarena', latitude: 55.1269, longitude: -6.95136 },
+      { crsCode: 'BNA', tiploc: 'BAGE', stationName: 'Burnage', latitude: 53.4219, longitude: -2.2151 },
+    ]
+    const burnage = stop('BAGE', 'Burnage', 'PP', { crs: 'BNA', lat: 53.42088, lng: -2.21419 })
+    expect(matchStationCoord(burnage, shared)?.stationName).toBe('Burnage')
+    expect(journeyMapStops([burnage], shared)[0]).toMatchObject({ lat: 53.4219, lng: -2.2151 })
+    const onlyElsewhere = [shared[0]]
+    expect(matchStationCoord(burnage, onlyElsewhere)).toBeNull()
+    expect(journeyMapStops([burnage], onlyElsewhere)[0]).toMatchObject({ lat: 53.42088, lng: -2.21419 })
+  })
+
   it('builds mapped calling points in journey order', () => {
     const mapped = journeyMapStops(
       [

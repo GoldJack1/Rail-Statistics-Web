@@ -3,6 +3,9 @@ import { isValidStationCoordinate } from './stationCoordinates'
 /** A platform further than this from the station pin belongs to somewhere else. */
 export const PLATFORM_MATCH_M = 450
 
+/** How far a returned platform may sit from the calling point before it is dropped. */
+export const PLATFORM_APPLY_M = 800
+
 export type PlatformRequest = {
   id: string
   lat: number
@@ -425,6 +428,23 @@ export function platformTrackPoints(
     })
   }
   return byRef
+}
+
+/** A platform placement has to sit at this calling point, not at another station. */
+export function platformSitsAtStation(
+  anchor: { lat: number; lng: number },
+  place: {
+    lat: number
+    lng: number
+    ends?: [{ lat: number; lng: number }, { lat: number; lng: number }]
+    bay?: { lat: number; lng: number }
+    stand?: { lat: number; lng: number }
+  },
+): boolean {
+  const points = [place, ...(place.ends ?? []), place.bay, place.stand].filter(
+    (point): point is { lat: number; lng: number } => Boolean(point),
+  )
+  return points.every((point) => haversineM(anchor, point) <= PLATFORM_APPLY_M)
 }
 
 /** Exact ref match, nearest platform to the station pin, within the station area. */

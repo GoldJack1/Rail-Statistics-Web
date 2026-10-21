@@ -9,6 +9,7 @@ import { useTheme, readThemeFromDocument } from '../../../hooks/useTheme'
 import { addThemeTileLayersToMap, swapThemeTileLayers, type MapTileLayerRefs } from '../../../utils/mapTileLayers'
 import { railwayDaySecondsFromClock } from '../../../utils/railwayOperatingDayUk'
 import { routeLimited, routedCoordinates, type LatLngTuple } from '../../../utils/brouterRailRoute'
+import { platformSitsAtStation } from '../../../utils/platformPosition'
 import { isValidStationCoordinate } from '../../../utils/stationCoordinates'
 import {
   journeyMapStops,
@@ -318,7 +319,16 @@ export function ServiceJourneyMap({
         .join('|'),
     [mapped],
   )
-  const activePlatforms = platformQueryReady === platformQuery ? platformCoords : NO_PLATFORMS
+  const activePlatforms = useMemo(() => {
+    if (platformQueryReady !== platformQuery) return NO_PLATFORMS
+    const next: Record<string, RoutePlatform> = {}
+    for (const [id, place] of Object.entries(platformCoords)) {
+      const stop = mapped.find((point) => String(point.index) === id)
+      if (!stop || !platformSitsAtStation(stop, place)) continue
+      next[id] = place
+    }
+    return next
+  }, [mapped, platformCoords, platformQuery, platformQueryReady])
   const routeStops = useMemo(
     () => mapped.filter((point) => point.kind !== 'junction'),
     [mapped],

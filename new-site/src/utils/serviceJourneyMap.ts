@@ -362,28 +362,54 @@ function stopClock(stop: ServiceStop, role: 'from' | 'to'): string {
   return String(stop.eta || stop.etd || stop.pta || stop.ptd || stop.wta || stop.wtd || '')
 }
 
+/**
+ * A pin further than this from the calling point is a different station.
+ * TIPLOC and catalogue fixes of a few kilometres stay; another network's
+ * station that shares the CRS code does not.
+ */
+const CATALOGUE_MATCH_M = 20_000
+
+function catalogueNear(
+  candidates: StationCoordInput[],
+  near: { lat: number; lng: number } | null,
+): StationCoordInput | null {
+  if (!candidates.length) return null
+  if (!near) return candidates[0]
+  let best = candidates[0]
+  let bestD = Infinity
+  for (const station of candidates) {
+    const distance = haversineM(near, { lat: station.latitude, lng: station.longitude })
+    if (distance < bestD) {
+      bestD = distance
+      best = station
+    }
+  }
+  return bestD <= CATALOGUE_MATCH_M ? best : null
+}
+
 export function matchStationCoord(
-  stop: Pick<ServiceStop, 'crs' | 'tpl'>,
+  stop: Pick<ServiceStop, 'crs' | 'tpl' | 'lat' | 'lng'>,
   stations: StationCoordInput[],
 ): StationCoordInput | null {
+  const schedule = coordFromStop(stop)
   const crs = String(stop.crs || '').trim().toUpperCase()
   if (crs.length === 3) {
-    const byCrs = stations.find(
+    const byCrs = stations.filter(
       (s) =>
         String(s.crsCode || '').trim().toUpperCase() === crs &&
         isValidStationCoordinate(s.latitude, s.longitude),
     )
-    if (byCrs) return byCrs
+    const hit = catalogueNear(byCrs, schedule)
+    if (hit) return hit
   }
   const tpl = String(stop.tpl || '').trim().toUpperCase()
   if (!tpl) return null
-  return (
-    stations.find(
-      (s) =>
-        String(s.tiploc || '').trim().toUpperCase() === tpl &&
-        isValidStationCoordinate(s.latitude, s.longitude),
-    ) || null
+  const byTpl = stations.filter(
+    (s) =>
+      String(s.tiploc || '').trim().toUpperCase() === tpl &&
+      isValidStationCoordinate(s.latitude, s.longitude),
   )
+  return catalogueNear(byTpl, schedule)
 }
 
 export type TiplocCoordMap = Readonly<Record<string, { lat: number; lng: number }>>
@@ -399,6 +425,8 @@ function coordFromLookup(stop: ServiceStop, extra?: TiplocCoordMap): { lat: numb
   const tpl = String(stop.tpl || '').trim().toUpperCase()
   const hit = tpl && extra ? extra[tpl] : undefined
   if (!hit || !isValidStationCoordinate(hit.lat, hit.lng)) return null
+  const schedule = coordFromStop(stop)
+  if (schedule && haversineM(schedule, hit) > CATALOGUE_MATCH_M) return null
   return hit
 }
 
@@ -435,8 +463,9 @@ export function journeyMapStops(
     // Paris, Lille, Brussels, Rotterdam and Amsterdam are not on the UK grid.
     // The bundled TIPLOC pin for some of them is the Folkestone NaPTAN
     // placeholder, so the continental table wins for those stations only.
-    // Everywhere else, catalogue pins beat the TIPLOC file, and the TIPLOC
-    // file beats the schedule's OS grid conversion.
+    // Everywhere else, a catalogue pin at this calling point beats the TIPLOC
+    // file, and the TIPLOC file beats the schedule's OS grid conversion.
+    // A pin kilometres away is a different station that shares the code.
     const coord = continentalEurostarCoordinate(stop)
       || (stn ? { lat: stn.latitude, lng: stn.longitude } : null)
       || coordFromLookup(stop, extra)

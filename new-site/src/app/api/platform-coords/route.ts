@@ -5,15 +5,21 @@ import { parsePlatformQuery } from '@/utils/platformPosition'
 
 export const maxDuration = 30
 
+function json(body: unknown) {
+  // Netlify's edge cache varies route handlers on __nextDataReq and _rsc only,
+  // so a public Cache-Control header serves one platform payload for every train.
+  return NextResponse.json(body, {
+    headers: {
+      'Cache-Control': 'private, no-store',
+      'CDN-Cache-Control': 'no-store',
+      'Netlify-CDN-Cache-Control': 'no-store',
+    },
+  })
+}
+
 export async function GET(request: NextRequest) {
   const requests = parsePlatformQuery(request.nextUrl.searchParams.get('at') || '')
-  if (requests.length === 0) {
-    return NextResponse.json({ coords: {} }, { headers: { 'Cache-Control': 'public, max-age=3600' } })
-  }
+  if (requests.length === 0) return json({ coords: {} })
   const coords = await lookupPlatformCoords(requests)
-  const complete = requests.every((item) => coords[item.id])
-  return NextResponse.json(
-    { coords },
-    { headers: { 'Cache-Control': complete ? 'public, max-age=86400' : 'private, max-age=120' } },
-  )
+  return json({ coords })
 }
