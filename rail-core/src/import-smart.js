@@ -110,7 +110,8 @@ function querySmartSteps(catalog, area, from, to) {
       }
     }
   }
-  if (from) {
+  // A CA step is the berth the train entered. The berth it left is not that place.
+  if (!to && from) {
     return catalog
       .prepare(
         `SELECT stanox, event_type, platform FROM smart_steps

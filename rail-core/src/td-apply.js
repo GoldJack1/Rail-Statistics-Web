@@ -6,6 +6,7 @@
 import { hhmm, hhmmLondon, hhmmss, hhmmssLondon, liveKind, openCatalog, openDayDb, operatingDayYmd, upsertCall } from "./db.js";
 import { resolveSmartTiploc } from "./import-smart.js";
 import { nrodCandidateDays, writeDaysForRid } from "./nrod-write-days.js";
+import { actualBelongsToBooked, isSignallingBerth } from "./td-match.js";
 
 export function ensureTdTables(db) {
   db.exec(`
@@ -126,9 +127,27 @@ function ridsForTdPass(db, headcode, tiploc, forcedRid = null) {
   return candidates.filter((rid) => spineTiplocs(db, rid)?.has(tpl));
 }
 
+function clockMinute(value) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(value || ""));
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/** A TD clock only fills a call when it is this working, not an earlier train on the headcode. */
+function tdActualFitsCall(existing, actual) {
+  if (!existing) return true;
+  const booked = clockMinute(existing.wtp || existing.wtd || existing.wta);
+  const minute = clockMinute(actual);
+  if (booked == null || minute == null) return true;
+  return actualBelongsToBooked(booked, minute);
+}
+
 function upsertTdPass(db, { rid, tiploc, crs, platform, actual }) {
   if (!rid || !tiploc) return;
-  const existing = db.prepare(`SELECT is_passing FROM calls WHERE rid = ? AND tiploc = ?`).get(rid, tiploc);
+  const existing = db
+    .prepare(`SELECT is_passing, wta, wtd, wtp FROM calls WHERE rid = ? AND tiploc = ?`)
+    .get(rid, tiploc);
+  if (!tdActualFitsCall(existing, actual)) return;
   const publicStop = existing && !Number(existing.is_passing);
   if (publicStop) {
     // Don't convert a public stop into a pass; only fill live if empty.
@@ -280,8 +299,8 @@ function applyTdToDay(db, message, parsed, { rid, tiploc, stanox, crs, platform,
     );
   }
 
-  // CA = berth step, CC = interpose. CB/CT handled elsewhere / ignored for path.
-  if (tiploc && (parsed.msgType === "CA" || parsed.msgType === "CC")) {
+  // CA = berth step, CC = interpose. A cancel or dummy berth is not a pass.
+  if (tiploc && !isSignallingBerth(berth) && (parsed.msgType === "CA" || parsed.msgType === "CC")) {
     const actual = tdClockPrecise(parsed.time, now);
     for (const passRid of ridsForTdPass(db, parsed.headcode, tiploc, forcedRid)) {
       upsertTdPass(db, { rid: passRid, tiploc, crs, platform, actual });
@@ -311,9 +330,10 @@ export function applyTdFrame(dataDir, message, ymd = operatingDayYmd(), opts = {
     try {
       const dayRid = resolveRid(db, parsed.headcode) || rid;
       const hints = spineHintsForHeadcode(db, parsed.headcode, dayRid);
-      const { tiploc, stanox, crs, platform } = catalog
-        ? resolveTdMapping(catalog, parsed, berth, hints)
-        : { tiploc: null, stanox: null, crs: null, platform: null };
+      const { tiploc, stanox, crs, platform } =
+        catalog && !isSignallingBerth(berth)
+          ? resolveTdMapping(catalog, parsed, berth, hints)
+          : { tiploc: null, stanox: null, crs: null, platform: null };
       applyTdToDay(db, message, parsed, {
         rid,
         tiploc,
@@ -439,7 +459,7 @@ export function replayTdEventsForDay(dataDir, ymd, opts = {}) {
           mapCache.set(mk, mapped);
         }
         const { tiploc, crs, platform } = mapped;
-        if (!tiploc) continue;
+        if (!tiploc || isSignallingBerth(berth)) continue;
         const actual = tdClockPrecise(parsed.time, row.received_at);
         for (const passRid of ridsForTdPass(db, headcode, tiploc)) {
           upsertTdPass(db, { rid: passRid, tiploc, crs, platform, actual });
@@ -457,7 +477,7 @@ export function replayTdEventsForDay(dataDir, ymd, opts = {}) {
         mapCache.set(mk, mapped);
       }
       const { tiploc, crs, platform } = mapped;
-      if (!tiploc) continue;
+      if (!tiploc || isSignallingBerth(berth)) continue;
 
       const actual = tdClockPrecise(parsed.time, row.received_at);
       for (const passRid of ridsForTdPass(db, headcode, tiploc, forcedRid)) {

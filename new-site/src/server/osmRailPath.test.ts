@@ -17,6 +17,10 @@ describe('osm rail path', () => {
       [[51.5045, -0.0862], [51.5066, -0.1032]],
       [[51.5045, -0.0862], [51.55, -0.2], [51.5066, -0.1032]],
     )).toBe(true)
+    expect(routeLeavesTheRailway(
+      [[53.69794, -1.77789], [53.72071, -1.85203]],
+      [[53.69794, -1.77789], [53.69324, -1.85553], [53.72071, -1.85203]],
+    )).toBe(false)
   })
 
   it('stays on its own track when the parallel road never joins', () => {

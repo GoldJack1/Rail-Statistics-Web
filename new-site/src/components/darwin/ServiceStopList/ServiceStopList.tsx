@@ -13,6 +13,7 @@ import { buildStopNameLookup, displayStopName, sortStopsByJourneyTime } from '@/
 import type { ServiceViewMode } from '@/components/darwin/serviceViewMode'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
 import { betweenStationsLabel, inferProgressIndex } from '@/utils/serviceProgress'
+import { pointsOnTheLeg } from '@/utils/serviceJourneyMap'
 import { useEurostarRunningMiles } from '@/hooks/useEurostarRunningMiles'
 import { formatMilesAndChains, milesAndChainsTitle } from '@/utils/milesAndChains'
 import { formatQuarterClock } from '@/utils/quarterClock'
@@ -763,10 +764,10 @@ export function ServiceStopList({
 }) {
   const { stations } = useStations()
   const lookup = useMemo(() => buildStopNameLookup(stations), [stations])
-  const orderedStops = useMemo(
-    () => (preserveOrder ? stops : sortStopsByJourneyTime(stops)),
-    [preserveOrder, stops],
-  )
+  const orderedStops = useMemo(() => {
+    const ordered = preserveOrder ? stops : sortStopsByJourneyTime(stops)
+    return pointsOnTheLeg(ordered, (stop) => slotKind(stop.slot) === 'pass' && !String(stop.crs || '').trim())
+  }, [preserveOrder, stops])
   const [nowMins, setNowMins] = useState<number | null>(() => londonNowRailwayMinutes())
   useEffect(() => {
     if (historical) return
@@ -788,7 +789,7 @@ export function ServiceStopList({
     .map((stop, index) => ({ stop, index }))
     .filter(({ stop, index }) => {
       const kind = slotKind(stop.slot)
-      if (!showPasses && kind === 'pass') return false
+      if (!showPasses && kind === 'pass' && !String(stop.crs || '').trim()) return false
       if (
         showPasses &&
         kind === 'pass' &&

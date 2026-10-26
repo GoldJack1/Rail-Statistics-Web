@@ -7,6 +7,7 @@ import { tdClockPrecise } from "./td-apply.js";
 import { resolveSmartTiploc } from "./import-smart.js";
 import { isNonPassengerLocation, isSignalOrElocTiploc } from "./geometry-densify.js";
 import { interpolateHm } from "./tiploc-graph.js";
+import { actualBelongsToBooked, isSignallingBerth } from "./td-match.js";
 
 function corpusMeta(catalog, tiploc) {
   if (!catalog || !tiploc) return { name: "", crs: "" };
@@ -88,7 +89,7 @@ function latestTdByTiploc(db, headcode) {
   try {
     rows = db
       .prepare(
-        `SELECT tiploc, json, received_at FROM td_events
+        `SELECT tiploc, berth, json, received_at FROM td_events
          WHERE headcode = ? COLLATE NOCASE AND tiploc IS NOT NULL AND tiploc != ''
          ORDER BY received_at`,
       )
@@ -98,6 +99,7 @@ function latestTdByTiploc(db, headcode) {
   }
   const byTpl = new Map();
   for (const row of rows) {
+    if (isSignallingBerth(row.berth)) continue;
     byTpl.set(String(row.tiploc).toUpperCase(), row);
   }
   return byTpl;
@@ -158,15 +160,6 @@ function hmToMin(value) {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
-/** A reused headcode can still be stepping from the previous working. */
-const HEADCODE_ACTUAL_MATCH_MIN = 8 * 60;
-
-function circularMinuteDelta(a, b) {
-  let delta = Math.abs(a - b);
-  if (delta > 12 * 60) delta = 1440 - delta;
-  return delta;
-}
-
 /**
  * TD is stored by headcode, so the morning train's steps land on the evening
  * schedule. Drop a TD actual that is not this call's booked time.
@@ -177,7 +170,7 @@ export function dropForeignTdActuals(calls) {
     const booked = callBookedMin(call);
     const actual = callActualMin(call);
     if (booked == null || actual == null) return call;
-    if (circularMinuteDelta(booked, actual) <= HEADCODE_ACTUAL_MATCH_MIN) return call;
+    if (actualBelongsToBooked(booked, actual)) return call;
     const next = { ...call, ata: null, atd: null, atp: null };
     const estimate = next.eta || next.etd || next.etp;
     if (next.live_kind === "actual" || next.live_kind === "actual-arr") {
@@ -412,6 +405,37 @@ export function insertSegmentJunctions(calls, sequences, coords, junctions = [])
     const stanox = stanoxOf.get(tiploc);
     if (stanox) presentStanox.add(stanox);
   }
+  // Places the timetable actually joins. A junction beside a booked junction,
+  // sharing the same onward places, is the other route out of this stop.
+  const beside = new Map();
+  const tie = (a, b) => {
+    if (!a || !b || a === b) return;
+    if (!beside.has(a)) beside.set(a, new Set());
+    if (!beside.has(b)) beside.set(b, new Set());
+    beside.get(a).add(b);
+    beside.get(b).add(a);
+  };
+  for (const seq of sequences || []) {
+    for (let i = 0; i < seq.length - 1; i++) tie(seq[i], seq[i + 1]);
+  }
+  const bookedJunction = new Set(
+    (junctions || []).map((junction) => String(junction?.tiploc || "").toUpperCase()).filter(Boolean),
+  );
+  const parallelToBookedJunction = (candidate, prev, here) => {
+    if (!beside.get(prev)?.has(here)) return false;
+    const neighbours = beside.get(candidate);
+    if (!neighbours) return false;
+    return [prev, here].some((end) => {
+      if (!bookedJunction.has(end) || neighbours.has(end)) return false;
+      const onward = beside.get(end);
+      if (!onward) return false;
+      for (const place of neighbours) {
+        if (place === prev || place === here) continue;
+        if (onward.has(place)) return true;
+      }
+      return false;
+    });
+  };
   const out = [];
   for (let i = 0; i < spine.length; i++) {
     if (i > 0) {
@@ -442,6 +466,7 @@ export function insertSegmentJunctions(calls, sequences, coords, junctions = [])
         const key = String(junction?.tiploc || "").toUpperCase();
         const stanox = key ? stanoxOf.get(key) : "";
         if (stanox && presentStanox.has(stanox)) continue;
+        if (parallelToBookedJunction(key, prev, here)) continue;
         const t = onSegment(locate(prev), locate(here), locate(key), 280);
         if (t == null || !key || key === here || present.has(key) || seen.has(key)) continue;
         seen.add(key);
@@ -475,6 +500,156 @@ export function insertSegmentJunctions(calls, sequences, coords, junctions = [])
     out.push(spine[i]);
   }
   return out.map((c, seq) => ({ ...c, seq }));
+}
+
+function chainageOf(chain, point) {
+  let walked = 0;
+  let best = Infinity;
+  let at = 0;
+  const consider = (chainage, distance) => {
+    if (distance < best - 0.5) {
+      best = distance;
+      at = chainage;
+    }
+  };
+  for (let index = 0; index < chain.length; index += 1) {
+    const place = chain[index];
+    if (index > 0) {
+      const prev = chain[index - 1];
+      const east = place.e - prev.e;
+      const north = place.n - prev.n;
+      const length = Math.hypot(east, north);
+      if (length >= 1) {
+        const t = ((point.e - prev.e) * east + (point.n - prev.n) * north) / (length * length);
+        const clamped = Math.max(0, Math.min(1, t));
+        consider(
+          walked + clamped * length,
+          Math.hypot(point.e - (prev.e + clamped * east), point.n - (prev.n + clamped * north)),
+        );
+        walked += length;
+      }
+    }
+    consider(walked, Math.hypot(place.e - point.e, place.n - point.n));
+  }
+  return { at, away: best, length: walked };
+}
+
+/**
+ * A passenger station the timetable left out, but only when every established
+ * schedule between these two booked points passes it. The gap is the next
+ * timing point already on this train, not the next station. Methley to
+ * Altofts has a direct timing and a longer one through Castleford, so
+ * Castleford is not added. A station is filled in only when there is no
+ * timetable way from one booked point to the next without it.
+ */
+export function insertIntermediateStations(calls, sequences, stationCrs, locate) {
+  const spine = (calls || []).filter((call) => call?.tiploc).map((call) => ({ ...call }));
+  if (spine.length < 2 || !sequences?.length) return spine;
+  const crsOf = (tiploc) => {
+    const code = String(stationCrs?.(tiploc) || "").trim().toUpperCase();
+    return code.length === 3 && !code.startsWith("X") ? code : "";
+  };
+  const pointOf = (tiploc) => locate?.(String(tiploc || "").toUpperCase()) || null;
+  const present = new Set(spine.map((call) => String(call.tiploc).toUpperCase()));
+  const anchorAt = spine.map(() => true);
+  for (let left = 0; left < spine.length; left += 1) {
+    if (!anchorAt[left]) continue;
+    let right = left + 1;
+    while (right < spine.length && !anchorAt[right]) right += 1;
+    if (right >= spine.length) break;
+    const from = String(spine[left].tiploc).toUpperCase();
+    const to = String(spine[right].tiploc).toUpperCase();
+    const booked = new Set();
+    const chain = [];
+    for (let index = left; index <= right; index += 1) {
+      const tiploc = String(spine[index].tiploc).toUpperCase();
+      if (index !== left && index !== right && !crsOf(tiploc)) booked.add(tiploc);
+      const point = pointOf(tiploc);
+      if (point) chain.push({ ...point, index });
+    }
+    if (chain.length < 2) continue;
+    const paths = [];
+    for (const seq of sequences || []) {
+      const start = seq.indexOf(from);
+      if (start < 0) continue;
+      let end = -1;
+      for (let index = start + 1; index < seq.length && index <= start + 12; index += 1) {
+        if (seq[index] === to) {
+          end = index;
+          break;
+        }
+      }
+      if (end < 0) continue;
+      const mids = seq.slice(start + 1, end);
+      const overlap = mids.filter((tiploc) => booked.has(tiploc)).length;
+      paths.push({ mids, overlap });
+    }
+    const fitting = booked.size
+      ? paths.filter((path) => path.overlap > 0 && path.overlap === Math.max(...paths.map((path) => path.overlap)))
+      : paths;
+    if (!fitting.length) continue;
+    const patterns = new Map();
+    fitting.forEach((path) => {
+      const stations = path.mids.filter((tiploc) => crsOf(tiploc) && !present.has(tiploc) && !booked.has(tiploc));
+      const key = stations.join(">");
+      patterns.set(key, (patterns.get(key) || 0) + 1);
+    });
+    const established = [...patterns.entries()].filter(([, count]) => count >= 3);
+    if (!established.length) continue;
+    let required = null;
+    for (const [key] of established) {
+      const stations = new Set(key ? key.split(">") : []);
+      required = required
+        ? new Set([...required].filter((tiploc) => stations.has(tiploc)))
+        : stations;
+    }
+    const found = [];
+    for (const tiploc of required || []) {
+      const point = pointOf(tiploc);
+      if (!point) continue;
+      const place = chainageOf(chain, point);
+      if (place.away > 8000 || place.length <= 0) continue;
+      found.push({ tiploc, crs: crsOf(tiploc), along: place.at / place.length });
+    }
+    found.sort((a, b) => a.along - b.along);
+    let inserted = 0;
+    found.forEach((station) => {
+      let at = right + inserted;
+      for (let index = left + 1; index < right + inserted; index += 1) {
+        const point = pointOf(spine[index].tiploc);
+        if (!point) continue;
+        const place = chainageOf(chain, point);
+        if (place.length > 0 && place.at / place.length > station.along) {
+          at = index;
+          break;
+        }
+      }
+      const before = spine[at - 1];
+      const after = spine[at];
+      const guess = guessBetween(before, after, 0.5);
+      present.add(station.tiploc);
+      spine.splice(at, 0, {
+        tiploc: station.tiploc,
+        crs: station.crs,
+        is_passing: 1,
+        cancelled: 0,
+        platform: null,
+        wta: null,
+        wtd: null,
+        wtp: guess.wtp,
+        etp: guess.atp ? null : guess.etp,
+        ata: null,
+        atd: null,
+        atp: guess.atp,
+        live_kind: guess.atp ? "actual" : "est",
+        actual_source: "inferred",
+      });
+      inserted += 1;
+      anchorAt.splice(at, 0, false);
+    });
+    left = right + inserted - 1;
+  }
+  return spine.map((call, seq) => ({ ...call, seq }));
 }
 
 export function insertSchedulePasses(calls, sequences) {
@@ -622,7 +797,7 @@ export function applyLiveToInferred(db, calls, trainId, catalog = null) {
       (row) =>
         row.actual != null &&
         row.booked != null &&
-        circularMinuteDelta(row.actual, row.booked) <= HEADCODE_ACTUAL_MATCH_MIN,
+        actualBelongsToBooked(row.booked, row.actual),
     );
   if (!reported.length) return rows;
   for (let i = 0; i < rows.length; i++) {
@@ -807,7 +982,7 @@ function tdByTiploc(db, headcode, catalog, calls) {
     (calls || []).map((c) => String(c.tiploc || "").toUpperCase()).filter(Boolean),
   );
   for (const row of tdEventsForHeadcode(db, headcode)) {
-    if (row.tiploc) continue;
+    if (row.tiploc || isSignallingBerth(row.berth)) continue;
     const mapped = resolveSmartTiploc(catalog, row.area_id, row.berth, row.from_berth, {
       hintTiplocs: hints,
     });
@@ -856,8 +1031,51 @@ function timedCalls(calls) {
     .filter(Boolean);
 }
 
-/** A reported place off to one side of the calls either side of it, in metres. */
+/** A place off to one side of the calls either side of it, in metres. */
 const CHORD_EXTRA_M = 2000;
+
+/**
+ * A booked pass whose grid is not on the way between the stops either side.
+ * Mill Lane Junction is timed between Low Moor and Bradford, but the stored
+ * pin is west of Halifax, so the calling list was showing a junction this
+ * train does not pass there. A pass on the chord, and every passenger call, stays.
+ */
+export function dropPassesOffTheLeg(calls, coords, slack = CHORD_EXTRA_M) {
+  const locate = coords instanceof Map ? coords : new Map();
+  const rows = calls || [];
+  const place = (call) => locate.get(String(call?.tiploc || "").toUpperCase());
+  const passenger = (call) => {
+    const crs = String(call?.crs || "").trim().toUpperCase();
+    return crs.length === 3 && !crs.startsWith("X");
+  };
+  return rows
+    .filter((call, index) => {
+      if (!Number(call?.is_passing) || passenger(call)) return true;
+      const here = place(call);
+      if (!here) return true;
+      let prev = null;
+      for (let i = index - 1; i >= 0; i -= 1) {
+        const found = place(rows[i]);
+        if (found) {
+          prev = found;
+          break;
+        }
+      }
+      let next = null;
+      for (let i = index + 1; i < rows.length; i += 1) {
+        const found = place(rows[i]);
+        if (found) {
+          next = found;
+          break;
+        }
+      }
+      if (!prev || !next) return true;
+      const direct = Math.hypot(prev.e - next.e, prev.n - next.n);
+      const via = Math.hypot(prev.e - here.e, prev.n - here.n) + Math.hypot(here.e - next.e, here.n - next.n);
+      return via - direct <= slack;
+    })
+    .map((call, seq) => ({ ...call, seq }));
+}
 
 /**
  * TRUST and TD rows for this headcode also match other trains that reused it.
@@ -886,6 +1104,30 @@ export function reportsForService(calls, reports, coords = null) {
     const via = Math.hypot(a.e - here.e, a.n - here.n) + Math.hypot(here.e - b.e, here.n - b.n);
     return via - direct <= CHORD_EXTRA_M;
   });
+}
+
+let stationCrsCache = null;
+
+/** TIPLOC to CRS for passenger stations. Sidings and X-codes are left out. */
+export function passengerStationCrs(catalog) {
+  if (stationCrsCache) return stationCrsCache;
+  const map = new Map();
+  if (catalog) {
+    try {
+      const rows = catalog
+        .prepare(`SELECT tiploc, crs FROM corpus WHERE crs IS NOT NULL AND trim(crs) != ''`)
+        .all();
+      for (const row of rows) {
+        const crs = String(row.crs || "").trim().toUpperCase();
+        if (crs.length !== 3 || crs.startsWith("X")) continue;
+        map.set(String(row.tiploc).toUpperCase(), crs);
+      }
+    } catch {
+      /* The catalogue has no corpus table in this process. */
+    }
+  }
+  stationCrsCache = map;
+  return map;
 }
 
 let namedJunctionCache = null;
@@ -948,6 +1190,7 @@ export function insertReportedPasses(calls, reports) {
   for (const report of reports || []) {
     const tiploc = String(report.tiploc || "").toUpperCase();
     if (!tiploc || present.has(tiploc) || report.minute == null || !report.clock) continue;
+    if (report.source === "td" && !String(report.name || "").trim()) continue;
     if (isNonPassengerLocation(tiploc, { name: report.name, crs: report.crs })) continue;
     present.add(tiploc);
     pending.push({ ...report, tiploc });
@@ -1045,7 +1288,7 @@ export function overlayTdOnCalls(db, calls, headcode, catalog = null) {
     if (target < 0) continue;
     const call = rows[target];
     const schedule = hmToMin(call.wtp || call.wtd || call.wta || call.std || call.sta);
-    if (schedule != null && minute != null && circularMinuteDelta(schedule, minute) > HEADCODE_ACTUAL_MATCH_MIN) continue;
+    if (schedule != null && minute != null && !actualBelongsToBooked(schedule, minute)) continue;
     if (call.ata || call.atd || call.atp) rows[target] = withTdSeconds(call, actual);
     else if (Number(call.is_passing)) {
       rows[target] = { ...call, atp: actual, live_kind: "actual", actual_source: call.actual_source || "td" };

@@ -16,6 +16,7 @@ import {
   liveJourneyPosition,
   mappedRouteWaypoints,
   matchStationCoord,
+  pointsOnTheLeg,
   removeRouteReversals,
   replaceInflatedLegs,
   snapLiveToRailPath,
@@ -137,7 +138,7 @@ describe('serviceJourneyMap', () => {
     ])
   })
 
-  it('routes between the stations and leaves the junction dogleg as markers', () => {
+  it('routes the dogleg through the junctions that leave the straight chord', () => {
     const mapped = journeyMapStops(
       [
         stop('LEEDS', 'Leeds', 'OR', { lat: 53.79537, lng: -1.54644 }),
@@ -151,8 +152,32 @@ describe('serviceJourneyMap', () => {
     expect(mapped.filter((point) => point.kind === 'junction')).toHaveLength(3)
     expect(mappedRouteWaypoints(mapped)).toEqual([
       [53.79537, -1.54644],
+      [53.76683, -1.4986],
+      [53.72982, -1.40092],
       [53.67839, -1.48698],
     ])
+  })
+
+  it('drops a pass whose pin is not between the stops either side', () => {
+    const kept = pointsOnTheLeg(
+      [
+        stop('LOWMOOR', 'Low Moor', 'IP', { lat: 53.74968, lng: -1.75184 }),
+        stop('MLLNJN', 'Mill Lane Junction', 'PP', { lat: 53.70662, lng: -1.88997 }),
+        stop('BRADIN', 'Bradford Interchange', 'DT', { lat: 53.79083, lng: -1.74803 }),
+      ],
+      (point) => point.slot === 'PP',
+    )
+    expect(kept.map((point) => point.tpl)).toEqual(['LOWMOOR', 'BRADIN'])
+
+    const curved = pointsOnTheLeg(
+      [
+        stop('BRHOUSE', 'Brighouse', 'IP', { lat: 53.69794, lng: -1.77789 }),
+        stop('GRTLNDJ', 'Greetland Junction', 'PP', { lat: 53.69356, lng: -1.85603 }),
+        stop('DYCLJN', 'Dryclough Junction', 'PP', { lat: 53.70858, lng: -1.85366 }),
+      ],
+      (point) => point.slot === 'PP',
+    )
+    expect(curved.map((point) => point.tpl)).toEqual(['BRHOUSE', 'GRTLNDJ', 'DYCLJN'])
   })
 
   it('leaves a junction off the route when it is not on the leg', () => {

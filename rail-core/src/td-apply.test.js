@@ -236,3 +236,101 @@ test("replayTdEventsForDay re-applies calls after SMART import", () => {
   assert.equal(row.atp, "16:05:30");
   day.close();
 });
+
+test("a cancel berth step is not a pass on this rid", () => {
+  const dir = mkdtempSync(join(tmpdir(), "td-cout-"));
+  const cat = openCatalog(dir);
+  cat.prepare(`INSERT INTO corpus (tiploc, stanox, crs, name) VALUES (?, ?, ?, ?)`).run(
+    "BRLYWJN",
+    "18469",
+    null,
+    "Bradley Wood Junction",
+  );
+  ensureSmartTables(cat);
+  importSmartPayload(
+    cat,
+    parseSmartPayload(
+      JSON.stringify({
+        SMART: [{ TD: "Y6", FROMBERTH: "DUMY", TOBERTH: "COUT", STANOX: "18469", EVENT: "C" }],
+      }),
+    ),
+  );
+  cat.close();
+  const db = openDayDb(dir, TODAY);
+  upsertService(db, {
+    rid: RID,
+    uid: "L89455",
+    train_id: "2J68",
+    rs_id: null,
+    toc: "NT",
+    operator_name: "Northern",
+    origin_crs: "LDS",
+    origin_name: "Leeds",
+    destination_crs: "BDI",
+    destination_name: "Bradford Interchange",
+    via: null,
+    service_type: "passenger",
+    cancelled: 0,
+    cancel_reason: null,
+    delay_reason: null,
+    is_charter: 0,
+    category: "OO",
+    headcode: "2J68",
+    updated_at: 1,
+  });
+  upsertCall(db, {
+    rid: RID,
+    tiploc: "BRLYWJN",
+    crs: null,
+    seq: 11,
+    is_passing: 1,
+    cancelled: 0,
+    wtp: "15:19",
+    live_kind: "scheduled",
+    updated_at: 1,
+  });
+  db.close();
+  applyTdFrame(
+    dir,
+    {
+      CA_MSG: {
+        msg_type: "CA",
+        area_id: "Y6",
+        from: "DUMY",
+        to: "COUT",
+        descr: "2J68",
+        time: "145420",
+      },
+    },
+    TODAY,
+  );
+  const day = openDayDb(dir, TODAY);
+  const row = day.prepare(`SELECT atp, actual_source FROM calls WHERE rid = ? AND tiploc = 'BRLYWJN'`).get(RID);
+  assert.equal(row.atp ?? null, null);
+  assert.notEqual(row.actual_source, "td");
+  day.close();
+});
+
+test("a headcode step from another working is not written onto this rid", () => {
+  const dir = mkdtempSync(join(tmpdir(), "td-early-"));
+  seedCorpus(dir);
+  seedService(dir);
+  applyTdFrame(
+    dir,
+    {
+      CA_MSG: {
+        msg_type: "CA",
+        area_id: "T2",
+        from: "401",
+        to: "500",
+        descr: "9E18",
+        time: "090715",
+      },
+    },
+    TODAY,
+  );
+  const db = openDayDb(dir, TODAY);
+  const row = db.prepare(`SELECT atp FROM calls WHERE rid = ? AND tiploc = 'BROADGR'`).get(RID);
+  assert.equal(row.atp ?? null, null);
+  db.close();
+});

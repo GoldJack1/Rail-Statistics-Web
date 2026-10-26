@@ -152,6 +152,9 @@ function createVectorRailwayLayer({
     attribution: OPEN_RAILWAY_MAP_ATTRIBUTION,
     pane: 'overlayPane',
     bounds,
+    interactive: false,
+    updateWhenIdle: true,
+    updateWhenZooming: false,
     vectorTileLayerStyles: {
       [layerName]: style
     },

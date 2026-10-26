@@ -67,6 +67,32 @@ function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: numb
 
 type MapPoint = { lat: number; lng: number }
 
+/**
+ * A pass is kept when it lies on the way between the places either side.
+ * Two kilometres of extra path is a curve. Mill Lane's pin, west of Halifax
+ * between Low Moor and Bradford, adds several kilometres and is left out.
+ */
+export function pointsOnTheLeg<T extends { lat?: number | null; lng?: number | null }>(
+  points: T[],
+  isPass: (point: T) => boolean,
+  slackM = 2000,
+): T[] {
+  const placed = (point: T | undefined): point is T & MapPoint =>
+    Boolean(point && isValidStationCoordinate(Number(point.lat), Number(point.lng)))
+  return points.filter((point, index) => {
+    if (!isPass(point) || !placed(point)) return true
+    let prevIndex = index - 1
+    while (prevIndex >= 0 && !placed(points[prevIndex])) prevIndex -= 1
+    let nextIndex = index + 1
+    while (nextIndex < points.length && !placed(points[nextIndex])) nextIndex += 1
+    const prev = points[prevIndex]
+    const next = points[nextIndex]
+    if (!placed(prev) || !placed(next)) return true
+    const extra = haversineM(prev, point) + haversineM(point, next) - haversineM(prev, next)
+    return extra <= slackM
+  })
+}
+
 /** A timing point has to be further along towards the next call than the line already is. */
 function stillAhead(from: MapPoint, point: MapPoint, next: MapPoint): boolean {
   if (haversineM(from, point) < 25) return false
@@ -74,30 +100,57 @@ function stillAhead(from: MapPoint, point: MapPoint, next: MapPoint): boolean {
 }
 
 /**
+ * How far a point sits to the side of the straight line between two places.
+ * A negative distance means it does not fall between them.
+ */
+function chordOffsetM(from: MapPoint, point: MapPoint, next: MapPoint): number {
+  const east = next.lng - from.lng
+  const north = next.lat - from.lat
+  const length = east * east + north * north
+  if (length < 1e-12) return -1
+  const along = ((point.lng - from.lng) * east + (point.lat - from.lat) * north) / length
+  if (along <= 0.05 || along >= 0.95) return -1
+  return haversineM(point, { lat: from.lat + along * north, lng: from.lng + along * east })
+}
+
+/**
+ * Station-to-station routing takes the shortest railway, which from Leeds is
+ * the line through Outwood rather than the booked line through Methley.
+ * A junction well off that chord is the dogleg the train actually takes, so
+ * it is sent as a via. One sitting on the chord is left as a marker: that
+ * pin is often the other branch at the same diamond.
+ */
+function junctionSteersTheRoute(from: MapPoint, point: MapPoint, next: MapPoint): boolean {
+  const offset = chordOffsetM(from, point, next)
+  return offset >= 1_500 && offset <= 9_000
+}
+
+/**
  * Route between stations. Calling stops and passing stations are vias when
- * they still lie ahead. Junctions are markers only: they are drawn, and the
- * live marker can track to them, but they are not sent to the router.
- * A point listed back behind the train is left out, because sending the
- * router there and back draws a spur. A booked platform moves that via onto
- * the rail beside the platform. One point per place: a bay starts at the
- * buffer, and a call stands on the stopping mark. A second point on the same
- * platform makes the line reverse.
+ * they still lie ahead. A junction on the straight chord is not sent: its
+ * pin often sits on the other branch. A junction off to the side, such as
+ * Methley between Leeds and Wakefield Kirkgate, is sent, because otherwise
+ * the router takes a shorter railway. A point listed back behind the train
+ * is left out, because sending the router there and back draws a spur. A
+ * booked platform moves that via onto the rail beside the platform. One
+ * point per place: a bay starts at the buffer, and a call stands on the
+ * stopping mark. A second point on the same platform makes the line reverse.
  */
 export function mappedRouteWaypoints(
   mapped: JourneyMapStop[],
   platformAt?: Readonly<Record<string, RoutePlatform>>,
 ): LatLngTuple[] {
-  const active = mapped.filter((stop) => !stop.cancelled && stop.kind !== 'junction')
-  const calls = active.filter((stop) => stop.calling)
+  const placed = mapped.filter((stop) => !stop.cancelled)
+  const calls = placed.filter((stop) => stop.calling)
   const placeAt = (stop: JourneyMapStop): MapPoint =>
     platformAt?.[String(stop.index)] ?? { lat: stop.lat, lng: stop.lng }
 
   const chosen: JourneyMapStop[] = []
   if (calls.length < 2) {
-    chosen.push(...active)
+    chosen.push(...placed.filter((stop) => stop.kind !== 'junction'))
   } else {
     let nextCall = 0
-    for (const stop of active) {
+    for (const stop of placed) {
       if (stop.calling) {
         chosen.push(stop)
         nextCall += 1
@@ -106,6 +159,11 @@ export function mappedRouteWaypoints(
       const next = calls[nextCall]
       const from = chosen[chosen.length - 1]
       if (!next || !from) continue
+      if (stop.kind === 'junction') {
+        if (!junctionSteersTheRoute(placeAt(from), placeAt(stop), placeAt(next))) continue
+        chosen.push(stop)
+        continue
+      }
       if (!stillAhead(placeAt(from), placeAt(stop), placeAt(next))) continue
       chosen.push(stop)
     }

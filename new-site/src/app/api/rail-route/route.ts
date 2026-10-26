@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { osmRailPath, railwayRouteJoined, routeLeavesTheRailway, shapeOntoLeftHandTrack } from '@/server/osmRailPath'
+import { railwayRouteJoined, routeLeavesTheRailway } from '@/server/osmRailPath'
 import { isValidStationCoordinate } from '@/utils/stationCoordinates'
 import {
   buildOpenRailRouteUrl,
@@ -15,7 +15,7 @@ const routeCache = new Map<string, { at: number; coordinates: LatLngTuple[] }>()
 const ROUTE_CACHE_MS = 30 * 60 * 1000
 
 function routeCacheKey(points: LatLngTuple[]): string {
-  return `geom12|${points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')}`
+  return `geom13|${points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')}`
 }
 
 function readCoord(value: string | null): number | null {
@@ -67,75 +67,38 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  const respond = async (coordinates: LatLngTuple[]) => {
-    let shaped = coordinates
-    try {
-      shaped = await shapeOntoLeftHandTrack(points, coordinates)
-    } catch {
-      shaped = coordinates
-    }
-    // Shaping is optional. These coordinates are already a rail path. Substituting
-    // the straight chord made the map drop the line and ask for the route again.
-    if (shaped === coordinates || shaped.length < 2) {
-      if (routeLeavesTheRailway(points, coordinates)) {
-        return NextResponse.json({ coordinates: fallback, fallback: true })
-      }
-      routeCache.set(cacheKey, { at: Date.now(), coordinates })
-      return NextResponse.json(
-        { coordinates, fallback: false },
-        { headers: { 'Cache-Control': 'private, max-age=300' } },
-      )
-    }
-    routeCache.set(cacheKey, { at: Date.now(), coordinates: shaped })
+  const publish = (coordinates: LatLngTuple[]) => {
+    routeCache.set(cacheKey, { at: Date.now(), coordinates })
     return NextResponse.json(
-      { coordinates: shaped, fallback: false },
+      { coordinates, fallback: false },
       { headers: { 'Cache-Control': 'private, max-age=300' } },
     )
   }
 
-  const alongTracksOr = async (routed: LatLngTuple[]): Promise<LatLngTuple[] | null> => {
-    if (routed.length >= 2 && !routeLeavesTheRailway(points, routed)) return routed
-    const alongTracks = await osmRailPath(points)
-    if (alongTracks && alongTracks.length >= 2 && !routeLeavesTheRailway(points, alongTracks)) return alongTracks
-    return null
-  }
-
-  const alongRails = await railwayRouteJoined(points).catch(() => null)
-  if (alongRails && alongRails.length >= 2 && !routeLeavesTheRailway(points, alongRails)) {
-    routeCache.set(cacheKey, { at: Date.now(), coordinates: alongRails })
-    return NextResponse.json(
-      { coordinates: alongRails, fallback: false },
-      { headers: { 'Cache-Control': 'private, max-age=300' } },
-    )
-  }
-
+  // The rail router answers in one request. The OpenStreetMap graph is only
+  // for a route that leaves the tracks, because that graph is several map queries.
   try {
     const upstream = await fetch(buildOpenRailRouteUrl(points), {
       headers: {
         Accept: 'application/json',
         'User-Agent': 'RailStatisticsWebsite/1.0 (+https://railstatistics.co.uk); rail route proxy',
       },
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(6000),
       cache: 'no-store',
     })
-    if (!upstream.ok) {
-      const limited = upstream.status === 403 || upstream.status === 429 || upstream.status >= 500
-      if (limited) return NextResponse.json({ coordinates: fallback, fallback: true, limited })
-      const alongTracks = await osmRailPath(points)
-      if (alongTracks && alongTracks.length >= 2) return respond(alongTracks)
-      return NextResponse.json({ coordinates: fallback, fallback: true })
+    if (upstream.ok) {
+      const routed = parseOpenRailRoute(await upstream.json())
+      if (routed.length >= 2 && !routeLeavesTheRailway(points, routed)) return publish(routed)
+    } else if (upstream.status === 403 || upstream.status === 429 || upstream.status >= 500) {
+      return NextResponse.json({ coordinates: fallback, fallback: true, limited: true })
     }
-    const payload: unknown = await upstream.json()
-    const coordinates = await alongTracksOr(parseOpenRailRoute(payload))
-    if (!coordinates) return NextResponse.json({ coordinates: fallback, fallback: true })
-    return respond(coordinates)
   } catch {
-    try {
-      const alongTracks = await osmRailPath(points)
-      if (alongTracks && alongTracks.length >= 2) return respond(alongTracks)
-    } catch {
-      /* The railway graph is optional. A straight chord stays marked as a fallback. */
-    }
-    return NextResponse.json({ coordinates: fallback, fallback: true })
+    /* The router timed out. The map graph below still draws the line. */
   }
+
+  const alongRails = await railwayRouteJoined(points).catch(() => null)
+  if (alongRails && alongRails.length >= 2 && !routeLeavesTheRailway(points, alongRails)) {
+    return publish(alongRails)
+  }
+  return NextResponse.json({ coordinates: fallback, fallback: true })
 }

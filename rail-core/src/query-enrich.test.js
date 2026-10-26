@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { sortCallsByWttTime } from "./journey-order.js";
-import { applyLiveToInferred, carryRunningLateness, dropForeignTdActuals, dropUnreportedOrmPasses, insertReportedPasses, insertSchedulePasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, reportsOnServiceTiploc, retimeInferredPasses, settleUnreportedPasses } from "./query-enrich.js";
+import { applyLiveToInferred, carryRunningLateness, dropForeignTdActuals, dropPassesOffTheLeg, dropUnreportedOrmPasses, insertIntermediateStations, insertReportedPasses, insertSchedulePasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, reportsOnServiceTiploc, retimeInferredPasses, settleUnreportedPasses } from "./query-enrich.js";
 import { openDayDb } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
 import { mkdtempSync } from "node:fs";
@@ -26,7 +26,8 @@ test("insertReportedPasses places a feed location by time and leaves scheduled r
     { tiploc: "HUDDERS", is_passing: 0, wtd: "18:30", atd: "18:40", actual_source: "trust" },
   ];
   const out = insertReportedPasses(calls, [
-    { tiploc: "SLAITHW", crs: "SWT", clock: "18:34", minute: 18 * 60 + 34, source: "td" },
+    { tiploc: "SLAITHW", name: "Slaithwaite", crs: "SWT", clock: "18:34", minute: 18 * 60 + 34, source: "td" },
+    { tiploc: "SIG0042", clock: "18:33", minute: 18 * 60 + 33, source: "td" },
     { tiploc: "MARSDEN", clock: "18:31", minute: 18 * 60 + 31, source: "td" },
   ]);
   assert.deepEqual(
@@ -254,6 +255,59 @@ test("a station plotted on a junction already on the train is not invented", () 
   assert.deepEqual(out.map((c) => c.tiploc), ["ARDWCKJ", "LNGSTN"]);
 });
 
+test("a booked pass off the leg between its neighbours is left out", () => {
+  const off = dropPassesOffTheLeg(
+    [
+      { tiploc: "LOWMOOR", is_passing: 0, crs: "LMR" },
+      { tiploc: "MLLNJN", is_passing: 1, crs: null },
+      { tiploc: "BRADIN", is_passing: 0, crs: "BDI" },
+    ],
+    new Map([
+      ["LOWMOOR", { e: 0, n: 5000 }],
+      ["MLLNJN", { e: -9000, n: 0 }],
+      ["BRADIN", { e: 200, n: 10000 }],
+    ]),
+  );
+  assert.deepEqual(off.map((call) => call.tiploc), ["LOWMOOR", "BRADIN"]);
+
+  const on = dropPassesOffTheLeg(
+    [
+      { tiploc: "BRHOUSE", is_passing: 0, crs: "BGH" },
+      { tiploc: "GRTLNDJ", is_passing: 1, crs: null },
+      { tiploc: "DYCLJN", is_passing: 1, crs: null },
+    ],
+    new Map([
+      ["BRHOUSE", { e: 0, n: 0 }],
+      ["GRTLNDJ", { e: 4000, n: 200 }],
+      ["DYCLJN", { e: 8000, n: 0 }],
+    ]),
+  );
+  assert.deepEqual(on.map((call) => call.tiploc), ["BRHOUSE", "GRTLNDJ", "DYCLJN"]);
+});
+
+test("the other junction out of a stop is not added on the route this train takes", () => {
+  const coords = new Map([
+    ["MIRFILD", { e: 0, n: 0 }],
+    ["HETNLJN", { e: 1000, n: 0 }],
+    ["BRLYWJN", { e: 1800, n: 400 }],
+  ]);
+  const viaEast = ["HETNLEJ", "BRLYWJN"];
+  const viaLodge = ["MIRFILD", "HETNLJN", "BRLYWJN"];
+  const out = insertSegmentJunctions(
+    [
+      { tiploc: "MIRFILD", wtd: "15:14" },
+      { tiploc: "HETNLJN", wtp: "15:18" },
+    ],
+    [viaLodge, viaLodge, viaLodge, viaEast, viaEast, viaEast],
+    coords,
+    [
+      { tiploc: "HETNLEJ", e: 700, n: 0 },
+      { tiploc: "HETNLJN", e: 1000, n: 0 },
+    ],
+  );
+  assert.deepEqual(out.map((c) => c.tiploc), ["MIRFILD", "HETNLJN"]);
+});
+
 test("a junction off the chord, or the same signalling place, is not added", () => {
   const coords = new Map([
     ["SLTHWTE", { e: 0, n: 0 }],
@@ -357,6 +411,80 @@ test("an estimated junction is not cleared once a later stop has reported", () =
   assert.equal(settled[1].etp, "13:55");
 });
 
+test("stations on this train's corridor are added and the other railway is not", () => {
+  const crs = new Map([
+    ["LEEDS", "LDS"],
+    ["WKFLDKG", "WKK"],
+    ["WDLESFD", "WDS"],
+    ["CASTLFD", "CFD"],
+    ["NORMNTN", "NOR"],
+    ["WKFLDWG", "WKF"],
+    ["HULL", "HUL"],
+  ]);
+  const coords = new Map([
+    ["LEEDS", { e: 0, n: 0 }],
+    ["METHLYJ", { e: 0, n: 5000 }],
+    ["ALTFTJN", { e: 0, n: 8000 }],
+    ["WKFLDKG", { e: 0, n: 12000 }],
+    ["WDLESFD", { e: 400, n: 2500 }],
+    ["CASTLFD", { e: 3000, n: 6000 }],
+    ["NORMNTN", { e: 200, n: 10000 }],
+    ["WKFLDWG", { e: -800, n: 11000 }],
+    ["HULL", { e: 40000, n: 0 }],
+  ]);
+  const stopping = ["LEEDS", "METHLYJ", "WDLESFD", "CASTLFD", "ALTFTJN", "NORMNTN", "WKFLDKG"];
+  const fast = ["LEEDS", "METHLYJ", "ALTFTJN", "WKFLDKG"];
+  const west = ["LEEDS", "WKFLDWG", "WKFLDKG"];
+  const stray = ["LEEDS", "METHLYJ", "HULL", "ALTFTJN", "WKFLDKG"];
+  const sequences = [
+    ...Array.from({ length: 8 }, () => stopping),
+    ...Array.from({ length: 8 }, () => fast),
+    ...Array.from({ length: 8 }, () => west),
+    stray,
+  ];
+  const out = insertIntermediateStations(
+    [
+      { tiploc: "LEEDS", is_passing: 0, crs: "LDS", wtd: "16:38" },
+      { tiploc: "METHLYJ", is_passing: 1, wtp: "16:48" },
+      { tiploc: "ALTFTJN", is_passing: 1, wtp: "16:49" },
+      { tiploc: "WKFLDKG", is_passing: 0, crs: "WKK", wta: "16:55" },
+    ],
+    sequences,
+    (tiploc) => crs.get(tiploc) || "",
+    (tiploc) => coords.get(tiploc) || null,
+  );
+  assert.deepEqual(
+    out.map((call) => call.tiploc),
+    ["LEEDS", "METHLYJ", "ALTFTJN", "WKFLDKG"],
+  );
+});
+
+test("a station is added only when every schedule between the booked points passes it", () => {
+  const crs = new Map([
+    ["A", "AAA"],
+    ["B", "BBB"],
+    ["MID", "MID"],
+  ]);
+  const coords = new Map([
+    ["A", { e: 0, n: 0 }],
+    ["JN", { e: 0, n: 5000 }],
+    ["MID", { e: 100, n: 2500 }],
+    ["B", { e: 0, n: 10000 }],
+  ]);
+  const through = ["A", "MID", "JN", "B"];
+  const out = insertIntermediateStations(
+    [
+      { tiploc: "A", is_passing: 0, crs: "AAA", wtd: "10:00" },
+      { tiploc: "JN", is_passing: 1, wtp: "10:10" },
+      { tiploc: "B", is_passing: 0, crs: "BBB", wta: "10:20" },
+    ],
+    Array.from({ length: 5 }, () => through),
+    (tiploc) => crs.get(tiploc) || "",
+    (tiploc) => coords.get(tiploc) || null,
+  );
+  assert.deepEqual(out.map((call) => call.tiploc), ["A", "MID", "JN", "B"]);
+});
+
 test("schedule pass uses the path that also reaches the next stop", () => {
   const fast = ["EUSTON", "WATFDJ", "RUGBY"];
   const slow = ["EUSTON", "SHMPSTD", "KILBNHR", "WATFDJ"];
@@ -417,6 +545,25 @@ test("overlayTdOnCalls maps null-tiploc events via SMART", () => {
   catalog.close();
 });
 
+test("a step from the previous working is not this train running early", () => {
+  const calls = [
+    { tiploc: "COTNGLY", is_passing: 0, wta: "14:53", wtd: "14:53½", ata: "14:56", atd: "14:58", actual_source: "darwin" },
+    { tiploc: "BRLYWJN", is_passing: 1, wtp: "15:19½", atp: "14:54", etp: "15:23", actual_source: "td", live_kind: "actual" },
+    { tiploc: "BRHOUSE", is_passing: 0, wta: "15:22", wtd: "15:33", eta: "15:24", etd: "15:33" },
+  ];
+  const dropped = dropForeignTdActuals(calls);
+  assert.equal(dropped[1].atp, null);
+  assert.equal(dropped[1].etp, "15:23");
+  assert.equal(dropped[0].atd, "14:58");
+  const inferred = applyLiveToInferred(null, [
+    dropped[0],
+    { tiploc: "HETNLEJ", is_passing: 1, wtp: "15:16", actual_source: "inferred" },
+    dropped[1],
+  ], null);
+  assert.equal(inferred[1].atp ?? null, null);
+  assert.notEqual(inferred[1].etp, "14:51");
+});
+
 test("a morning headcode step is not this evening's pass", () => {
   const calls = [
     { tiploc: "SHEFFLD", is_passing: 0, wta: "21:56", wtd: "22:02", atd: "22:02", actual_source: "trust" },
@@ -440,6 +587,20 @@ test("a morning headcode step is not this evening's pass", () => {
   const carried = carryRunningLateness(inferred);
   assert.equal(carried[1].eta, "22:25");
   assert.equal(carried[1].etd, "22:26");
+});
+
+test("overlayTdOnCalls ignores a step already past a timing point this train has not reached", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rail-core-"));
+  const db = openDayDb(dir, "2026-10-26");
+  db.exec(`
+    INSERT INTO td_events (event_id, headcode, area_id, berth, from_berth, msg_type, tiploc, stanox, json, received_at)
+    VALUES ('6', '2J68', 'YW', '1234', '0000', 'CA', 'BRLYWJN', '18469', '{"CA_MSG":{"time":"145420","msg_type":"CA"}}', 6)
+  `);
+  const calls = [{ tiploc: "BRLYWJN", is_passing: 1, wtp: "15:19½", atp: null, etp: "15:23" }];
+  const out = overlayTdOnCalls(db, calls, "2J68");
+  assert.equal(out[0].atp, null);
+  assert.equal(out[0].etp, "15:23");
+  db.close();
 });
 
 test("overlayTdOnCalls ignores a headcode reused from the morning", () => {

@@ -19,6 +19,7 @@ import {
   journeyMapStops,
   liveJourneyPosition,
   mappedRouteWaypoints,
+  pointsOnTheLeg,
   routeWaypointsDiffer,
   snapLiveToRailPath,
   snapMarkerToPath,
@@ -179,13 +180,48 @@ function routeSpan(path: LatLngTuple[]): number {
   return (north - south) + (east - west)
 }
 
-/** The whole journey, drawn once it is on the railway from end to end. */
+/**
+ * One railway leg at a time. A single request for the whole journey snaps a
+ * junction onto whichever parallel track is nearest, and the marker is left
+ * off the line the train takes. Each leg ends on the next timing point.
+ */
+function joinRouteLegs(legs: Array<LatLngTuple[] | undefined>): LatLngTuple[] {
+  const joined: LatLngTuple[] = []
+  for (const leg of legs) {
+    if (!leg || leg.length < 2) {
+      if (joined.length) joined.push([Number.NaN, Number.NaN])
+      continue
+    }
+    appendPath(joined, leg)
+  }
+  const drawn = joined.filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
+  return drawn.length >= 2 ? joined : []
+}
+
 async function fetchRailRouteAlongTrack(
   points: LatLngTuple[],
   signal: AbortSignal,
+  onUpdate?: (path: LatLngTuple[]) => void,
 ): Promise<LatLngTuple[]> {
   if (points.length < 2) return points
-  return routeAlong(points, signal)
+  if (points.length === 2) return routeAlong(points, signal)
+  const legs: Array<LatLngTuple[] | undefined> = new Array(points.length - 1)
+  let cursor = 0
+  const publish = () => {
+    if (signal.aborted) return
+    const path = joinRouteLegs(legs)
+    if (path.length) onUpdate?.(path)
+  }
+  const take = async () => {
+    while (cursor < legs.length && !signal.aborted) {
+      const index = cursor
+      cursor += 1
+      legs[index] = await routeAlong([points[index], points[index + 1]], signal)
+      publish()
+    }
+  }
+  await Promise.all([take(), take(), take(), take()])
+  return joinRouteLegs(legs)
 }
 
 async function fetchTiplocCoords(
@@ -338,7 +374,10 @@ export function ServiceJourneyMap({
   )
 
   const mapped = useMemo(
-    () => journeyMapStops(service.stops || [], stations, extraCoords),
+    () => pointsOnTheLeg(
+      journeyMapStops(service.stops || [], stations, extraCoords),
+      (point) => !point.calling && !String(point.crs || '').trim(),
+    ),
     [service.stops, stations, extraCoords],
   )
   const platformQuery = useMemo(
@@ -444,7 +483,7 @@ export function ServiceJourneyMap({
       if (cancelled || routeEpochRef.current !== epoch || fineRouteDoneRef.current) return
       applyRoutedPath(path)
     }
-    void fetchRailRouteAlongTrack(points, controller.signal)
+    void fetchRailRouteAlongTrack(points, controller.signal, publish)
       .then(publish)
       .catch(() => {
         if (cancelled || routeEpochRef.current !== epoch || fineRouteDoneRef.current) return
@@ -467,7 +506,11 @@ export function ServiceJourneyMap({
     const epoch = routeEpochRef.current
     const controller = new AbortController()
     let cancelled = false
-    void fetchRailRouteAlongTrack(points, controller.signal)
+    void fetchRailRouteAlongTrack(points, controller.signal, (path) => {
+      if (cancelled || routeEpochRef.current !== epoch) return
+      if (railSegments(path).length < 1) return
+      applyRoutedPath(path)
+    })
       .then((path) => {
         if (cancelled || routeEpochRef.current !== epoch) return
         if (railSegments(path).length < 1) return
@@ -602,7 +645,7 @@ export function ServiceJourneyMap({
         ? onPlatform.bay
         : (p.calling && onPlatform?.stand)
           ? onPlatform.stand
-          : onPlatform ?? (placeOnTrack ? snapMarkerToPath(p, railPath, p.kind === 'junction' ? 80 : 250) : p)
+          : onPlatform ?? (placeOnTrack ? snapMarkerToPath(p, railPath, p.kind === 'junction' ? 220 : 250) : p)
       const marker = L.circleMarker(
         [at.lat, at.lng],
         markerOptions(POINT_COLOR[p.kind], p.kind === 'stop' ? 7 : 5, ROUTE_MARKER_PANE),

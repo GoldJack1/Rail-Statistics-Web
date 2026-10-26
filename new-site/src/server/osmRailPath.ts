@@ -24,11 +24,16 @@ export function chainLengthM(points: LatLngTuple[]): number {
   return total
 }
 
-/** The router walked far outside the gap between the waypoints. */
+/**
+ * The router walked far outside the gap between the waypoints.
+ * A valley curve is longer than the straight chord — Halifax to Brighouse
+ * is about one and a half times the chord — and that path is still the railway.
+ * Only a route more than twice as long has left the corridor.
+ */
 export function routeLeavesTheRailway(waypoints: LatLngTuple[], path: LatLngTuple[]): boolean {
   const chain = chainLengthM(waypoints)
   const routed = chainLengthM(path.filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1])))
-  return chain > 40 && routed > chain * 1.6 && routed - chain > 800
+  return chain > 40 && routed > chain * 2.4 && routed - chain > 800
 }
 
 function nodeKey(lat: number, lng: number): string {
@@ -238,37 +243,12 @@ export async function railwayRoute(points: LatLngTuple[]): Promise<LatLngTuple[]
 }
 
 /**
- * One continuous line for the whole journey. Short sections keep each graph
- * small, and they are joined before anything is returned.
+ * One OpenStreetMap fetch for the whole journey. The boxes inside that fetch
+ * stay short, so a long route is not a series of separate rail-map requests.
  */
 export async function railwayRouteJoined(points: LatLngTuple[]): Promise<LatLngTuple[] | null> {
   if (points.length < 2) return null
-  const sectionSize = 4
-  if (points.length <= sectionSize) return railwayRoute(points)
-  const sections: LatLngTuple[][] = []
-  for (let i = 0; i < points.length - 1; i += sectionSize - 1) {
-    const slice = points.slice(i, i + sectionSize)
-    if (slice.length >= 2) sections.push(slice)
-  }
-  const parts: Array<LatLngTuple[] | null> = new Array(sections.length)
-  let cursor = 0
-  async function worker() {
-    while (cursor < sections.length) {
-      const index = cursor
-      cursor += 1
-      let path = await railwayRoute(sections[index]).catch(() => null)
-      if (!path || path.length < 2) path = await railwayRoute(sections[index]).catch(() => null)
-      parts[index] = path
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(3, sections.length) }, () => worker()))
-  const joined: LatLngTuple[] = []
-  for (const part of parts) {
-    if (!part || part.length < 2) return null
-    const start = joined.length > 0 ? 1 : 0
-    for (let i = start; i < part.length; i++) joined.push(part[i])
-  }
-  return joined.length >= 2 ? joined : null
+  return railwayRoute(points)
 }
 
 function waysFromOverpass(payload: unknown): Point[][] {
