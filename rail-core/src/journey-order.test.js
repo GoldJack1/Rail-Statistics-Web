@@ -219,6 +219,17 @@ test("keeps advertised westbound calls after Leeds even without CRS", () => {
   assert.equal(dest.tiploc, "MNCRVIC");
 });
 
+test("keeps a later public arrival when the train has not arrived", () => {
+  const kept = recoverBookedPublic({
+    tiploc: "ABRDEEN",
+    crs: "ABD",
+    sta: "07:50",
+    wta: "07:34",
+    eta: "07:50",
+  });
+  assert.equal(kept.sta, "07:50");
+});
+
 test("recovers public dep when Darwin copied the actual onto std", () => {
   const recovered = recoverBookedPublic({
     tiploc: "MNCRVIC",

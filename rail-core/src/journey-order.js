@@ -325,15 +325,13 @@ export function recoverBookedPublic(c) {
   const out = { ...c };
   const std = publicCallTime(c.std, c);
   const sta = publicCallTime(c.sta, c);
-  if (c.wtd && std && clockGapMinutes(std, c.wtd) >= 8) {
-    if (!c.atd || clockGapMinutes(std, c.atd) <= 2 || clockGapMinutes(std, c.wtd) >= 12) {
-      out.std = String(c.wtd).slice(0, 5);
-    }
+  // Only when the public clock is a copy of an actual. A later public arrival
+  // than the working time is recovery, not a corrupted timetable.
+  if (c.wtd && std && c.atd && clockGapMinutes(std, c.wtd) >= 8 && clockGapMinutes(std, c.atd) <= 2) {
+    out.std = String(c.wtd).slice(0, 5);
   }
-  if (c.wta && sta && clockGapMinutes(sta, c.wta) >= 8) {
-    if (!c.ata || clockGapMinutes(sta, c.ata) <= 2 || clockGapMinutes(sta, c.wta) >= 12) {
-      out.sta = String(c.wta).slice(0, 5);
-    }
+  if (c.wta && sta && c.ata && clockGapMinutes(sta, c.wta) >= 8 && clockGapMinutes(sta, c.ata) <= 2) {
+    out.sta = String(c.wta).slice(0, 5);
   }
   return out;
 }

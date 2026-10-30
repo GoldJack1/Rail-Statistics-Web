@@ -117,6 +117,15 @@ describe('calling pattern path and carried delay', () => {
       liveKind: 'actual-arr',
     })
     expect(colourDelay(waiting, 'stop')).toBe(-4)
+    const publicTerminus = passStop({
+      slot: 'DT',
+      wtp: null,
+      pta: '10:00',
+      wta: '09:55',
+      eta: '10:00',
+      liveKind: 'est-arr',
+    })
+    expect(colourDelay(publicTerminus, 'destination')).toBe(0)
     const waitingOnly = stationArrivalFirst(waiting, 'stop')
     expect(waitingOnly?.departedTime).toBeNull()
     expect(waitingOnly?.time).toBe('14:12')

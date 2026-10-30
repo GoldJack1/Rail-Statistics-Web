@@ -318,8 +318,8 @@ function pairedDelay(booked: string | null | undefined, real: string | null | un
 /** Arrival is WTT arr against realtime arr. Departure or pass is its own pair. */
 export function movementDelays(stop: ServiceStop, kind: StopKind): { arrival: number | null; departure: number | null } {
   if (stop.unknownDelay) return { arrival: null, departure: null }
-  const arrival = kind === 'pass' ? null : pairedDelay(stop.wta || stop.pta, stop.ata || stop.eta)
-  const depBooked = kind === 'pass' ? (stop.wtp || stop.wtd) : (stop.wtd || stop.ptd)
+  const arrival = kind === 'pass' ? null : pairedDelay(publicArrival(stop) || stop.wta, stop.ata || stop.eta)
+  const depBooked = kind === 'pass' ? (stop.wtp || stop.wtd) : (publicDeparture(stop) || stop.wtd)
   const depActual = trimSeconds(kind === 'pass' ? stop.atp : stop.atd)
   const depEstimate = trimSeconds(kind === 'pass' ? stop.etp : stop.etd)
   // An arrival must not be reused as the departure. An estimate counts only before the train has arrived.
