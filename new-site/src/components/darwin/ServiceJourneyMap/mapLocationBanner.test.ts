@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ServiceStop } from '@/types/darwin'
 import type { LiveJourneyPosition } from '@/utils/serviceJourneyMap'
-import { mapLocationBanner } from './mapLocationBanner'
+import { mapLocationBanner, portionBannerTitle } from './mapLocationBanner'
 
 function stop(partial: Partial<ServiceStop> & Pick<ServiceStop, 'tpl' | 'slot'>): ServiceStop {
   return {
@@ -39,6 +39,15 @@ function point(index: number, name: string, tpl: string, kind: 'stop' | 'pass'):
     platform: null,
   }
 }
+
+describe('portionBannerTitle', () => {
+  it('names a portion by its headcode and the stations at each end', () => {
+    expect(portionBannerTitle('1B01', [
+      stop({ tpl: 'FRTWLM', name: 'Fort William', slot: 'OR' }),
+      stop({ tpl: 'EDINBUR', name: 'Edinburgh', slot: 'DT' }),
+    ])).toBe('1B01 · Fort William → Edinburgh')
+  })
+})
 
 describe('mapLocationBanner', () => {
   it('names a passed point and the expected next point, with lateness', () => {

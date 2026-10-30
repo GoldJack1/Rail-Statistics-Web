@@ -6,6 +6,18 @@ import type { LiveJourneyPosition } from '@/utils/serviceJourneyMap'
 export type MapLocationBanner = {
   text: string
   tone: CallingPatternTone
+  title?: string
+}
+
+/** Headcode and the ends of this portion, for a bar above a split map. */
+export function portionBannerTitle(trainId: string | null | undefined, stops: ServiceStop[]): string {
+  const named = (stops || []).filter((stop) => stop.name && stop.name !== stop.tpl)
+  const first = named.find((stop) => stop.slot !== 'PP') || named[0]
+  const last = named[named.length - 1]
+  const origin = first?.name || ''
+  const dest = last?.name || ''
+  const route = origin && dest && origin !== dest ? `${origin} → ${dest}` : origin || dest
+  return [String(trainId || '').trim(), route].filter(Boolean).join(' · ')
 }
 
 function hm(value: string | null | undefined): string {

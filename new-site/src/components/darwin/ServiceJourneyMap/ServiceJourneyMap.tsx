@@ -17,7 +17,7 @@ import { useTocOperators } from '../../../hooks/useTocOperators'
 import { resolveTocRouteColor } from '../../../utils/tocOperatorMap'
 import type { ServiceDetail, ServiceStop } from '../../../types/darwin'
 import type { Station } from '../../../types'
-import { mapLocationBanner, type MapLocationBanner } from './mapLocationBanner'
+import { mapLocationBanner, portionBannerTitle, type MapLocationBanner } from './mapLocationBanner'
 import { loadGbRailGraph } from '../../../utils/tracksRailGraph'
 import { ServiceTracksMap, type BranchTrack } from './ServiceTracksMap'
 
@@ -119,7 +119,7 @@ export function ServiceJourneyMap({
   /** Other portions of a split, each with its own live position. */
   branches?: ServiceDetail[]
 }) {
-  const [banner, setBanner] = useState<MapLocationBanner | null>(null)
+  const [banners, setBanners] = useState<MapLocationBanner[]>([])
   const [extraCoords, setExtraCoords] = useState<Record<string, { lat: number; lng: number }>>({})
   const [platformCoords, setPlatformCoords] = useState<Record<string, RoutePlatform>>({})
   const [platformQueryReady, setPlatformQueryReady] = useState<string | null>(null)
@@ -128,10 +128,20 @@ export function ServiceJourneyMap({
   const nominatimTriedRef = useRef<string | null>(null)
   const bannerKeyRef = useRef('')
   const liveInputRef = useRef({
-    stops: service.stops,
-    mapped: [] as ReturnType<typeof journeyMapStops>,
-    location: service.location,
-    cancelled: service.cancelled,
+    self: {
+      title: '',
+      stops: service.stops || [],
+      mapped: [] as ReturnType<typeof journeyMapStops>,
+      location: service.location,
+      cancelled: service.cancelled,
+    },
+    others: [] as Array<{
+      title: string
+      stops: ServiceStop[]
+      mapped: ReturnType<typeof journeyMapStops>
+      location: ServiceDetail['location']
+      cancelled: boolean
+    }>,
   })
   const shellRef = useRef<HTMLDivElement>(null)
   const [fullscreen, setFullscreen] = useState(false)
@@ -220,12 +230,26 @@ export function ServiceJourneyMap({
 
   useEffect(() => {
     liveInputRef.current = {
-      stops: service.stops,
-      mapped,
-      location: service.location,
-      cancelled: service.cancelled,
+      self: {
+        title: portionBannerTitle(service.trainId, service.stops || []),
+        stops: service.stops || [],
+        mapped,
+        location: service.location,
+        cancelled: service.cancelled,
+      },
+      others: branchTracks.flatMap((track) => {
+        const branch = branches.find((svc) => svc.rid === track.rid)
+        if (!branch) return []
+        return [{
+          title: portionBannerTitle(branch.trainId, branch.stops || []),
+          stops: track.stops,
+          mapped: track.mapped,
+          location: track.location,
+          cancelled: branch.cancelled,
+        }]
+      }),
     }
-  }, [service.stops, mapped, service.location, service.cancelled])
+  }, [service, mapped, branchTracks, branches])
 
   useEffect(() => {
     if (!neededKey) {
@@ -301,14 +325,20 @@ export function ServiceJourneyMap({
       raf = window.requestAnimationFrame(tick)
       if (ts - lastCaptionAt < 400) return
       lastCaptionAt = ts
-      const { stops, mapped: pts, location, cancelled } = liveInputRef.current
-      if (!pts.length) return
-      const raw = liveJourneyPosition(stops || [], pts, location, londonNowRailwaySeconds())
-      const next = mapLocationBanner(stops || [], raw, { cancelled })
-      const key = next ? `${next.tone}|${next.text}` : ''
+      const { self, others } = liveInputRef.current
+      const rows = [self, ...others]
+      const now = londonNowRailwaySeconds()
+      const next = rows.flatMap((row) => {
+        if (!row.mapped.length) return []
+        const raw = liveJourneyPosition(row.stops, row.mapped, row.location, now)
+        const banner = mapLocationBanner(row.stops, raw, { cancelled: row.cancelled })
+        if (!banner) return []
+        return [{ ...banner, title: rows.length > 1 ? row.title : undefined }]
+      })
+      const key = next.map((banner) => `${banner.title || ''}|${banner.tone}|${banner.text}`).join('\n')
       if (key !== bannerKeyRef.current) {
         bannerKeyRef.current = key
-        setBanner(next)
+        setBanners(next)
       }
     }
     raf = window.requestAnimationFrame(tick)
@@ -410,10 +440,19 @@ export function ServiceJourneyMap({
 
   return (
     <div className={immersive ? 'svc-journey-map svc-journey-map--immersive' : 'svc-journey-map'} ref={shellRef}>
-      {banner ? (
-        <p className={`svc-journey-map__where svc-journey-map__where--${banner.tone}`} role="status">
-          {banner.text}
-        </p>
+      {banners.length ? (
+        <div className="svc-journey-map__wheres">
+          {banners.map((banner) => (
+            <p
+              key={banner.title || banner.text}
+              className={`svc-journey-map__where svc-journey-map__where--${banner.tone}`}
+              role="status"
+            >
+              {banner.title ? <span className="svc-journey-map__where-route">{banner.title}</span> : null}
+              <span>{banner.text}</span>
+            </p>
+          ))}
+        </div>
       ) : null}
       <div className="svc-journey-map__stage">
         <ServiceTracksMap

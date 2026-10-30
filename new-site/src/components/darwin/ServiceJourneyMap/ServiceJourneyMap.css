@@ -57,6 +57,12 @@ html.svc-map-immersive body {
   background: #111920;
 }
 
+.svc-journey-map__wheres {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
 .svc-journey-map__where {
   display: flex;
   flex-direction: column;
@@ -73,6 +79,12 @@ html.svc-map-immersive body {
   line-height: 1.35;
   color: var(--cp-ontime-fg);
   background: var(--cp-ontime-bg);
+}
+
+.svc-journey-map__where-route {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
 }
 
 .svc-journey-map__where--ontime { color: var(--cp-ontime-fg); background: var(--cp-ontime-bg); }
