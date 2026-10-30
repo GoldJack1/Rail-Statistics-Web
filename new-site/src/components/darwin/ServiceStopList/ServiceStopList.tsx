@@ -222,6 +222,20 @@ function isActualLiveKind(kind?: string | null): boolean {
   return kind === 'actual' || kind === 'actual-arr'
 }
 
+/** Evening departure still to come. A morning clock is the day after, not before. */
+function originStillToDepart(stops: ServiceStop[], nowMins: number | null): boolean {
+  if (nowMins == null) return false
+  const origin = stops.find((stop) => slotKind(stop.slot) === 'origin') || stops.find((stop) => slotKind(stop.slot) !== 'pass')
+  if (!origin) return false
+  if (trimSeconds(origin.atd || origin.ata || origin.atp) || isActualLiveKind(origin.liveKind)) return false
+  const booked = trimSeconds(origin.ptd || origin.wtd)
+  if (!booked) return false
+  const dep = railwayDayMinutesFromHhmm(booked)
+  if (dep == null || nowMins >= dep) return false
+  if (dep >= 12 * 60 && nowMins < 12 * 60) return false
+  return true
+}
+
 function londonNowRailwayMinutes(): number | null {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/London',
@@ -232,6 +246,28 @@ function londonNowRailwayMinutes(): number | null {
   }).formatToParts(new Date())
   const pick = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || '00'
   return railwayDayMinutesFromHhmm(`${pick('hour')}:${pick('minute')}`)
+}
+
+function clockMinutes(value: string | null | undefined): number | null {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || '').trim())
+  if (!match) return null
+  return Number(match[1]) * 60 + Number(match[2])
+}
+
+/**
+ * A pass time at a station is not a call. A working dwell of at least two
+ * minutes is a booked stop even when it has no public arrival or departure.
+ */
+export function asBookedCall(stop: ServiceStop): ServiceStop {
+  if (slotKind(stop.slot) !== 'pass') return stop
+  if (String(stop.wtp || '').trim()) return stop
+  const arr = clockMinutes(stop.wta)
+  const dep = clockMinutes(stop.wtd)
+  if (arr == null || dep == null) return stop
+  let gap = dep - arr
+  if (gap < 0) gap += 24 * 60
+  if (gap < 2 || gap >= 12 * 60) return stop
+  return { ...stop, slot: 'IP' }
 }
 
 function isPublicCall(stop: ServiceStop): boolean {
@@ -778,7 +814,7 @@ export function ServiceStopList({
   }, [historical, orderedStops])
   const showPasses = viewMode === 'detailed'
   const mileageStops = useEurostarRunningMiles(orderedStops, showPasses)
-  const reportedFull = historical
+  const reportedFull = historical || originStillToDepart(orderedStops, nowMins)
     ? null
     : inferProgressIndex(orderedStops, nowMins) ?? reportedIndex(orderedStops, location?.last?.tiploc)
   const stopHasActual = (stop: ServiceStop) =>
@@ -786,10 +822,10 @@ export function ServiceStopList({
   // Detailed keeps upcoming working passes as Expected; drop densify rows the train
   // has already gone past without a report (those were filling the list with "No report").
   const visible = mileageStops
-    .map((stop, index) => ({ stop, index }))
+    .map((stop, index) => ({ stop: asBookedCall(stop), index }))
     .filter(({ stop, index }) => {
       const kind = slotKind(stop.slot)
-      if (!showPasses && kind === 'pass' && !String(stop.crs || '').trim()) return false
+      if (!showPasses && kind === 'pass') return false
       if (
         showPasses &&
         kind === 'pass' &&

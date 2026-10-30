@@ -38,6 +38,25 @@ function ensurePmtiles() {
   pmtilesReady = true
 }
 
+function frameJourney(map: MapLibreMap, stops: JourneyMapStop[]) {
+  const pts = stops.filter((stop) => Number.isFinite(stop.lat) && Number.isFinite(stop.lng))
+  if (pts.length < 2) return
+  let west = Infinity
+  let south = Infinity
+  let east = -Infinity
+  let north = -Infinity
+  for (const stop of pts) {
+    west = Math.min(west, stop.lng)
+    east = Math.max(east, stop.lng)
+    south = Math.min(south, stop.lat)
+    north = Math.max(north, stop.lat)
+  }
+  map.fitBounds(
+    [[west, south], [east, north]],
+    { padding: 48, maxZoom: 10, duration: 0 },
+  )
+}
+
 function londonNowRailwaySeconds(): number {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/London',
@@ -182,7 +201,8 @@ export function ServiceTracksMap({
   const pathRef = useRef<LatLngTuple[] | null>(null)
   const inputRef = useRef({ stops, mapped, location, platforms })
   const shownRef = useRef<{ lat: number; lng: number } | null>(null)
-  const viewLockedRef = useRef(false)
+  const userMovedRef = useRef(false)
+  const framedCountRef = useRef(0)
   const lineColor = theme === 'dark' ? liftRouteColorForDarkBasemap(routeColor) : routeColor
   const routeColorRef = useRef(lineColor)
   const appliedTheme = useRef(theme)
@@ -200,25 +220,25 @@ export function ServiceTracksMap({
   useEffect(() => {
     const container = containerRef.current
     if (!container || mapped.length < 1) return
-    const raw = liveJourneyPosition(stops || [], mapped, location, londonNowRailwaySeconds())
-    const live = raw && Number.isFinite(raw.lat) ? raw : null
-    const center = live ? [live.lng, live.lat] : [mapped[0].lng, mapped[0].lat]
+    const center = [mapped[0].lng, mapped[0].lat]
     ensurePmtiles()
     const map = new maplibregl.Map({
       container,
       style: tracksMapStyle(theme),
       center: center as [number, number],
-      zoom: live ? 13 : 8,
+      zoom: 5,
       minZoom: 4,
       maxZoom: 16,
       maxCanvasSize: [8192, 8192],
       attributionControl: false,
       fadeDuration: 0,
     })
-    viewLockedRef.current = Boolean(live)
     mapRef.current = map
     const onZoom = () => setZoom(map.getZoom())
     map.on('zoom', onZoom)
+    map.on('movestart', (event) => {
+      if (event.originalEvent) userMovedRef.current = true
+    })
     const addRouteLayers = () => {
       if (map.getSource('tracks-route')) return
       map.addSource('tracks-route', { type: 'geojson', data: EMPTY })
@@ -306,7 +326,6 @@ export function ServiceTracksMap({
       map.remove()
       mapRef.current = null
       setMapReady(null)
-      viewLockedRef.current = false
       shownRef.current = null
     }
     // The map is created once per mount. Route and stop updates go through sources.
@@ -365,6 +384,14 @@ export function ServiceTracksMap({
   }, [mapped, platforms, mapReady])
 
   useEffect(() => {
+    const map = mapRef.current
+    if (!mapReady || !map || userMovedRef.current) return
+    if (mapped.length < 2 || mapped.length === framedCountRef.current) return
+    frameJourney(map, mapped)
+    framedCountRef.current = mapped.length
+  }, [mapped, mapReady])
+
+  useEffect(() => {
     let raf = 0
     let last = performance.now()
     const tick = (ts: number) => {
@@ -393,10 +420,6 @@ export function ServiceTracksMap({
       setSource(map, 'tracks-live', pointCollection(shownRef.current.lat, shownRef.current.lng, live.label))
       if (tipLiveRef.current && tipRef.current) {
         tipRef.current.setLngLat([shownRef.current.lng, shownRef.current.lat]).setHTML(tipHtml(live.label))
-      }
-      if (!viewLockedRef.current) {
-        map.jumpTo({ center: [shownRef.current.lng, shownRef.current.lat], zoom: 13 })
-        viewLockedRef.current = true
       }
     }
     raf = window.requestAnimationFrame(tick)

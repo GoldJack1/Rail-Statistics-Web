@@ -417,6 +417,23 @@ test("an early unbooked report does not jump the train to the destination", () =
   assert.equal(loc.last.tiploc, "GRGRAVE");
 });
 
+test("an evening sleeper is not finished because its morning arrival is already past", () => {
+  const loc = computeServiceLocation(
+    [
+      { tiploc: "EUSTON", crs: "EUS", seq: 0, std: "21:15", is_passing: 0 },
+      { tiploc: "WILSDJ", seq: 1, wtp: "21:21", atp: "09:10", is_passing: 1, actual_source: "td" },
+      { tiploc: "INVRNES", crs: "INV", seq: 2, sta: "09:17", is_passing: 0 },
+    ],
+    {
+      ymd: "2026-10-30",
+      now: new Date("2026-10-30T20:25:00Z"),
+      stationName: (crs, tpl) => ({ EUS: "London Euston", INV: "Inverness" }[crs] || tpl),
+    },
+  );
+  assert.equal(loc.phase, "not_started");
+  assert.equal(loc.label, "Not left London Euston");
+});
+
 test("location at_station when arrived and not departed", () => {
   const loc = computeServiceLocation(
     [

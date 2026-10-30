@@ -723,16 +723,30 @@ export function liveJourneyPosition(
 ): LiveJourneyPosition | null {
   const path = mapped.filter((p) => !p.cancelled)
   if (!path.length) return null
-  if (location?.phase === 'not_started') {
+  const origin = path[0]
+  const originStop = stops[origin.index]
+  const originLeft = Boolean(String(originStop?.atd || originStop?.ata || originStop?.atp || '').slice(0, 5))
+  const originBooked = railwayDaySecondsFromClock(String(originStop?.ptd || originStop?.wtd || ''))
+  const stillToDepart =
+    !originLeft &&
+    originBooked != null &&
+    nowSecs != null &&
+    nowSecs < originBooked &&
+    !(originBooked >= 12 * 3600 && nowSecs < 12 * 3600)
+  if (stillToDepart || location?.phase === 'not_started') {
     const first = path[0]
-    return { lat: first.lat, lng: first.lng, label: location.label || `At ${first.name}`, atStation: true, from: first, to: first, t: 0 }
+    return { lat: first.lat, lng: first.lng, label: location?.label || `At ${first.name}`, atStation: true, from: first, to: first, t: 0 }
   }
+  let place = location
   if (location?.phase === 'finished') {
-    const last = path[path.length - 1]
-    return { lat: last.lat, lng: last.lng, label: location.label || `Arrived ${last.name}`, atStation: true, from: last, to: last, t: 1 }
+    if (originLeft) {
+      const last = path[path.length - 1]
+      return { lat: last.lat, lng: last.lng, label: location.label || `Arrived ${last.name}`, atStation: true, from: last, to: last, t: 1 }
+    }
+    place = null
   }
 
-  const locLast = indexOfTiploc(stops, location?.last?.tiploc)
+  const locLast = indexOfTiploc(stops, place?.last?.tiploc)
   const reported = locLast ?? inferProgressIndex(stops, null)
   if (reported == null) {
     const first = path[0]

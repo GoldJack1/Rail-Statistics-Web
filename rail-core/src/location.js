@@ -52,8 +52,26 @@ export function computeServiceLocation(calls, opts = {}) {
   const dest = [...journey].reverse().find((c) => !isPass(c)) || journey[journey.length - 1];
   const destActual = dest ? actualClock(dest) && dest.ata : false;
 
+  const origin = journey.find((c) => !isPass(c)) || journey[0];
+  const originClock = origin?.std || origin?.wtd || origin?.ptd || origin?.sta || null;
+  const originAt = originClock && ymd ? londonInstant(ymd, String(originClock).slice(0, 5)) : null;
+  const originDeparted = Boolean(origin && actualClock(origin));
+  const originIdx = journey.indexOf(origin);
+  const reportedBeforeOrigin = journey.slice(0, Math.max(0, originIdx)).some((c) => actualClock(c));
+  // A morning destination on an evening departure is tomorrow. A stray report
+  // after the origin must not finish the train while it is still due to leave.
+  if (!originDeparted && !reportedBeforeOrigin && originAt && now.getTime() < originAt.getTime()) {
+    return {
+      phase: "not_started",
+      last: null,
+      next: point(origin),
+      label: `Not left ${nameOf(origin, opts.stationName)}`,
+      fresh: false,
+    };
+  }
+
   if (lastIdx < 0) {
-    const first = journey.find((c) => !isPass(c)) || journey[0];
+    const first = origin;
     return {
       phase: "not_started",
       last: null,
@@ -109,8 +127,13 @@ export function computeServiceLocation(calls, opts = {}) {
   }
 
   const destBooked = dest?.sta || dest?.ata || dest?.std;
-  const destAt = destBooked && ymd ? londonInstant(ymd, String(destBooked).slice(0, 5)) : null;
-  const destOverdue = destBooked && ymd && destAt && !locationIsFresh(destBooked, ymd, now, 40 * 60_000) && now.getTime() > destAt.getTime();
+  const destClock = destBooked ? String(destBooked).slice(0, 5) : "";
+  const destMins = parseHmMinutes(destClock);
+  const originMins = parseHmMinutes(originClock);
+  const overnight = originMins != null && destMins != null && destMins + 6 * 60 < originMins;
+  let destAt = destClock && ymd ? londonInstant(ymd, destClock) : null;
+  if (destAt && overnight && destMins < 12 * 60) destAt = new Date(destAt.getTime() + 24 * 60 * 60 * 1000);
+  const destOverdue = Boolean(destAt && now.getTime() > destAt.getTime() + 40 * 60_000);
   if (!fresh && destOverdue) {
     return {
       phase: "finished",

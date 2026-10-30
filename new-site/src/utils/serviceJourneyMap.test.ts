@@ -477,6 +477,28 @@ describe('serviceJourneyMap', () => {
     expect(halfway?.to?.name).toBe('York')
   })
 
+  it('keeps an evening sleeper at the origin when a morning arrival is marked finished', () => {
+    const stops = [
+      stop('LEEDS', 'Leeds', 'OR', { crs: 'LDS', ptd: '21:15' }),
+      stop('YORK', 'York', 'DT', { crs: 'YRK', pta: '09:17', eta: '09:10', liveKind: 'est-arr', liveTime: '09:10' }),
+    ]
+    const mapped = journeyMapStops(stops, stations)
+    const live = liveJourneyPosition(
+      stops,
+      mapped,
+      {
+        phase: 'finished',
+        last: { tiploc: 'YORK', crs: 'YRK', kind: 'stop', at: '09:10' },
+        next: null,
+        label: 'No later reports after York',
+      },
+      20 * 3600 + 25 * 60,
+    )
+    expect(live?.lat).toBe(53.795)
+    expect(live?.atStation).toBe(true)
+    expect(live?.from?.name).toBe('Leeds')
+  })
+
   it('moves on the live forecast rather than the public arrival', () => {
     const stops = [
       stop('LEEDS', 'Leeds', 'OR', { crs: 'LDS', ptd: '12:00', atd: '12:10', liveKind: 'actual', liveTime: '12:10' }),

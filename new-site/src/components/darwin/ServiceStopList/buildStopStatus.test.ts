@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ServiceStop } from '@/types/darwin'
-import { arrivalAside, buildStopStatus, colourDelay, delayMinutesAlong, platformCell, stationArrivalFirst } from './ServiceStopList'
+import { arrivalAside, asBookedCall, buildStopStatus, colourDelay, delayMinutesAlong, platformCell, stationArrivalFirst } from './ServiceStopList'
 
 function passStop(overrides: Partial<ServiceStop> = {}): ServiceStop {
   return {
@@ -13,6 +13,14 @@ function passStop(overrides: Partial<ServiceStop> = {}): ServiceStop {
     ...overrides,
   } as ServiceStop
 }
+
+describe('asBookedCall', () => {
+  it('keeps a station pass as a pass and a working dwell as a stop', () => {
+    expect(asBookedCall(passStop({ crs: 'WMB', wtp: '21:23½', wta: null, wtd: null })).slot).toBe('PP')
+    expect(asBookedCall(passStop({ crs: 'EDB', wtp: null, wta: '03:47', wtd: '04:20' })).slot).toBe('IP')
+    expect(asBookedCall(passStop({ crs: 'CHF', wtp: null, wta: '16:56', wtd: '16:57' })).slot).toBe('PP')
+  })
+})
 
 describe('buildStopStatus densify / working passes', () => {
   it('shows Expected + wtp instead of Delayed when carried delay has no live report', () => {

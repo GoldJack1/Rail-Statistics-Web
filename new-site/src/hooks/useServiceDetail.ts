@@ -167,9 +167,10 @@ export function useServiceDetail({
   date,
   at,
 }: UseServiceDetailOptions): UseServiceDetailResult {
-  const [data, setData]     = useState<ServiceDetail | null>(null)
+  const cachedOnMount = rid ? getCachedService(serviceCacheKey(rid, date, at)) : null
+  const [data, setData]     = useState<ServiceDetail | null>(cachedOnMount)
   const [error, setError]   = useState<string | null>(null)
-  const [status, setStatus] = useState<ServiceDetailStatus>('idle')
+  const [status, setStatus] = useState<ServiceDetailStatus>(cachedOnMount ? 'ok' : 'idle')
   const [ageMs, setAgeMs]   = useState<number | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
