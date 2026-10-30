@@ -333,7 +333,7 @@ export function ServiceJourneyMap({
       return
     }
     const webkitRequest = (shell as HTMLElement & { webkitRequestFullscreen?: () => void }).webkitRequestFullscreen
-    let pending: Promise<void> | void
+    let pending: Promise<void> | undefined = undefined
     try {
       if (typeof shell.requestFullscreen === 'function') pending = shell.requestFullscreen()
       else if (typeof webkitRequest === 'function') webkitRequest.call(shell)
