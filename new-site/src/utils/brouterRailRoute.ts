@@ -82,11 +82,15 @@ export function routedCoordinates(payload: unknown): LatLngTuple[] | null {
 
 const OPEN_RAIL_ROUTE = 'https://routing.openrailrouting.org/route'
 
-/** Standard-gauge tracks, including the branches a working timetable actually uses. */
+/**
+ * Heavy rail only. non_tgv is railway=rail, so metro, tram and tube are not
+ * in the graph. all_tracks_1435 includes them, and a Tyne and Wear Metro
+ * out-and-back was being drawn as the East Coast line through Newcastle.
+ */
 export function buildOpenRailRouteUrl(points: LatLngTuple[]): string {
   const url = new URL(OPEN_RAIL_ROUTE)
   for (const [lat, lng] of points) url.searchParams.append('point', `${lat},${lng}`)
-  url.searchParams.set('profile', 'all_tracks_1435')
+  url.searchParams.set('profile', 'non_tgv')
   url.searchParams.set('points_encoded', 'false')
   url.searchParams.set('instructions', 'false')
   url.searchParams.set('elevation', 'false')

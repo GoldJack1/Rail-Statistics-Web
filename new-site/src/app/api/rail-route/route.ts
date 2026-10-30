@@ -15,7 +15,7 @@ const routeCache = new Map<string, { at: number; coordinates: LatLngTuple[] }>()
 const ROUTE_CACHE_MS = 30 * 60 * 1000
 
 function routeCacheKey(points: LatLngTuple[]): string {
-  return `geom13|${points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')}`
+  return `geom14|${points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')}`
 }
 
 function readCoord(value: string | null): number | null {

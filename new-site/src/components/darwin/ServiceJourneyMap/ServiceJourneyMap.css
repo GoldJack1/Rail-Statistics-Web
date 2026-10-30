@@ -1,3 +1,8 @@
+html.svc-map-immersive,
+html.svc-map-immersive body {
+  overflow: hidden;
+}
+
 .svc-journey-map {
   display: flex;
   flex-direction: column;
@@ -8,10 +13,22 @@
   background: var(--bg-secondary);
 }
 
-.svc-journey-map:fullscreen {
+.svc-journey-map:fullscreen,
+.svc-journey-map--immersive {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
   width: 100%;
   height: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
   background: var(--bg-primary);
+}
+
+.svc-journey-map:fullscreen .svc-journey-map__canvas,
+.svc-journey-map--immersive .svc-journey-map__canvas {
+  min-height: 0;
+  height: 100%;
 }
 
 .svc-journey-map__canvas {
@@ -25,9 +42,19 @@
   background: var(--bg-secondary);
 }
 
-.svc-journey-map:fullscreen .svc-journey-map__canvas {
-  min-height: 100%;
-  height: 100%;
+.svc-journey-map__stage {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.svc-journey-map__canvas--tracks {
+  background: var(--bg-secondary);
+}
+
+[data-theme='dark'] .svc-journey-map__canvas--tracks {
+  background: #111920;
 }
 
 .svc-journey-map__where {
@@ -84,7 +111,46 @@
   color: inherit;
 }
 
-.leaflet-container .svc-journey-map__fullscreen {
+.maplibregl-map .svc-journey-map__tip {
+  pointer-events: none;
+  opacity: 0.95;
+}
+
+.maplibregl-map .svc-journey-map__tip .maplibregl-popup-content {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.maplibregl-map .svc-journey-map__tip .leaflet-tooltip {
+  position: relative;
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.5;
+  color: #222;
+  background-color: #fff;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+}
+
+[data-theme='dark'] .maplibregl-map .svc-journey-map__tip .leaflet-tooltip {
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  border-color: var(--bg-primary);
+}
+
+[data-theme='dark'] .maplibregl-map .svc-journey-map__tip .leaflet-tooltip-top::before {
+  border-top-color: var(--bg-primary);
+}
+
+.maplibregl-map .svc-journey-map__tip .maplibregl-popup-tip {
+  display: none;
+}
+
+.maplibregl-map .svc-journey-map__fullscreen {
   position: absolute;
   top: max(var(--space-md), env(safe-area-inset-top, 0px));
   right: max(var(--space-md), env(safe-area-inset-right, 0px));
@@ -92,7 +158,7 @@
   pointer-events: none;
 }
 
-.leaflet-container .svc-journey-map__fullscreen .rs-button {
+.maplibregl-map .svc-journey-map__fullscreen .rs-button {
   pointer-events: auto;
 }
 

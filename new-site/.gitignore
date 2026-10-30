@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# Raw Overpass download. The compact graph is public/data/gb-passenger-rail.json.
+/public/data/gb-passenger-rail.overpass.json
+
 # production
 /build
 

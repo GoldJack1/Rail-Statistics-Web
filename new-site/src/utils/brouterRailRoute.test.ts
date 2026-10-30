@@ -93,7 +93,7 @@ describe('parseOpenRailRoute', () => {
 })
 
 describe('buildOpenRailRouteUrl', () => {
-  it('sends every timing point in lat,lng order on the standard-gauge profile', () => {
+  it('sends every timing point in lat,lng order on the heavy-rail profile', () => {
     const url = buildOpenRailRouteUrl([
       [53.48748, -2.2426],
       [53.49631, -2.21258],
@@ -101,7 +101,7 @@ describe('buildOpenRailRouteUrl', () => {
     expect(url).toContain('https://routing.openrailrouting.org/route?')
     expect(url).toContain('point=53.48748%2C-2.2426')
     expect(url).toContain('point=53.49631%2C-2.21258')
-    expect(url).toContain('profile=all_tracks_1435')
+    expect(url).toContain('profile=non_tgv')
     expect(url).toContain('points_encoded=false')
   })
 })

@@ -1,5 +1,6 @@
 /* Portaled inside .leaflet-container so tiles cannot paint over controls on WebKit. */
-.leaflet-container .map-zoom-control {
+.leaflet-container .map-zoom-control,
+.maplibregl-map .map-zoom-control {
   position: absolute;
   top: max(var(--space-md), env(safe-area-inset-top, 0px));
   left: max(var(--space-md), env(safe-area-inset-left, 0px));
@@ -12,11 +13,13 @@
   -webkit-transform: translate3d(0, 0, 0);
 }
 
-.leaflet-container .map-zoom-control .rs-button {
+.leaflet-container .map-zoom-control .rs-button,
+.maplibregl-map .map-zoom-control .rs-button {
   pointer-events: auto;
 }
 
-.leaflet-container .map-zoom-control .rs-button__icon svg {
+.leaflet-container .map-zoom-control .rs-button__icon svg,
+.maplibregl-map .map-zoom-control .rs-button__icon svg {
   display: block;
   width: 16px;
   height: 16px;

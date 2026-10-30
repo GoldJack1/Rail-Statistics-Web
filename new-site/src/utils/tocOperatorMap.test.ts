@@ -3,6 +3,7 @@ import {
   getContrastingTextColor,
   getTocOperatorChipColors,
   mapTocOperatorDoc,
+  liftRouteColorForDarkBasemap,
   resolveTocRouteColor,
   resolveNreTocCodeDisplayName,
   resolveTocOperatorDisplayName,
@@ -47,6 +48,13 @@ describe('getTocOperatorChipColors', () => {
 
   it('falls back when TOC is unknown', () => {
     expect(getTocOperatorChipColors(operators, 'Unknown TOC').bg).toBe('#64748b')
+  })
+
+  it('lifts a dark brand colour for the dark basemap and leaves a light one', () => {
+    const lifted = liftRouteColorForDarkBasemap('#660033')
+    expect(lifted).not.toBe('#660033')
+    expect(parseInt(lifted.slice(1, 3), 16)).toBeGreaterThan(parseInt(lifted.slice(3, 5), 16))
+    expect(liftRouteColorForDarkBasemap('#E10600')).toBe('#E10600')
   })
 
   it('resolves a route colour from the TOC name or code', () => {

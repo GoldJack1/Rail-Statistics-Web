@@ -69,6 +69,39 @@ export function getContrastingTextColor(backgroundHex: string): string {
   return relativeLuminance(backgroundHex) > 0.45 ? '#1a1a1a' : '#ffffff'
 }
 
+function mixTowardWhite(hex: string, amount: number): string {
+  const value = hex.slice(1)
+  const channel = (offset: number) => {
+    const current = parseInt(value.slice(offset, offset + 2), 16)
+    return Math.round(current + (255 - current) * amount)
+      .toString(16)
+      .padStart(2, '0')
+  }
+  return `#${channel(0)}${channel(2)}${channel(4)}`.toUpperCase()
+}
+
+function maxChannel(hex: string): number {
+  const value = hex.slice(1)
+  return Math.max(
+    parseInt(value.slice(0, 2), 16),
+    parseInt(value.slice(2, 4), 16),
+    parseInt(value.slice(4, 6), 16),
+  ) / 255
+}
+
+/**
+ * A brand colour that is too dark to read on the dark Tracks basemap is
+ * stepped toward white until the line has enough contrast. A colour that is
+ * already bright, such as a vivid red, stays as it is.
+ */
+export function liftRouteColorForDarkBasemap(hex: string): string {
+  let colour = normalizeHexColor(hex) ?? TOC_OPERATOR_FALLBACK_COLORS.bg
+  for (let step = 0; step < 5 && maxChannel(colour) < 0.62; step++) {
+    colour = mixTowardWhite(colour, 0.34)
+  }
+  return colour
+}
+
 function normalizeTocLookupKey(value: string): string {
   return value.trim().toLowerCase().replace(/[_\s-]+/g, ' ')
 }
