@@ -9,11 +9,31 @@ export type MapLocationBanner = {
   title?: string
 }
 
+function dwells(stop: ServiceStop): boolean {
+  if (String(stop.wtp || '').trim()) return false
+  const mins = (value: string | null | undefined) => {
+    const match = /^(\d{1,2}):(\d{2})/.exec(String(value || '').trim())
+    if (!match) return null
+    return Number(match[1]) * 60 + Number(match[2])
+  }
+  const arr = mins(stop.wta)
+  const dep = mins(stop.wtd)
+  if (arr == null || dep == null) return false
+  let gap = dep - arr
+  if (gap < 0) gap += 24 * 60
+  return gap >= 2 && gap < 12 * 60
+}
+
+function isRouteEnd(stop: ServiceStop): boolean {
+  return stop.slot !== 'PP' || dwells(stop)
+}
+
 /** Headcode and the ends of this portion, for a bar above a split map. */
 export function portionBannerTitle(trainId: string | null | undefined, stops: ServiceStop[]): string {
   const named = (stops || []).filter((stop) => stop.name && stop.name !== stop.tpl)
-  const first = named.find((stop) => stop.slot !== 'PP') || named[0]
-  const last = named[named.length - 1]
+  const ends = named.filter(isRouteEnd)
+  const first = ends[0] || named.find((stop) => stop.slot !== 'PP') || named[0]
+  const last = ends[ends.length - 1] || named[named.length - 1]
   const origin = first?.name || ''
   const dest = last?.name || ''
   const route = origin && dest && origin !== dest ? `${origin} → ${dest}` : origin || dest

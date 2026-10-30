@@ -430,7 +430,12 @@ function trimCallsToDestination(rows, svc, keepOrder = false) {
     out.push(c);
     const pass = isWorkingPass(c);
     if (pass) continue;
-    seenPublic = true;
+    // The origin can share the destination's name, as on the Edinburgh
+    // portion that works forward to Carstairs. That first stop is not the end.
+    if (!seenPublic) {
+      seenPublic = true;
+      continue;
+    }
     const crs = String(c.crs || "").toUpperCase();
     const tpl = String(c.tiploc || "").toUpperCase();
     const name = String(stationName(crs, tpl) || "").trim().toUpperCase();

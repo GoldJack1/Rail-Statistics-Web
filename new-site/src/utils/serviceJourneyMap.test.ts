@@ -425,6 +425,20 @@ describe('serviceJourneyMap', () => {
     expect(journeyPointKind(stop('SBYD', 'Stalybridge', 'PP', { crs: 'SYB' }))).toBe('pass')
     expect(journeyPointKind(stop('MILESPL', 'Miles Platting Junction', 'PP', { crs: 'MLP' }))).toBe('junction')
     expect(journeyPointKind(stop('HOLBJCN', 'Holbeck Jn', 'PP'))).toBe('junction')
+    expect(journeyPointKind(stop('EDINBUR', 'Edinburgh', 'PP', { crs: 'EDB', wta: '00:56', wtd: '01:24' }))).toBe('stop')
+  })
+
+  it('sends the sleeper through Edinburgh even though that dwell has no public time', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('FALKRKG', 'Falkirk Grahamston', 'IP', { crs: 'FKG', lat: 56.005, lng: -3.785 }),
+        stop('EDINBUR', 'Edinburgh', 'PP', { crs: 'EDB', wta: '00:56', wtd: '01:24', lat: 55.952, lng: -3.19 }),
+        stop('PRST', 'Preston', 'IP', { crs: 'PRE', lat: 53.756, lng: -2.707 }),
+      ],
+      [],
+    )
+    expect(mapped.find((point) => point.tpl === 'EDINBUR')?.calling).toBe(true)
+    expect(mappedRouteWaypoints(mapped).map((point) => point[0])).toEqual([56.005, 55.952, 53.756])
   })
 
   it('interpolates a midpoint', () => {

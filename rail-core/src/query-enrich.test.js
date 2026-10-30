@@ -582,7 +582,7 @@ test("yesterday's sleeper steps are not tonight's 1M16", () => {
     ],
     { rid: "202610306704564", now },
   );
-  assert.equal(inserted.at(-1).atp ?? null, null);
+  assert.equal(inserted.some((call) => call.tiploc === "TILEH"), false);
   const yesterday = dropForeignTdActuals(
     [
       { tiploc: "IVRNESS", is_passing: 0, wtd: "20:45" },

@@ -169,8 +169,12 @@ export function dropForeignTdActuals(calls, opts = {}) {
   const now = opts.now || Date.now();
   const originClock = (calls || []).map((call) => call?.wtd || call?.std || call?.wta || call?.sta).find(Boolean) || null;
   const originAt = rid && originClock ? bookedInstantForRid(rid, originClock, originClock) : null;
-  return (calls || []).map((call) => {
-    if (String(call.actual_source || "") !== "td") return call;
+  const out = [];
+  for (const call of calls || []) {
+    if (String(call.actual_source || "") !== "td") {
+      out.push(call);
+      continue;
+    }
     const booked = callBookedMin(call);
     const actual = callActualMin(call);
     const clockMismatch = booked != null && actual != null && !actualBelongsToBooked(booked, actual);
@@ -184,7 +188,10 @@ export function dropForeignTdActuals(calls, opts = {}) {
       beforeOrigin ||
       (rid && stamp && bookedClock && !tdClockBelongsToRid(rid, bookedClock, stamp, originClock, now)),
     );
-    if (!clockMismatch && !otherDay) return call;
+    if (!clockMismatch && !otherDay) {
+      out.push(call);
+      continue;
+    }
     const next = {
       ...call,
       ata: null,
@@ -196,8 +203,13 @@ export function dropForeignTdActuals(calls, opts = {}) {
     if (next.live_kind === "actual" || next.live_kind === "actual-arr") {
       next.live_kind = estimate ? "est" : null;
     }
-    return next;
-  });
+    // An inserted describer step has no timetable. Once its time is rejected
+    // there is nothing to show, and leaving the place on the list pulls the
+    // route and the destination off the booked train.
+    if (!bookedClock && !(next.eta || next.etd || next.etp)) continue;
+    out.push(next);
+  }
+  return out;
 }
 
 const sequenceCache = new Map();

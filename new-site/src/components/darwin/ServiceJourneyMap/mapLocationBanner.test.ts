@@ -47,6 +47,15 @@ describe('portionBannerTitle', () => {
       stop({ tpl: 'EDINBUR', name: 'Edinburgh', slot: 'DT' }),
     ])).toBe('1B01 · Fort William → Edinburgh')
   })
+
+  it('keeps London as the end when a previous working left places after it', () => {
+    expect(portionBannerTitle('1M16', [
+      stop({ tpl: 'IVRNESS', name: 'Inverness', slot: 'OR' }),
+      stop({ tpl: 'EDINBUR', name: 'Edinburgh', slot: 'PP', wta: '00:56', wtd: '01:24' }),
+      stop({ tpl: 'EUSTON', name: 'London Euston', slot: 'DT' }),
+      stop({ tpl: 'TILEH', name: 'Tile Hill', slot: 'PP' }),
+    ])).toBe('1M16 · Inverness → London Euston')
+  })
 })
 
 describe('mapLocationBanner', () => {
