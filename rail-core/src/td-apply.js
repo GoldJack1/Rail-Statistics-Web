@@ -6,7 +6,7 @@
 import { hhmm, hhmmLondon, hhmmss, hhmmssLondon, liveKind, openCatalog, openDayDb, operatingDayYmd, upsertCall } from "./db.js";
 import { resolveSmartTiploc } from "./import-smart.js";
 import { nrodCandidateDays, writeDaysForRid } from "./nrod-write-days.js";
-import { actualBelongsToBooked, isSignallingBerth } from "./td-match.js";
+import { actualBelongsToBooked, isSignallingBerth, tdClockBelongsToRid } from "./td-match.js";
 
 export function ensureTdTables(db) {
   db.exec(`
@@ -118,13 +118,24 @@ function resolveRid(db, headcode) {
   return null;
 }
 
-function ridsForTdPass(db, headcode, tiploc, forcedRid = null) {
+function ridsForTdPass(db, headcode, tiploc, forcedRid = null, actual = null, now = Date.now()) {
   if (forcedRid) return [forcedRid];
   const candidates = resolveRidCandidates(db, headcode);
-  if (candidates.length === 1) return candidates;
+  if (candidates.length <= 1) return candidates;
   if (!tiploc || !candidates.length) return [];
   const tpl = String(tiploc).toUpperCase();
-  return candidates.filter((rid) => spineTiplocs(db, rid)?.has(tpl));
+  const matched = candidates.filter((rid) => spineTiplocs(db, rid)?.has(tpl));
+  if (matched.length <= 1 || !actual) return matched;
+  const fitting = matched.filter((rid) => {
+    const call = db
+      .prepare(`SELECT wtp, wtd, wta, std, sta FROM calls WHERE rid = ? AND tiploc = ? COLLATE NOCASE ORDER BY seq LIMIT 1`)
+      .get(rid, tpl);
+    const origin = db.prepare(`SELECT wtd, std, wta, sta FROM calls WHERE rid = ? ORDER BY seq LIMIT 1`).get(rid);
+    const booked = call?.wtp || call?.wtd || call?.wta || call?.std || call?.sta;
+    const originClock = origin?.wtd || origin?.std || origin?.wta || origin?.sta;
+    return tdClockBelongsToRid(rid, booked, actual, originClock, now);
+  });
+  return fitting.length ? fitting : [];
 }
 
 function clockMinute(value) {
@@ -302,7 +313,7 @@ function applyTdToDay(db, message, parsed, { rid, tiploc, stanox, crs, platform,
   // CA = berth step, CC = interpose. A cancel or dummy berth is not a pass.
   if (tiploc && !isSignallingBerth(berth) && (parsed.msgType === "CA" || parsed.msgType === "CC")) {
     const actual = tdClockPrecise(parsed.time, now);
-    for (const passRid of ridsForTdPass(db, parsed.headcode, tiploc, forcedRid)) {
+    for (const passRid of ridsForTdPass(db, parsed.headcode, tiploc, forcedRid, actual, now)) {
       upsertTdPass(db, { rid: passRid, tiploc, crs, platform, actual });
     }
   }

@@ -564,6 +564,27 @@ test("a step from the previous working is not this train running early", () => {
   assert.notEqual(inferred[1].etp, "14:51");
 });
 
+test("yesterday's sleeper steps are not tonight's 1M16", () => {
+  const now = Date.parse("2026-10-30T21:30:00Z");
+  const tonight = [
+    { tiploc: "IVRNESS", is_passing: 0, wtd: "20:45", atd: "20:45", actual_source: "trust" },
+    { tiploc: "ABINGTN", is_passing: 1, wtp: "02:06", atp: "02:29:10", actual_source: "td", live_kind: "actual" },
+    { tiploc: "PRST", is_passing: 0, wta: "04:13½", wtd: "04:15½", eta: "04:15", etd: "04:07", actual_source: "td", live_kind: "working" },
+  ];
+  const dropped = dropForeignTdActuals(tonight, { rid: "202610306704564", now });
+  assert.equal(dropped[0].atd, "20:45");
+  assert.equal(dropped[1].atp ?? null, null);
+  assert.equal(dropped[2].etd ?? null, null);
+  const yesterday = dropForeignTdActuals(
+    [
+      { tiploc: "IVRNESS", is_passing: 0, wtd: "20:45" },
+      { tiploc: "ABINGTN", is_passing: 1, wtp: "02:06", atp: "02:29", actual_source: "td", live_kind: "actual" },
+    ],
+    { rid: "202610296704565", now },
+  );
+  assert.equal(yesterday[1].atp, "02:29");
+});
+
 test("a morning headcode step is not this evening's pass", () => {
   const calls = [
     { tiploc: "SHEFFLD", is_passing: 0, wta: "21:56", wtd: "22:02", atd: "22:02", actual_source: "trust" },

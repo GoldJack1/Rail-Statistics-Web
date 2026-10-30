@@ -7,7 +7,7 @@ import { tdClockPrecise } from "./td-apply.js";
 import { resolveSmartTiploc } from "./import-smart.js";
 import { isNonPassengerLocation, isSignalOrElocTiploc } from "./geometry-densify.js";
 import { interpolateHm } from "./tiploc-graph.js";
-import { actualBelongsToBooked, isSignallingBerth } from "./td-match.js";
+import { actualBelongsToBooked, isSignallingBerth, tdClockBelongsToRid } from "./td-match.js";
 
 function corpusMeta(catalog, tiploc) {
   if (!catalog || !tiploc) return { name: "", crs: "" };
@@ -164,14 +164,28 @@ function hmToMin(value) {
  * TD is stored by headcode, so the morning train's steps land on the evening
  * schedule. Drop a TD actual that is not this call's booked time.
  */
-export function dropForeignTdActuals(calls) {
+export function dropForeignTdActuals(calls, opts = {}) {
+  const rid = opts.rid || null;
+  const now = opts.now || Date.now();
+  const originClock = (calls || []).map((call) => call?.wtd || call?.std || call?.wta || call?.sta).find(Boolean) || null;
   return (calls || []).map((call) => {
     if (String(call.actual_source || "") !== "td") return call;
     const booked = callBookedMin(call);
     const actual = callActualMin(call);
-    if (booked == null || actual == null) return call;
-    if (actualBelongsToBooked(booked, actual)) return call;
-    const next = { ...call, ata: null, atd: null, atp: null };
+    const clockMismatch = booked != null && actual != null && !actualBelongsToBooked(booked, actual);
+    const stamp = call.atp || call.atd || call.ata || call.etp || call.etd || call.eta;
+    const bookedClock = call.wtp || call.wtd || call.wta || call.ptd || call.pta;
+    const otherDay = Boolean(
+      rid && stamp && bookedClock && !tdClockBelongsToRid(rid, bookedClock, stamp, originClock, now),
+    );
+    if (!clockMismatch && !otherDay) return call;
+    const next = {
+      ...call,
+      ata: null,
+      atd: null,
+      atp: null,
+      ...(otherDay ? { eta: null, etd: null, etp: null } : {}),
+    };
     const estimate = next.eta || next.etd || next.etp;
     if (next.live_kind === "actual" || next.live_kind === "actual-arr") {
       next.live_kind = estimate ? "est" : null;

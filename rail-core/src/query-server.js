@@ -763,11 +763,14 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     { includeNonPassenger: QUERY_ENV === "dev" },
   );
   maybePersistInferred(db, resolvedRid, []);
-  let calls = dropOrmNearDuplicates(
-    maskCallsAsOf(
-      trimCallsToDestination(sortCallsByJourneyTime(dropCifTailAfterPublicTerminus(rawCalls)), svc),
-      at,
+  let calls = dropForeignTdActuals(
+    dropOrmNearDuplicates(
+      maskCallsAsOf(
+        trimCallsToDestination(sortCallsByJourneyTime(dropCifTailAfterPublicTerminus(rawCalls)), svc),
+        at,
+      ),
     ),
+    { rid: resolvedRid },
   );
   if (QUERY_ENV === "dev") {
     const headcode = svc.headcode || svc.train_id;
@@ -778,11 +781,12 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
       ),
     );
     calls = dropUnreportedPasses(calls);
-    calls = dropForeignTdActuals(calls);
+    calls = dropForeignTdActuals(calls, { rid: resolvedRid });
     const reports = collectReportedPasses(db, calls, svc.train_id, headcode, catalog);
     const coords = tiplocCoords(catalog, [...calls.map((c) => c.tiploc), ...reports.map((r) => r.tiploc)]);
     calls = insertReportedPasses(calls, reportsForService(calls, reports, coords));
     calls = overlayTdOnCalls(db, calls, headcode, catalog);
+    calls = dropForeignTdActuals(calls, { rid: resolvedRid });
     const segmentCoords = tiplocCoords(catalog, calls.map((c) => c.tiploc));
     const track = loadGtclGraph(process.env.GTCL_GRAPH || `${DATA_DIR}/gtcl-graph.sqlite`);
     calls = sortCallsByWttTime(calls);

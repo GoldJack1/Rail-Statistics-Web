@@ -3,6 +3,7 @@
  * pass. Dummy and cancel berths are not locations, and a headcode is reused
  * by later trains the same day.
  */
+import { addCalendarDays, londonCalendarYmd, londonInstant, ssdFromRid } from "./calendar-day.js";
 
 /** Berths that describe a panel action, not a place on the network. */
 const SIGNALLING_BERTHS = new Set(["DUMY", "DUMMY", "COUT"]);
@@ -34,6 +35,49 @@ export function actualBelongsToBooked(booked, actual) {
   if (booked == null || actual == null) return false;
   const late = minutesAfter(actual, booked);
   return late >= -EARLY_ACTUAL_LIMIT_MIN && late <= HEADCODE_ACTUAL_MATCH_MIN;
+}
+
+function clockMinute(value) {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || "").trim());
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function hhmmClock(value) {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || "").trim());
+  if (!match) return null;
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+/** Booked London instant. A morning call after an evening origin is the next calendar day. */
+export function bookedInstantForRid(rid, bookedClock, originClock) {
+  const ssd = ssdFromRid(rid);
+  const bookedMin = clockMinute(bookedClock);
+  if (!ssd || bookedMin == null) return null;
+  const originMin = clockMinute(originClock);
+  const ymd = originMin != null && originMin >= 12 * 60 && bookedMin < 12 * 60 ? addCalendarDays(ssd, 1) : ssd;
+  return londonInstant(ymd, hhmmClock(bookedClock));
+}
+
+/** The latest London occurrence of this clock at or just after now. */
+export function latestClockInstant(clock, now = Date.now()) {
+  const today = londonCalendarYmd(new Date(now));
+  const at = londonInstant(today, hhmmClock(clock));
+  if (!at) return null;
+  if (at.getTime() > now + 2 * 60 * 1000) return londonInstant(addCalendarDays(today, -1), hhmmClock(clock));
+  return at;
+}
+
+/**
+ * A headcode reused overnight has the same booked clocks on two RIDs.
+ * Keep the step only when that clock last happened near this RID's booked instant.
+ */
+export function tdClockBelongsToRid(rid, bookedClock, actualClock, originClock, now = Date.now()) {
+  const bookedAt = bookedInstantForRid(rid, bookedClock, originClock);
+  const actualAt = latestClockInstant(actualClock, now);
+  if (!bookedAt || !actualAt) return true;
+  const lateMin = (actualAt.getTime() - bookedAt.getTime()) / 60_000;
+  return lateMin >= -EARLY_ACTUAL_LIMIT_MIN && lateMin <= HEADCODE_ACTUAL_MATCH_MIN;
 }
 
 /**
