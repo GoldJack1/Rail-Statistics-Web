@@ -8,6 +8,7 @@ import {
   associationsForRid,
   collapseOvernightAssociates,
   combinedDestinationName,
+  enrichAssociationsFromDays,
   extractDarwinAssociationsXml,
   inferAssociationsFromConsist,
   inferScheduleDivides,
@@ -467,4 +468,35 @@ test("display associations can keep ECS and freight NP links", () => {
   );
   assert.equal(rows.length, 1);
   assert.equal(rows[0].otherTrainId, "5P83");
+});
+
+test("sleeper portion keeps tonight's RID when the same UID ran earlier", () => {
+  const dir = mkdtempSync(join(tmpdir(), "assoc-uid-"));
+  const earlier = openDayDb(dir, "2026-10-28");
+  const today = openDayDb(dir, "2026-10-30");
+  const insert = (db, rid) => {
+    db.prepare(
+      `INSERT INTO services (rid, uid, train_id, rs_id, toc, operator_name, origin_crs, origin_name,
+        destination_crs, destination_name, via, service_type, cancelled, cancel_reason, delay_reason,
+        is_charter, category, headcode, updated_at)
+       VALUES (?, 'C04542', '1A25', null, 'CS', 'Caledonian Sleeper', 'EDB', 'Edinburgh', 'ABD', 'Aberdeen', null, 'passenger', 0, null, null, 0, 'XX', '1A25', 1)`,
+    ).run(rid);
+    db.prepare(
+      `INSERT INTO calls (rid, tiploc, crs, seq, is_passing, cancelled, updated_at, live_kind, sta)
+       VALUES (?, 'ABRDEEN', 'ABD', 1, 0, 0, 1, 'scheduled', '07:50')`,
+    ).run(rid);
+  };
+  insert(earlier, "202610286704542");
+  insert(today, "202610306704542");
+  const found = enrichAssociationsFromDays(
+    [{ otherRid: "202610306704542", otherUid: "C04542", category: "VV", role: "main" }],
+    [
+      { ymd: "2026-10-28", db: earlier },
+      { ymd: "2026-10-30", db: today },
+    ],
+    (_crs, tpl) => tpl,
+  );
+  assert.equal(found[0].otherRid, "202610306704542");
+  earlier.close();
+  today.close();
 });

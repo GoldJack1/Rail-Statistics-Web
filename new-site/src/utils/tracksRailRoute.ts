@@ -54,6 +54,7 @@ async function fetchRailLeg(
 export async function routeTracksJourney(
   points: LatLngTuple[],
   signal: AbortSignal,
+  onProgress?: (path: LatLngTuple[]) => void,
 ): Promise<LatLngTuple[]> {
   if (points.length < 2) return points
   const graph = await loadGbRailGraph()
@@ -78,6 +79,7 @@ export async function routeTracksJourney(
       continue
     }
     appendPath(joined, leg)
+    onProgress?.(joined.slice())
   }
   const drawn = joined.filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
   if (drawn.length < 2) return []

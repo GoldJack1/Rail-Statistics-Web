@@ -583,6 +583,34 @@ function originOfService(db, svc, stationName) {
   return stationName?.(row?.crs, row?.tiploc) || svc.origin_name || row?.tiploc || null;
 }
 
+function serviceOnDays(databases, rid) {
+  if (!rid) return null;
+  for (const { db } of databases || []) {
+    if (!db) continue;
+    const row = db.prepare(`SELECT * FROM services WHERE rid = ?`).get(rid);
+    if (row) return { row, db };
+  }
+  return null;
+}
+
+/** Same CIF UID runs again later in the week. Keep the dated RID, not the earlier copy. */
+function serviceByUidOnDays(databases, uid, preferDay) {
+  const key = String(uid || "").toUpperCase();
+  if (!key) return null;
+  let best = null;
+  for (const { db, ymd } of databases || []) {
+    if (!db) continue;
+    const rows = db.prepare(`SELECT * FROM services WHERE UPPER(IFNULL(uid,'')) = ?`).all(key);
+    for (const row of rows) {
+      const day = ssdFromRid(row.rid) || ymd || "";
+      const score = preferDay && day === preferDay ? 2 : 1;
+      const rank = `${score}|${day}|${row.rid}`;
+      if (!best || rank > best.rank) best = { row, db, rank };
+    }
+  }
+  return best;
+}
+
 /**
  * Resolve peer service rows for associations whose other RID lives on an
  * adjacent railway day (typical for overnight CS divides).
@@ -590,24 +618,12 @@ function originOfService(db, svc, stationName) {
 export function enrichAssociationsFromDays(associations, databases, stationName) {
   return (associations || []).map((a) => {
     if (!a?.otherRid && !a?.otherUid) return a;
-    let other = null;
-    let otherDb = null;
-    for (const { db } of databases || []) {
-      if (!db) continue;
-      if (a.otherRid) {
-        other = db.prepare(`SELECT * FROM services WHERE rid = ?`).get(a.otherRid);
-      }
-      if (!other && a.otherUid) {
-        other = db
-          .prepare(`SELECT * FROM services WHERE UPPER(IFNULL(uid,'')) = ? LIMIT 1`)
-          .get(String(a.otherUid).toUpperCase());
-      }
-      if (other) {
-        otherDb = db;
-        break;
-      }
-    }
-    if (!other) return a;
+    const hit =
+      serviceOnDays(databases, a.otherRid) ||
+      serviceByUidOnDays(databases, a.otherUid, ssdFromRid(a.otherRid));
+    if (!hit) return a;
+    const other = hit.row;
+    const otherDb = hit.db;
     return {
       ...a,
       otherRid: other.rid || a.otherRid,

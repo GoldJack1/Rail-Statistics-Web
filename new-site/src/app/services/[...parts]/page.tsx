@@ -40,13 +40,13 @@ import {
 import { buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from '@/utils/splitWorking'
 import '../ServiceDetailPage.css'
 
-const ServiceJourneyMap = dynamic(
-  () => import('@/components/darwin/ServiceJourneyMap/ServiceJourneyMap').then((mod) => mod.ServiceJourneyMap),
-  {
-    ssr: false,
-    loading: () => <p className="edit-hint kb-source-hint">Loading map…</p>,
-  },
-)
+const loadServiceJourneyMap = () =>
+  import('@/components/darwin/ServiceJourneyMap/ServiceJourneyMap').then((mod) => mod.ServiceJourneyMap)
+
+const ServiceJourneyMap = dynamic(loadServiceJourneyMap, {
+  ssr: false,
+  loading: () => <p className="edit-hint kb-source-hint">Loading map…</p>,
+})
 
 const BASE_SERVICE_SECTIONS: AccountSection[] = [
   { id: 'overview', label: 'Overview', icon: Info },
@@ -108,7 +108,7 @@ function workingServiceHref(
 ): string | undefined {
   if (!date) return undefined
   return serviceHref({
-    id: a.otherUid || a.otherRid,
+    id: a.otherRid || a.otherUid,
     date,
     section: 'calling',
     mode: viewMode,
@@ -325,6 +325,11 @@ const ServiceDetailPage: React.FC = () => {
   useEffect(() => {
     setSection(parsed.section)
   }, [parsed.section])
+
+  useEffect(() => {
+    if (!serviceId) return
+    void loadServiceJourneyMap()
+  }, [serviceId])
 
   const { status, data, error, ageMs, refetch } = useServiceDetail({
     rid: serviceId,
@@ -578,7 +583,7 @@ const ServiceDetailPage: React.FC = () => {
                 .filter((a) => a.category !== 'NP' && isPassengerHeadcode(a.otherTrainId))
                 .map((a) => {
                 const href = serviceHref({
-                  id: a.otherUid || a.otherRid,
+                  id: a.otherRid || a.otherUid,
                   date: data.ssd || date,
                   section: 'overview',
                   mode: viewMode,
@@ -756,7 +761,7 @@ const ServiceDetailPage: React.FC = () => {
                 associations={(data.associations || []).filter((a) => a.category !== 'NP')}
                 associationHref={(a) =>
                   serviceHref({
-                    id: a.otherUid || a.otherRid,
+                    id: a.otherRid || a.otherUid,
                     date: data.ssd || date,
                     section: 'overview',
                     mode: viewMode,

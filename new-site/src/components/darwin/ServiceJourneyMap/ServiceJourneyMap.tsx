@@ -18,7 +18,10 @@ import { resolveTocRouteColor } from '../../../utils/tocOperatorMap'
 import type { ServiceDetail } from '../../../types/darwin'
 import type { Station } from '../../../types'
 import { mapLocationBanner, type MapLocationBanner } from './mapLocationBanner'
+import { loadGbRailGraph } from '../../../utils/tracksRailGraph'
 import { ServiceTracksMap } from './ServiceTracksMap'
+
+if (typeof window !== 'undefined') void loadGbRailGraph()
 import { JOERD_TERRAIN_CREDIT, TRACKS_RELIEF } from '../../../utils/tracksCredits'
 import '@/components/darwin/callingPatternTones.css'
 import './ServiceJourneyMap.css'
@@ -192,7 +195,6 @@ export function ServiceJourneyMap({
     }
     const controller = new AbortController()
     let cancelled = false
-    setGeoReady(false)
     void fetchTiplocCoords(neededKey.split('|'), controller.signal)
       .then((coords) => {
         if (cancelled) return
@@ -354,7 +356,7 @@ export function ServiceJourneyMap({
     }, 80)
   }
 
-  if (!geoReady) {
+  if (!geoReady && mapped.length < 1) {
     return <p className="edit-hint kb-source-hint">Plotting the route…</p>
   }
 

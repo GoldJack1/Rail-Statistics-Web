@@ -188,7 +188,9 @@ export function ServiceTracksMap({
   const appliedTheme = useRef(theme)
   const tipRef = useRef<maplibregl.Popup | null>(null)
   const tipLiveRef = useRef(false)
-  const waypointKey = waypoints.map((point) => `${point[0].toFixed(5)},${point[1].toFixed(5)}`).join('|')
+  // Platform marks sit within about 100 m of the station. A finer key restarts
+  // the whole search when those chunks arrive, and the line disappears.
+  const waypointKey = waypoints.map((point) => `${point[0].toFixed(3)},${point[1].toFixed(3)}`).join('|')
 
   useLayoutEffect(() => {
     inputRef.current = { stops, mapped, location, platforms }
@@ -335,16 +337,16 @@ export function ServiceTracksMap({
     if (waypoints.length < 2) return
     const controller = new AbortController()
     let gone = false
-    void routeTracksJourney(waypoints, controller.signal)
-      .then((path) => {
-        if (gone) return
-        pathRef.current = path
-        const map = mapRef.current
-        if (map && map.getSource('tracks-route')) {
-          setSource(map, 'tracks-route', lineCollection(path))
-          setSource(map, 'tracks-stops', stopCollection(inputRef.current.mapped, path, inputRef.current.platforms))
-        }
-      })
+    const paint = (path: LatLngTuple[]) => {
+      if (gone || path.length < 2) return
+      pathRef.current = path
+      const map = mapRef.current
+      if (!map?.getSource('tracks-route')) return
+      setSource(map, 'tracks-route', lineCollection(path))
+      setSource(map, 'tracks-stops', stopCollection(inputRef.current.mapped, path, inputRef.current.platforms))
+    }
+    void routeTracksJourney(waypoints, controller.signal, paint)
+      .then(paint)
       .catch(() => {
         /* A replaced journey aborts the search. */
       })

@@ -900,7 +900,7 @@ export function ServiceStopList({
                 ? associations
                 .filter((a) => a.tiploc && a.tiploc === stop.tpl && a.category !== 'NP')
                 .map((a) => {
-                  const href = associationHref?.(a) || `/services/${encodeURIComponent(a.otherUid || a.otherRid)}`
+                  const href = associationHref?.(a) || `/services/${encodeURIComponent(a.otherRid || a.otherUid)}`
                   const dest = a.otherDestinationName || 'another destination'
                   const orig = a.otherOriginName || 'elsewhere'
                   const head = a.otherTrainId ? ` ${a.otherTrainId}` : ''
