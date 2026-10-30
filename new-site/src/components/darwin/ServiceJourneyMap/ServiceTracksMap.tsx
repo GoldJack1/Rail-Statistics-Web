@@ -25,7 +25,16 @@ import {
 } from '../../../utils/tracksDarkStyle'
 import { routeTracksJourney, splitRouteGaps } from '../../../utils/tracksRailRoute'
 import { liftRouteColorForDarkBasemap } from '../../../utils/tocOperatorMap'
-import type { ServiceDetail } from '../../../types/darwin'
+import type { ServiceDetail, ServiceStop } from '../../../types/darwin'
+
+export type BranchTrack = {
+  rid: string
+  trainId: string
+  stops: ServiceStop[]
+  mapped: JourneyMapStop[]
+  waypoints: LatLngTuple[]
+  location: ServiceDetail['location']
+}
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
 
@@ -113,17 +122,27 @@ function stopCollection(
   }
 }
 
-function pointCollection(lat: number, lng: number, label = ''): GeoJSON.FeatureCollection {
+function pointCollection(lat: number, lng: number, label = '', id = ''): GeoJSON.FeatureCollection {
+  return liveCollection([{ lat, lng, label, id }])
+}
+
+function liveCollection(points: Array<{ lat: number; lng: number; label: string; id: string }>): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
-    features: [
-      {
-        type: 'Feature',
-        properties: { label },
-        geometry: { type: 'Point', coordinates: [lng, lat] },
-      },
-    ],
+    features: points
+      .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng))
+      .map((point) => ({
+        type: 'Feature' as const,
+        properties: { label: point.label, id: point.id },
+        geometry: { type: 'Point' as const, coordinates: [point.lng, point.lat] },
+      })),
   }
+}
+
+function withHeadcode(trainId: string, label: string): string {
+  const head = trainId.trim()
+  if (!head || label.startsWith(head)) return label
+  return `${head} · ${label}`
 }
 
 /** Same stroke width as the Leaflet service line, in the operator colour. */
@@ -176,6 +195,8 @@ function setSource(map: MapLibreMap, id: string, data: GeoJSON.FeatureCollection
 export function ServiceTracksMap({
   waypoints,
   extraWaypoints = [],
+  branches = [],
+  trainId = '',
   mapped,
   extraMapped = [],
   stops,
@@ -188,6 +209,8 @@ export function ServiceTracksMap({
 }: {
   waypoints: LatLngTuple[]
   extraWaypoints?: LatLngTuple[][]
+  branches?: BranchTrack[]
+  trainId?: string
   mapped: JourneyMapStop[]
   extraMapped?: JourneyMapStop[]
   stops: ServiceDetail['stops']
@@ -203,25 +226,30 @@ export function ServiceTracksMap({
   const [mapReady, setMapReady] = useState<MapLibreMap | null>(null)
   const [zoom, setZoom] = useState(8)
   const pathRef = useRef<LatLngTuple[] | null>(null)
-  const inputRef = useRef({ stops, mapped, location, platforms })
+  const branchPathsRef = useRef<Map<string, LatLngTuple[]>>(new Map())
+  const inputRef = useRef({ stops, mapped, location, platforms, trainId, branches })
   const shownRef = useRef<{ lat: number; lng: number } | null>(null)
+  const shownBranchesRef = useRef<Map<string, { lat: number; lng: number }>>(new Map())
   const userMovedRef = useRef(false)
   const framedCountRef = useRef(0)
   const lineColor = theme === 'dark' ? liftRouteColorForDarkBasemap(routeColor) : routeColor
   const routeColorRef = useRef(lineColor)
   const appliedTheme = useRef(theme)
   const tipRef = useRef<maplibregl.Popup | null>(null)
-  const tipLiveRef = useRef(false)
+  const tipLiveRef = useRef<string | null>(null)
   // Platform marks sit within about 100 m of the station. A finer key restarts
   // the whole search when those chunks arrive, and the line disappears.
   const waypointKey = waypoints.map((point) => `${point[0].toFixed(3)},${point[1].toFixed(3)}`).join('|')
   const extraKey = extraWaypoints
     .map((route) => route.map((point) => `${point[0].toFixed(3)},${point[1].toFixed(3)}`).join('|'))
     .join('||')
+  const branchKey = branches
+    .map((branch) => `${branch.rid}:${branch.waypoints.map((point) => `${point[0].toFixed(3)},${point[1].toFixed(3)}`).join('|')}`)
+    .join('||')
   const frameStops = extraMapped.length ? [...mapped, ...extraMapped] : mapped
 
   useLayoutEffect(() => {
-    inputRef.current = { stops, mapped, location, platforms }
+    inputRef.current = { stops, mapped, location, platforms, trainId, branches }
     routeColorRef.current = lineColor
   })
 
@@ -330,7 +358,7 @@ export function ServiceTracksMap({
           const label = feature?.properties?.label
           const coords = feature?.geometry?.type === 'Point' ? feature.geometry.coordinates : null
           if (!label || !coords) return
-          tipLiveRef.current = layer === 'tracks-live'
+          tipLiveRef.current = layer === 'tracks-live' ? String(feature?.properties?.id || label) : null
           placeTip(map, tip, coords as [number, number], String(label), layer, feature?.properties?.kind)
         })
         map.on('mouseleave', layer, (event) => {
@@ -338,12 +366,12 @@ export function ServiceTracksMap({
           const label = hit?.properties?.label
           const coords = hit?.geometry?.type === 'Point' ? hit.geometry.coordinates : null
           if (!hit || !label || !coords) {
-            tipLiveRef.current = false
+            tipLiveRef.current = null
             map.getCanvas().style.cursor = ''
             tip.remove()
             return
           }
-          tipLiveRef.current = hit.layer?.id === 'tracks-live'
+          tipLiveRef.current = hit.layer?.id === 'tracks-live' ? String(hit.properties?.id || label) : null
           placeTip(map, tip, coords as [number, number], String(label), hit.layer?.id, hit.properties?.kind)
         })
       }
@@ -438,6 +466,31 @@ export function ServiceTracksMap({
   }, [extraKey, mapReady])
 
   useEffect(() => {
+    if (!mapReady) return
+    if (!branches.length) {
+      branchPathsRef.current = new Map()
+      return
+    }
+    const controller = new AbortController()
+    let gone = false
+    void Promise.all(
+      branches.map(async (branch) => {
+        const path = await routeTracksJourney(branch.waypoints, controller.signal).catch(() => [] as LatLngTuple[])
+        return [branch.rid, path] as const
+      }),
+    ).then((rows) => {
+      if (gone) return
+      branchPathsRef.current = new Map(rows.filter(([, path]) => path.length >= 2))
+    })
+    return () => {
+      gone = true
+      controller.abort()
+    }
+    // branchKey is the content of the other services' routes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchKey, mapReady])
+
+  useEffect(() => {
     const map = mapRef.current
     if (!mapReady || !map?.getSource('tracks-stops')) return
     setSource(map, 'tracks-stops', stopCollection(mapped, pathRef.current, platforms))
@@ -460,26 +513,44 @@ export function ServiceTracksMap({
       if (!map || !map.getSource('tracks-live')) return
       const dt = Math.min(0.08, Math.max(0, (ts - last) / 1000))
       last = ts
-      const { stops: liveStops, mapped: pts, location: liveLocation } = inputRef.current
-      if (!pts.length) return
-      const raw = liveJourneyPosition(liveStops || [], pts, liveLocation, londonNowRailwaySeconds())
-      const live = raw ? snapLiveToRailPath(raw, pathRef.current) : null
-      if (!live || !Number.isFinite(live.lat)) return
-      if (!shownRef.current) {
-        shownRef.current = { lat: live.lat, lng: live.lng }
-      } else {
-        const jump = Math.abs(live.lat - shownRef.current.lat) + Math.abs(live.lng - shownRef.current.lng)
-        if (jump > 0.35) {
-          shownRef.current = { lat: live.lat, lng: live.lng }
-        } else {
-          const ease = 1 - Math.exp(-dt / 0.28)
-          shownRef.current.lat += (live.lat - shownRef.current.lat) * ease
-          shownRef.current.lng += (live.lng - shownRef.current.lng) * ease
+      const now = londonNowRailwaySeconds()
+      const current = inputRef.current
+      const place = (
+        shown: { lat: number; lng: number } | undefined,
+        lat: number,
+        lng: number,
+      ) => {
+        if (!shown) return { lat, lng }
+        const jump = Math.abs(lat - shown.lat) + Math.abs(lng - shown.lng)
+        if (jump > 0.35) return { lat, lng }
+        const ease = 1 - Math.exp(-dt / 0.28)
+        return {
+          lat: shown.lat + (lat - shown.lat) * ease,
+          lng: shown.lng + (lng - shown.lng) * ease,
         }
       }
-      setSource(map, 'tracks-live', pointCollection(shownRef.current.lat, shownRef.current.lng, live.label))
-      if (tipLiveRef.current && tipRef.current) {
-        tipRef.current.setLngLat([shownRef.current.lng, shownRef.current.lat]).setHTML(tipHtml(live.label))
+      const points: Array<{ lat: number; lng: number; label: string; id: string }> = []
+      const primary = liveJourneyPosition(current.stops || [], current.mapped, current.location, now)
+      const primaryLive = primary ? snapLiveToRailPath(primary, pathRef.current) : null
+      if (primaryLive && Number.isFinite(primaryLive.lat)) {
+        const label = current.branches.length ? withHeadcode(current.trainId, primaryLive.label) : primaryLive.label
+        const at = place(shownRef.current || undefined, primaryLive.lat, primaryLive.lng)
+        shownRef.current = at
+        points.push({ ...at, label, id: 'self' })
+      }
+      for (const branch of current.branches) {
+        const raw = liveJourneyPosition(branch.stops, branch.mapped, branch.location, now)
+        const live = raw ? snapLiveToRailPath(raw, branchPathsRef.current.get(branch.rid) || null) : null
+        if (!live || !Number.isFinite(live.lat)) continue
+        const at = place(shownBranchesRef.current.get(branch.rid), live.lat, live.lng)
+        shownBranchesRef.current.set(branch.rid, at)
+        points.push({ ...at, label: withHeadcode(branch.trainId, live.label), id: branch.rid })
+      }
+      if (!points.length) return
+      setSource(map, 'tracks-live', liveCollection(points))
+      const followed = tipLiveRef.current ? points.find((point) => point.id === tipLiveRef.current) : null
+      if (followed && tipRef.current) {
+        tipRef.current.setLngLat([followed.lng, followed.lat]).setHTML(tipHtml(followed.label))
       }
     }
     raf = window.requestAnimationFrame(tick)

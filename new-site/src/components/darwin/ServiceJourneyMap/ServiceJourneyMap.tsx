@@ -19,7 +19,7 @@ import type { ServiceDetail, ServiceStop } from '../../../types/darwin'
 import type { Station } from '../../../types'
 import { mapLocationBanner, type MapLocationBanner } from './mapLocationBanner'
 import { loadGbRailGraph } from '../../../utils/tracksRailGraph'
-import { ServiceTracksMap } from './ServiceTracksMap'
+import { ServiceTracksMap, type BranchTrack } from './ServiceTracksMap'
 
 if (typeof window !== 'undefined') void loadGbRailGraph()
 import { JOERD_TERRAIN_CREDIT, TRACKS_RELIEF } from '../../../utils/tracksCredits'
@@ -111,10 +111,13 @@ export function ServiceJourneyMap({
   service,
   stations,
   extraStops = [],
+  branches = [],
 }: {
   service: ServiceDetail
   stations: Station[]
   extraStops?: ServiceStop[][]
+  /** Other portions of a split, each with its own live position. */
+  branches?: ServiceDetail[]
 }) {
   const [banner, setBanner] = useState<MapLocationBanner | null>(null)
   const [extraCoords, setExtraCoords] = useState<Record<string, { lat: number; lng: number }>>({})
@@ -141,8 +144,11 @@ export function ServiceJourneyMap({
     [operators, service.toc, service.tocName],
   )
   const neededKey = useMemo(
-    () => tiplocsNeedingCoordinates([...(service.stops || []), ...extraStops.flat()], stations).join('|'),
-    [service.stops, stations, extraStops],
+    () => tiplocsNeedingCoordinates(
+      [...(service.stops || []), ...extraStops.flat(), ...branches.flatMap((branch) => branch.stops || [])],
+      stations,
+    ).join('|'),
+    [service.stops, stations, extraStops, branches],
   )
 
   const mapped = useMemo(
@@ -187,6 +193,24 @@ export function ServiceJourneyMap({
   const extraWaypoints = useMemo(
     () => extraRoutes.map((points) => mappedRouteWaypoints(points)),
     [extraRoutes],
+  )
+  const branchTracks = useMemo<BranchTrack[]>(
+    () => branches.flatMap((branch) => {
+      const points = pointsOnTheLeg(
+        journeyMapStops(branch.stops || [], stations, extraCoords),
+        (point) => !point.calling && !String(point.crs || '').trim(),
+      )
+      if (points.length < 2) return []
+      return [{
+        rid: branch.rid,
+        trainId: branch.trainId,
+        stops: branch.stops || [],
+        mapped: points,
+        waypoints: mappedRouteWaypoints(points),
+        location: branch.location,
+      }]
+    }),
+    [branches, stations, extraCoords],
   )
 
   const missingStop = useMemo(() => {
@@ -395,6 +419,8 @@ export function ServiceJourneyMap({
         <ServiceTracksMap
           waypoints={waypoints}
           extraWaypoints={extraWaypoints}
+          branches={branchTracks}
+          trainId={service.trainId}
           mapped={mapped}
           extraMapped={extraMapped}
           stops={service.stops}

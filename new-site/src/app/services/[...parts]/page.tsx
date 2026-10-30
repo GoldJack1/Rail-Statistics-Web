@@ -411,6 +411,11 @@ const ServiceDetailPage: React.FC = () => {
     () => (splitWorking && data ? splitMapStopLists(splitWorking, data.stops) : []),
     [splitWorking, data],
   )
+  const liveBranches = useMemo(() => {
+    if (!splitWorking || !data) return []
+    const want = new Set(splitWorking.portions.map((portion) => portion.rid))
+    return partners.filter((svc) => want.has(svc.rid))
+  }, [splitWorking, partners, data])
   const loadingTpl = useMemo(
     () => (data ? stopTplFromBackLink(from, data.stops, data.origin) : null),
     [data, from],
@@ -803,7 +808,7 @@ const ServiceDetailPage: React.FC = () => {
 
         {data && section === 'map' && (
           <section className="modal-section svc-map-section" aria-label="Journey map">
-            <ServiceJourneyMap service={data} stations={stations} extraStops={mapBranches} />
+            <ServiceJourneyMap service={data} stations={stations} extraStops={mapBranches} branches={liveBranches} />
           </section>
         )}
 
