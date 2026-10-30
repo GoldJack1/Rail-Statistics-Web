@@ -259,6 +259,9 @@ test("an early estimate does not move a booked timing point", () => {
 test("a working dwell with no public time is a pass", () => {
   assert.equal(isWorkingPass({ tiploc: "CHFN", crs: "CHF", wta: "16:56", wtd: "16:57" }), true);
   assert.equal(isWorkingPass({ tiploc: "YORK", crs: "YRK", sta: "17:08", std: "17:11", wta: "17:08", wtd: "17:11" }), false);
+  assert.equal(isWorkingPass({ tiploc: "EDINBUR", wta: "00:56", wtd: "01:24", is_passing: 0 }), false);
+  assert.equal(isWorkingPass({ tiploc: "EDINBUR", wta: "00:39", is_passing: 0 }), false);
+  assert.equal(isWorkingPass({ tiploc: "HAYMRKT", wtp: "00:34½", is_passing: 1 }), true);
 });
 
 test("working timetable order counts the half minute and ignores a later public time", () => {

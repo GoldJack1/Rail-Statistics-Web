@@ -426,6 +426,19 @@ describe('serviceJourneyMap', () => {
     expect(journeyPointKind(stop('MILESPL', 'Miles Platting Junction', 'PP', { crs: 'MLP' }))).toBe('junction')
     expect(journeyPointKind(stop('HOLBJCN', 'Holbeck Jn', 'PP'))).toBe('junction')
     expect(journeyPointKind(stop('EDINBUR', 'Edinburgh', 'PP', { crs: 'EDB', wta: '00:56', wtd: '01:24' }))).toBe('stop')
+    expect(journeyPointKind(stop('EDINBUR', 'Edinburgh', 'PP', { crs: 'EDB', wta: '00:39' }))).toBe('stop')
+  })
+
+  it('continues the Aberdeen sleeper over the Forth to its Edinburgh arrival', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('IVRKTHG', 'Inverkeithing', 'IP', { crs: 'INK', lat: 56.034, lng: -3.396 }),
+        stop('HAYMRKT', 'Haymarket', 'PP', { crs: 'HYM', wtp: '00:34½', lat: 55.946, lng: -3.218 }),
+        stop('EDINBUR', 'Edinburgh', 'PP', { crs: 'EDB', wta: '00:39', lat: 55.952, lng: -3.19 }),
+      ],
+      [],
+    )
+    expect(mappedRouteWaypoints(mapped).map((point) => Number(point[0].toFixed(3)))).toEqual([56.034, 55.946, 55.952])
   })
 
   it('sends the sleeper through Edinburgh even though that dwell has no public time', () => {

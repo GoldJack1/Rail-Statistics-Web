@@ -36,9 +36,20 @@ export function isAdvertisedCall(c) {
 }
 
 export function isWorkingPass(c) {
-  // A passenger stop needs a public time. A working dwell with no public
-  // arrival or departure is a pass, even when the timetable books a few seconds.
-  return !isAdvertisedCall(c);
+  // A passenger stop needs a public time. A few seconds of working time is
+  // still a pass. A real dwell, or a working arrival such as Edinburgh after
+  // Inverkeithing, is where the train is booked to stop.
+  if (isAdvertisedCall(c)) return false;
+  const passTime = String(c?.wtp || "").trim();
+  const arr = parseHmMinutes(c?.wta);
+  const dep = parseHmMinutes(c?.wtd);
+  if (arr != null && dep != null && !passTime) {
+    let gap = dep - arr;
+    if (gap < 0) gap += 24 * 60;
+    if (gap >= 2 && gap < 12 * 60) return false;
+  }
+  if (arr != null && dep == null && !passTime && Number(c?.is_passing) === 0) return false;
+  return true;
 }
 
 /** Public GBTT stop, including advertised TIPLOCs that never received a CRS. */

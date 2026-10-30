@@ -56,6 +56,14 @@ describe('portionBannerTitle', () => {
       stop({ tpl: 'TILEH', name: 'Tile Hill', slot: 'PP' }),
     ])).toBe('1M16 · Inverness → London Euston')
   })
+
+  it('ends the Aberdeen portion at Edinburgh, where it is booked to arrive', () => {
+    expect(portionBannerTitle('1B16', [
+      stop({ tpl: 'ABRDEEN', name: 'Aberdeen', slot: 'OR' }),
+      stop({ tpl: 'IVRKTHG', name: 'Inverkeithing', slot: 'IP' }),
+      stop({ tpl: 'EDINBUR', name: 'Edinburgh', slot: 'PP', wta: '00:39' }),
+    ])).toBe('1B16 · Aberdeen → Edinburgh')
+  })
 })
 
 describe('mapLocationBanner', () => {

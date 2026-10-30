@@ -474,11 +474,12 @@ function clockMinutes(value: string | null | undefined): number | null {
   return Number(match[1]) * 60 + Number(match[2])
 }
 
-/** A working dwell of a few minutes is where the train stops, even with no public time. */
+/** A working dwell of a few minutes, or a working arrival, is where the train stops. */
 function workingDwellStop(stop: { wta?: string | null; wtd?: string | null; wtp?: string | null }): boolean {
   if (String(stop.wtp || '').trim()) return false
   const arr = clockMinutes(stop.wta)
   const dep = clockMinutes(stop.wtd)
+  if (arr != null && dep == null) return true
   if (arr == null || dep == null) return false
   let gap = dep - arr
   if (gap < 0) gap += 24 * 60

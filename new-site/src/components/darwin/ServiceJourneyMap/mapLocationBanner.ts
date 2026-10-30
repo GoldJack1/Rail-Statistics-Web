@@ -18,6 +18,7 @@ function dwells(stop: ServiceStop): boolean {
   }
   const arr = mins(stop.wta)
   const dep = mins(stop.wtd)
+  if (arr != null && dep == null) return true
   if (arr == null || dep == null) return false
   let gap = dep - arr
   if (gap < 0) gap += 24 * 60

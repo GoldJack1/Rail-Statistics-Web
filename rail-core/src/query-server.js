@@ -445,8 +445,9 @@ function trimCallsToDestination(rows, svc, keepOrder = false) {
   }
   if (!destHits.length) return out.length ? out : ordered;
   const cut = destHits[destHits.length - 1];
-  const laterAdvertised = out.slice(cut + 1).some((c) => isPublicPassengerCall(c));
-  if (laterAdvertised) return out;
+  // Inverkeithing is the public destination, and the sleeper is still booked
+  // on to Edinburgh. Those later working stops stay on the train.
+  if (out.slice(cut + 1).some((c) => !isWorkingPass(c))) return out;
   return out.slice(0, cut + 1);
 }
 
