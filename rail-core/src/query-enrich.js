@@ -7,7 +7,7 @@ import { tdClockPrecise } from "./td-apply.js";
 import { resolveSmartTiploc } from "./import-smart.js";
 import { isNonPassengerLocation, isSignalOrElocTiploc } from "./geometry-densify.js";
 import { interpolateHm } from "./tiploc-graph.js";
-import { actualBelongsToBooked, isSignallingBerth, tdClockBelongsToRid } from "./td-match.js";
+import { actualBelongsToBooked, bookedInstantForRid, isSignallingBerth, latestClockInstant, tdClockBelongsToRid } from "./td-match.js";
 
 function corpusMeta(catalog, tiploc) {
   if (!catalog || !tiploc) return { name: "", crs: "" };
@@ -168,6 +168,7 @@ export function dropForeignTdActuals(calls, opts = {}) {
   const rid = opts.rid || null;
   const now = opts.now || Date.now();
   const originClock = (calls || []).map((call) => call?.wtd || call?.std || call?.wta || call?.sta).find(Boolean) || null;
+  const originAt = rid && originClock ? bookedInstantForRid(rid, originClock, originClock) : null;
   return (calls || []).map((call) => {
     if (String(call.actual_source || "") !== "td") return call;
     const booked = callBookedMin(call);
@@ -175,8 +176,13 @@ export function dropForeignTdActuals(calls, opts = {}) {
     const clockMismatch = booked != null && actual != null && !actualBelongsToBooked(booked, actual);
     const stamp = call.atp || call.atd || call.ata || call.etp || call.etd || call.eta;
     const bookedClock = call.wtp || call.wtd || call.wta || call.ptd || call.pta;
+    const beforeOrigin = Boolean(
+      !bookedClock && stamp && originAt && latestClockInstant(stamp, now) &&
+      latestClockInstant(stamp, now).getTime() < originAt.getTime() - 10 * 60_000,
+    );
     const otherDay = Boolean(
-      rid && stamp && bookedClock && !tdClockBelongsToRid(rid, bookedClock, stamp, originClock, now),
+      beforeOrigin ||
+      (rid && stamp && bookedClock && !tdClockBelongsToRid(rid, bookedClock, stamp, originClock, now)),
     );
     if (!clockMismatch && !otherDay) return call;
     const next = {
