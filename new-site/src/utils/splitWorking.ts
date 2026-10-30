@@ -190,8 +190,17 @@ export function buildSplitWorking(self: ServiceDetail, partners: ServiceDetail[]
   const splitTpl = links[0].tiploc
   if (!splitTpl) return null
   const atSplit = links.filter((a) => a.tiploc === splitTpl)
-  if (!atSplit.some((a) => a.role === 'main')) return null
-  const isJoin = atSplit.every((a) => a.category === 'JJ') || atSplit.some((a) => a.category === 'JJ')
+  const isJoin = atSplit.some((a) => a.category === 'JJ')
+  if (!atSplit.some((a) => a.role === 'main')) {
+    const orderedSelf = orderStops(self.stops)
+    const here = passengerIndex(orderedSelf, splitTpl)
+    const want = splitTpl.toUpperCase()
+    const elsewhere = (stops: ServiceStop[]) =>
+      stops.some((stop) => isBookedStop(stop) && stop.tpl.toUpperCase() !== want)
+    const endsHere = here >= 0 && !elsewhere(orderedSelf.slice(here + 1))
+    const startsHere = here >= 0 && !elsewhere(orderedSelf.slice(0, here))
+    if (!(isJoin && endsHere) && !(!isJoin && startsHere)) return null
+  }
 
   const byKey = new Map<string, ServiceDetail>()
   const remember = (svc: ServiceDetail | undefined) => {
@@ -253,8 +262,11 @@ export function buildSplitWorking(self: ServiceDetail, partners: ServiceDetail[]
     })
   }
   addPortion(main)
+  const family = (main.associations || []).filter(
+    (a) => (a.category === 'VV' || a.category === 'JJ') && !a.isDeleted && a.tiploc === splitTpl && isPassengerHeadcode(a.otherTrainId),
+  )
   const allowed = new Set(
-    atSplit.flatMap((a) => [a.otherRid, a.otherUid, a.assocRid, a.mainRid].filter(Boolean).map((id) => String(id).toUpperCase())),
+    [...atSplit, ...family].flatMap((a) => [a.otherRid, a.otherUid, a.assocRid, a.mainRid].filter(Boolean).map((id) => String(id).toUpperCase())),
   )
   for (const p of partners) {
     if (allowed.has(p.rid.toUpperCase()) || allowed.has((p.uid || '').toUpperCase())) addPortion(p)

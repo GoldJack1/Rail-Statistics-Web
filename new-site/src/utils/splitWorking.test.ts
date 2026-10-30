@@ -276,6 +276,33 @@ describe('buildSplitWorking', () => {
       '1B16 Aberdeen to Edinburgh',
     ])
     expect(splitMapStopLists(split!, main.stops).map((stops) => stops[0]?.tpl)).toEqual(['FRTWLM', 'ABRDEEN'])
+
+    const fromFortWilliam = svc({
+      ...fortWilliam,
+      associations: [{
+        ...link('ftw', '1B01', 'Edinburgh'),
+        role: 'associated',
+        otherRid: 'main',
+        otherUid: 'C04564',
+        otherTrainId: '1M16',
+        otherOriginName: 'Inverness',
+        otherDestinationName: 'London Euston',
+        mainRid: 'main',
+        assocRid: 'ftw',
+      }],
+    })
+    const mainWithFamily = svc({
+      ...main,
+      associations: main.associations,
+    })
+    const fromPortion = buildSplitWorking(fromFortWilliam, [mainWithFamily, aberdeen])
+    expect(fromPortion?.kind).toBe('join')
+    expect(fromPortion?.togetherStops.map((s) => s.tpl)).toEqual(['EDINBUR', 'PRST', 'EUSTON'])
+    expect(splitMapStopLists(fromPortion!, fromFortWilliam.stops).map((stops) => stops.map((s) => s.tpl)[0])).toEqual([
+      'IVRNESS',
+      'ABRDEEN',
+      'EDINBUR',
+    ])
   })
 
   it('ignores association partners that split at a different station', () => {

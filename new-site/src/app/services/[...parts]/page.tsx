@@ -365,16 +365,33 @@ const ServiceDetailPage: React.FC = () => {
     return [...ids]
   }, [data])
   const partnerMap = useServiceDetails(partnerIds, historicalDate, historicalAt)
+  const siblingIds = useMemo(() => {
+    const known = new Set<string>(partnerIds.map((id) => id.toUpperCase()))
+    if (data?.rid) known.add(data.rid.toUpperCase())
+    if (data?.uid) known.add(data.uid.toUpperCase())
+    const ids = new Set<string>()
+    for (const svc of partnerMap.values()) {
+      for (const a of svc.associations || []) {
+        if (a.isDeleted || (a.category !== 'VV' && a.category !== 'JJ')) continue
+        if (!isPassengerHeadcode(a.otherTrainId)) continue
+        const id = a.otherRid || a.otherUid
+        if (!id || known.has(id.toUpperCase())) continue
+        ids.add(id)
+      }
+    }
+    return [...ids]
+  }, [partnerMap, partnerIds, data?.rid, data?.uid])
+  const siblingMap = useServiceDetails(siblingIds, historicalDate, historicalAt)
   const partners = useMemo(() => {
     const seen = new Set<string>()
     const list: ServiceDetail[] = []
-    for (const svc of partnerMap.values()) {
+    for (const svc of [...partnerMap.values(), ...siblingMap.values()]) {
       if (seen.has(svc.rid) || svc.rid === data?.rid) continue
       seen.add(svc.rid)
       list.push(svc)
     }
     return list
-  }, [partnerMap, data?.rid])
+  }, [partnerMap, siblingMap, data?.rid])
   const splitWorking = useMemo(
     () => (data ? buildSplitWorking(data, partners) : null),
     [data, partners],
