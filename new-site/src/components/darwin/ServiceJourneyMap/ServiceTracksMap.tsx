@@ -175,7 +175,9 @@ function setSource(map: MapLibreMap, id: string, data: GeoJSON.FeatureCollection
 
 export function ServiceTracksMap({
   waypoints,
+  extraWaypoints = [],
   mapped,
+  extraMapped = [],
   stops,
   location,
   platforms,
@@ -185,7 +187,9 @@ export function ServiceTracksMap({
   onToggleFullscreen,
 }: {
   waypoints: LatLngTuple[]
+  extraWaypoints?: LatLngTuple[][]
   mapped: JourneyMapStop[]
+  extraMapped?: JourneyMapStop[]
   stops: ServiceDetail['stops']
   location: ServiceDetail['location']
   platforms: Record<string, RoutePlatform>
@@ -211,6 +215,10 @@ export function ServiceTracksMap({
   // Platform marks sit within about 100 m of the station. A finer key restarts
   // the whole search when those chunks arrive, and the line disappears.
   const waypointKey = waypoints.map((point) => `${point[0].toFixed(3)},${point[1].toFixed(3)}`).join('|')
+  const extraKey = extraWaypoints
+    .map((route) => route.map((point) => `${point[0].toFixed(3)},${point[1].toFixed(3)}`).join('|'))
+    .join('||')
+  const frameStops = extraMapped.length ? [...mapped, ...extraMapped] : mapped
 
   useLayoutEffect(() => {
     inputRef.current = { stops, mapped, location, platforms }
@@ -242,9 +250,22 @@ export function ServiceTracksMap({
     const addRouteLayers = () => {
       if (map.getSource('tracks-route')) return
       map.addSource('tracks-route', { type: 'geojson', data: EMPTY })
+      map.addSource('tracks-extra-route', { type: 'geojson', data: EMPTY })
       map.addSource('tracks-stops', { type: 'geojson', data: EMPTY })
+      map.addSource('tracks-extra-stops', { type: 'geojson', data: EMPTY })
       map.addSource('tracks-live', { type: 'geojson', data: EMPTY })
       map.addSource('tracks-user', { type: 'geojson', data: EMPTY })
+      map.addLayer({
+        id: 'tracks-extra-line',
+        type: 'line',
+        source: 'tracks-extra-route',
+        paint: {
+          'line-color': routeColorRef.current,
+          'line-width': ROUTE_LINE_WIDTH,
+          'line-opacity': ROUTE_LINE_OPACITY,
+        },
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+      })
       map.addLayer({
         id: 'tracks-route-line',
         type: 'line',
@@ -255,6 +276,17 @@ export function ServiceTracksMap({
           'line-opacity': ROUTE_LINE_OPACITY,
         },
         layout: { 'line-cap': 'round', 'line-join': 'round' },
+      })
+      map.addLayer({
+        id: 'tracks-extra-stops',
+        type: 'circle',
+        source: 'tracks-extra-stops',
+        paint: {
+          'circle-radius': ['match', ['get', 'kind'], 'stop', 7, 5],
+          'circle-color': ['match', ['get', 'kind'], 'stop', '#16a34a', 'pass', '#2563eb', '#111827'],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+        },
       })
       map.addLayer({
         id: 'tracks-stops',
@@ -291,7 +323,7 @@ export function ServiceTracksMap({
       })
       const tip = markerTip()
       tipRef.current = tip
-      const tipLayers = ['tracks-live', 'tracks-stops', 'tracks-user'] as const
+      const tipLayers = ['tracks-live', 'tracks-stops', 'tracks-extra-stops', 'tracks-user'] as const
       for (const layer of tipLayers) {
         map.on('mouseenter', layer, (event) => {
           const feature = event.features?.[0]
@@ -350,6 +382,7 @@ export function ServiceTracksMap({
     const map = mapRef.current
     if (!mapReady || !map?.getLayer('tracks-route-line')) return
     map.setPaintProperty('tracks-route-line', 'line-color', lineColor)
+    if (map.getLayer('tracks-extra-line')) map.setPaintProperty('tracks-extra-line', 'line-color', lineColor)
   }, [lineColor, mapReady])
 
   useEffect(() => {
@@ -379,6 +412,33 @@ export function ServiceTracksMap({
 
   useEffect(() => {
     const map = mapRef.current
+    if (!mapReady || !map?.getSource('tracks-extra-route')) return
+    if (!extraWaypoints.length) {
+      setSource(map, 'tracks-extra-route', EMPTY)
+      setSource(map, 'tracks-extra-stops', EMPTY)
+      return
+    }
+    const controller = new AbortController()
+    let gone = false
+    const paint = (paths: LatLngTuple[][]) => {
+      if (gone) return
+      const features = paths.flatMap((path) => lineCollection(path).features)
+      setSource(map, 'tracks-extra-route', { type: 'FeatureCollection', features })
+      setSource(map, 'tracks-extra-stops', stopCollection(extraMapped, null, {}))
+    }
+    void Promise.all(
+      extraWaypoints.map((route) => routeTracksJourney(route, controller.signal).catch(() => [] as LatLngTuple[])),
+    ).then(paint)
+    return () => {
+      gone = true
+      controller.abort()
+    }
+    // extraKey is the content of the branch routes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extraKey, mapReady])
+
+  useEffect(() => {
+    const map = mapRef.current
     if (!mapReady || !map?.getSource('tracks-stops')) return
     setSource(map, 'tracks-stops', stopCollection(mapped, pathRef.current, platforms))
   }, [mapped, platforms, mapReady])
@@ -386,10 +446,10 @@ export function ServiceTracksMap({
   useEffect(() => {
     const map = mapRef.current
     if (!mapReady || !map || userMovedRef.current) return
-    if (mapped.length < 2 || mapped.length === framedCountRef.current) return
-    frameJourney(map, mapped)
-    framedCountRef.current = mapped.length
-  }, [mapped, mapReady])
+    if (frameStops.length < 2 || frameStops.length === framedCountRef.current) return
+    frameJourney(map, frameStops)
+    framedCountRef.current = frameStops.length
+  }, [frameStops, mapReady])
 
   useEffect(() => {
     let raf = 0

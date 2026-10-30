@@ -31,7 +31,12 @@ export function boardDestinationLabel(row: {
   destinationName?: string | null
   destination?: string | null
   associationDestinations?: Array<string | null | undefined> | null
+  joinedDestination?: string | null
+  joinedVia?: string | null
 }): string {
+  const joined = String(row.joinedDestination || '').trim()
+  const via = String(row.joinedVia || '').trim()
+  if (joined) return via && via !== joined ? `${joined} via ${via}` : joined
   const published = String(row.destinationName || '').trim()
   const extras = row.associationDestinations || []
   if (published.includes(' & ')) return published
@@ -87,9 +92,32 @@ function orderStops(stops: ServiceStop[]): ServiceStop[] {
     .map((row) => row.stop)
 }
 
+function clockMinutes(value: string | null | undefined): number | null {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || '').trim())
+  if (!match) return null
+  return Number(match[1]) * 60 + Number(match[2])
+}
+
+/** A working dwell is a booked stop. A pass time with no dwell stays a pass. */
+function isBookedStop(stop: ServiceStop): boolean {
+  if (stop.slot !== 'PP') return true
+  const arr = clockMinutes(stop.wta)
+  const dep = clockMinutes(stop.wtd)
+  if (arr == null || dep == null || String(stop.wtp || '').trim()) return false
+  let gap = dep - arr
+  if (gap < 0) gap += 24 * 60
+  return gap >= 2 && gap < 12 * 60
+}
+
+function stopPlaceName(stop: ServiceStop | undefined): string {
+  const name = String(stop?.name || '').trim()
+  if (!name || name === stop?.tpl) return ''
+  return name
+}
+
 function passengerIndex(stops: ServiceStop[], tpl: string): number {
   const want = String(tpl || '').toUpperCase()
-  const pax = stops.findIndex((s) => s.tpl.toUpperCase() === want && s.slot !== 'PP')
+  const pax = stops.findIndex((s) => s.tpl.toUpperCase() === want && isBookedStop(s))
   if (pax >= 0) return pax
   return stops.findIndex((s) => s.tpl.toUpperCase() === want)
 }
@@ -115,6 +143,7 @@ export type SplitPortion = {
 }
 
 export type SplitWorking = {
+  kind: 'join' | 'divide'
   splitTpl: string
   splitName: string
   togetherTrainId: string
@@ -123,6 +152,21 @@ export type SplitWorking = {
   togetherConsist: ConsistData | null
   portions: SplitPortion[]
   associations: ServiceAssociation[]
+}
+
+/** Routes drawn with this service: the other portions, and the shared run when this train does not cover it. */
+export function splitMapStopLists(split: SplitWorking, selfStops: ServiceStop[]): ServiceStop[][] {
+  const have = new Set((selfStops || []).map((stop) => stop.tpl.toUpperCase()))
+  const lists: ServiceStop[][] = []
+  const seen = new Set<string>()
+  for (const stops of [...split.portions.map((portion) => portion.stops), split.togetherStops]) {
+    if (stops.length < 2) continue
+    const key = stops.map((stop) => stop.tpl).join('|')
+    if (seen.has(key) || stops.every((stop) => have.has(stop.tpl.toUpperCase()))) continue
+    seen.add(key)
+    lists.push(stops)
+  }
+  return lists
 }
 
 export function splitTogetherLabel(split: SplitWorking): string {
@@ -169,8 +213,10 @@ export function buildSplitWorking(self: ServiceDetail, partners: ServiceDetail[]
   const togetherStops = splitAt >= 0
     ? (isJoin ? orderedMain.slice(splitAt) : orderedMain.slice(0, splitAt + 1))
     : orderedMain
+  const joinCall = orderedMain.find((s) => s.tpl.toUpperCase() === splitTpl.toUpperCase())
+  const joinName = stopPlaceName(joinCall) || atSplit[0].tiplocName || ''
   const splitName = isJoin
-    ? ([...togetherStops].reverse().find((s) => s.slot !== 'PP')?.name || main.destinationName || splitTpl)
+    ? ([...togetherStops].reverse().find(isBookedStop)?.name || main.destinationName || splitTpl)
     : (togetherStops[togetherStops.length - 1]?.name || splitTpl)
 
   const portions: SplitPortion[] = []
@@ -188,8 +234,14 @@ export function buildSplitWorking(self: ServiceDetail, partners: ServiceDetail[]
       branch = start >= 0 ? ordered.slice(start) : []
     }
     if (!branch.length) return
-    const dest = [...branch].reverse().find((s) => s.slot !== 'PP')?.name || svc.destinationName || svc.destination
-    const origin = branch.find((s) => s.slot !== 'PP')?.name || splitName
+    const bookedDest = [...branch].reverse().find(isBookedStop)
+    let dest = stopPlaceName(bookedDest) || bookedDest?.name || svc.destinationName || svc.destination
+    if (isJoin) {
+      const atJoin = [...branch].reverse().find((s) => s.tpl.toUpperCase() === splitTpl.toUpperCase())
+      dest = stopPlaceName(atJoin) || joinName || dest
+    }
+    const originStop = branch.find(isBookedStop)
+    const origin = stopPlaceName(originStop) || originStop?.name || (isJoin ? '' : splitName)
     portions.push({
       rid: svc.rid,
       uid: svc.uid,
@@ -210,9 +262,11 @@ export function buildSplitWorking(self: ServiceDetail, partners: ServiceDetail[]
   addPortion(self)
 
   if (!portions.length) return null
-  const togetherOriginName =
-    togetherStops.find((s) => s.slot !== 'PP')?.name || (isJoin ? splitTpl : main.originName) || main.origin || ''
+  const togetherOriginName = isJoin
+    ? (joinName || togetherStops.find(isBookedStop)?.name || '')
+    : (togetherStops.find(isBookedStop)?.name || main.originName || main.origin || '')
   return {
+    kind: isJoin ? 'join' : 'divide',
     splitTpl,
     splitName,
     togetherTrainId: main.trainId || '',

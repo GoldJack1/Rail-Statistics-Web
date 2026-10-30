@@ -130,6 +130,8 @@ function rowFromRailCore(r: Record<string, unknown>): DepartureRow {
     associationDestinations: Array.isArray(r.associationDestinations)
       ? (r.associationDestinations as unknown[]).map((n) => String(n)).filter(Boolean)
       : [],
+    joinedDestination: r.joinedDestination ? String(r.joinedDestination) : null,
+    joinedVia: r.joinedVia ? String(r.joinedVia) : null,
     via: typeof r.via === 'string' ? r.via : null,
     callingAfter: Array.isArray(r.callingAfter) ? (r.callingAfter as string[]) : [],
     callingAfterNames: Array.isArray(r.callingAfterNames) ? (r.callingAfterNames as (string | null)[]) : [],

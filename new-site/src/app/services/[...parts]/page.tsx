@@ -37,7 +37,7 @@ import {
   serviceHref,
   type ServiceSection,
 } from '@/utils/serviceUrl'
-import { buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from '@/utils/splitWorking'
+import { buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitMapStopLists, splitPortionLabel, splitTogetherLabel } from '@/utils/splitWorking'
 import '../ServiceDetailPage.css'
 
 const loadServiceJourneyMap = () =>
@@ -384,10 +384,16 @@ const ServiceDetailPage: React.FC = () => {
     [data?.associations, partnerMap],
   )
   const destinationLabel = splitWorking
-    ? joinStationNames(splitWorking.portions.map((p) => p.destinationName))
+    ? splitWorking.kind === 'join'
+      ? splitWorking.splitName
+      : joinStationNames(splitWorking.portions.map((p) => p.destinationName))
     : data
       ? serviceDestinationLabel(data)
       : ''
+  const mapBranches = useMemo(
+    () => (splitWorking && data ? splitMapStopLists(splitWorking, data.stops) : []),
+    [splitWorking, data],
+  )
   const loadingTpl = useMemo(
     () => (data ? stopTplFromBackLink(from, data.stops, data.origin) : null),
     [data, from],
@@ -780,7 +786,7 @@ const ServiceDetailPage: React.FC = () => {
 
         {data && section === 'map' && (
           <section className="modal-section svc-map-section" aria-label="Journey map">
-            <ServiceJourneyMap service={data} stations={stations} />
+            <ServiceJourneyMap service={data} stations={stations} extraStops={mapBranches} />
           </section>
         )}
 

@@ -99,6 +99,10 @@ export interface DepartureRow {
   destinationCrs: string | null;
   /** Extra divide destinations when the published name is still a single station. */
   associationDestinations?: string[];
+  /** Main train this service joins, when the board should name that destination. */
+  joinedDestination?: string | null;
+  /** Station where this service joins the main train. */
+  joinedVia?: string | null;
   /** Short via line for the card (not full calling-after arrays). */
   via?: string | null;
 

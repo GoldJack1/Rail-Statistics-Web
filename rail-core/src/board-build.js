@@ -12,6 +12,7 @@ import { lookupConsistsForUids, unitIdsAtBoardCall } from "./ptac-apply.js";
 import {
   associationsForRid,
   combinedDestinationName,
+  joinedBoardDestination,
   enrichAssociationsFromDays,
   filterDisplayAssociations,
   inferAssociationsFromConsist,
@@ -438,6 +439,7 @@ export function buildStationBoard({
       assocByRid.set(r.s_rid, associations);
     }
     const destNameShown = combinedDestinationName(destName, associations, toc, pax.map((c) => c.tiploc));
+    const joined = joinedBoardDestination(associations);
     const associationDestinations = [...new Set(
       (associations || [])
         .filter((a) => a.category === "VV" && a.role === "main" && !a.isCancelled && a.otherDestinationName)
@@ -472,6 +474,8 @@ export function buildStationBoard({
       destinationName: destNameShown,
       destinationCrs: destCrs,
       associationDestinations,
+      joinedDestination: joined.joinedDestination,
+      joinedVia: joined.joinedVia,
       via,
       callingAfter: [],
       callingAfterNames: [],

@@ -727,6 +727,18 @@ export function filterDisplayAssociations(associations, toc = null, journeyTpls 
   });
 }
 
+/** A portion that joins a main train is advertised to that train's destination. */
+export function joinedBoardDestination(associations) {
+  const joins = (associations || []).filter(
+    (a) => a.category === "JJ" && a.role === "associated" && !a.isCancelled && !a.isDeleted && a.otherDestinationName,
+  );
+  if (!joins.length) return { joinedDestination: null, joinedVia: null };
+  const dest = String(joins[0].otherDestinationName || "").trim();
+  const viaName = String(joins[0].tiplocName || "").trim();
+  const via = viaName && viaName !== joins[0].tiploc && viaName !== dest ? viaName : null;
+  return { joinedDestination: dest || null, joinedVia: via };
+}
+
 export function combinedDestinationName(ownName, associations, toc = null, journeyTpls = []) {
   const extras = publicDivideAssociations(associations, toc, journeyTpls).map((a) => a.otherDestinationName);
   const names = [...new Set([ownName, ...extras].filter(Boolean))];

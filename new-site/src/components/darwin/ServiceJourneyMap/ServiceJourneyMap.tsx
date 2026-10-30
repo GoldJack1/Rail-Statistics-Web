@@ -15,7 +15,7 @@ import {
 } from '../../../utils/serviceJourneyMap'
 import { useTocOperators } from '../../../hooks/useTocOperators'
 import { resolveTocRouteColor } from '../../../utils/tocOperatorMap'
-import type { ServiceDetail } from '../../../types/darwin'
+import type { ServiceDetail, ServiceStop } from '../../../types/darwin'
 import type { Station } from '../../../types'
 import { mapLocationBanner, type MapLocationBanner } from './mapLocationBanner'
 import { loadGbRailGraph } from '../../../utils/tracksRailGraph'
@@ -110,9 +110,11 @@ function londonNowRailwaySeconds(): number | null {
 export function ServiceJourneyMap({
   service,
   stations,
+  extraStops = [],
 }: {
   service: ServiceDetail
   stations: Station[]
+  extraStops?: ServiceStop[][]
 }) {
   const [banner, setBanner] = useState<MapLocationBanner | null>(null)
   const [extraCoords, setExtraCoords] = useState<Record<string, { lat: number; lng: number }>>({})
@@ -139,8 +141,8 @@ export function ServiceJourneyMap({
     [operators, service.toc, service.tocName],
   )
   const neededKey = useMemo(
-    () => tiplocsNeedingCoordinates(service.stops || [], stations).join('|'),
-    [service.stops, stations],
+    () => tiplocsNeedingCoordinates([...(service.stops || []), ...extraStops.flat()], stations).join('|'),
+    [service.stops, stations, extraStops],
   )
 
   const mapped = useMemo(
@@ -168,9 +170,23 @@ export function ServiceJourneyMap({
     }
     return next
   }, [mapped, platformCoords, platformQuery, platformQueryReady])
+  const extraRoutes = useMemo(
+    () => extraStops
+      .map((stops) => pointsOnTheLeg(
+        journeyMapStops(stops, stations, extraCoords),
+        (point) => !point.calling && !String(point.crs || '').trim(),
+      ))
+      .filter((points) => points.length >= 2),
+    [extraStops, stations, extraCoords],
+  )
+  const extraMapped = useMemo(() => extraRoutes.flat(), [extraRoutes])
   const waypoints = useMemo(
     () => mappedRouteWaypoints(mapped, activePlatforms),
     [mapped, activePlatforms],
+  )
+  const extraWaypoints = useMemo(
+    () => extraRoutes.map((points) => mappedRouteWaypoints(points)),
+    [extraRoutes],
   )
 
   const missingStop = useMemo(() => {
@@ -378,7 +394,9 @@ export function ServiceJourneyMap({
       <div className="svc-journey-map__stage">
         <ServiceTracksMap
           waypoints={waypoints}
+          extraWaypoints={extraWaypoints}
           mapped={mapped}
+          extraMapped={extraMapped}
           stops={service.stops}
           location={service.location}
           platforms={activePlatforms}

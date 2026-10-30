@@ -8,6 +8,7 @@ import {
   associationsForRid,
   collapseOvernightAssociates,
   combinedDestinationName,
+  joinedBoardDestination,
   enrichAssociationsFromDays,
   extractDarwinAssociationsXml,
   inferAssociationsFromConsist,
@@ -65,6 +66,23 @@ test("combined destination names a divide", () => {
       { category: "VV", role: "main", isCancelled: false, tiploc: "BHAMNWS", otherDestinationName: "Leicester" },
     ]),
     "Cardiff Central & Plymouth",
+  );
+});
+
+test("a joining portion is advertised to the main destination", () => {
+  assert.deepEqual(
+    joinedBoardDestination([
+      {
+        category: "JJ",
+        role: "associated",
+        isCancelled: false,
+        isDeleted: false,
+        tiploc: "EDINBUR",
+        tiplocName: "Edinburgh",
+        otherDestinationName: "London Euston",
+      },
+    ]),
+    { joinedDestination: "London Euston", joinedVia: "Edinburgh" },
   );
 });
 

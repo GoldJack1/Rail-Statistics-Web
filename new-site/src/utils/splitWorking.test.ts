@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { advertisedTime, boardDestinationLabel, buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from './splitWorking'
+import { advertisedTime, boardDestinationLabel, buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitMapStopLists, splitPortionLabel, splitTogetherLabel } from './splitWorking'
 import type { ServiceDetail, ServiceStop } from '../types/darwin'
 
 function stop(tpl: string, name: string, slot: string): ServiceStop {
@@ -74,6 +74,14 @@ describe('boardDestinationLabel', () => {
       destinationName: 'Cardiff Central',
       associationDestinations: ['Plymouth'],
     })).toBe('Cardiff Central & Plymouth')
+  })
+
+  it('names a joining portion by the main train destination', () => {
+    expect(boardDestinationLabel({
+      destinationName: 'Edinburgh',
+      joinedDestination: 'London Euston',
+      joinedVia: 'Edinburgh',
+    })).toBe('London Euston via Edinburgh')
   })
 })
 
@@ -200,6 +208,74 @@ describe('buildSplitWorking', () => {
     const split = buildSplitWorking(main, [aberdeen])
     expect(split?.portions.map((p) => p.destinationName)).toEqual(['Inverness', 'Aberdeen'])
     expect(joinStationNames(split!.portions.map((p) => p.destinationName))).toBe('Inverness & Aberdeen')
+  })
+
+  it('joins the Highland sleeper at Edinburgh and keeps London Euston', () => {
+    const link = (otherRid: string, trainId: string, destination: string) => ({
+      category: 'JJ' as const,
+      tiploc: 'EDINBUR',
+      tiplocName: 'Edinburgh',
+      tiplocCrs: 'EDB',
+      mainRid: 'main',
+      assocRid: otherRid,
+      role: 'main' as const,
+      otherRid,
+      otherUid: otherRid,
+      otherTrainId: trainId,
+      otherToc: 'CS',
+      otherOriginName: destination,
+      otherDestinationName: destination,
+      mainTime: null,
+      assocTime: null,
+      isCancelled: false,
+      isDeleted: false,
+    })
+    const main = svc({
+      rid: 'main',
+      uid: 'C04564',
+      trainId: '1M16',
+      originName: 'Inverness',
+      destinationName: 'London Euston',
+      stops: [
+        { ...stop('IVRNESS', 'Inverness', 'OR'), ptd: '20:45' },
+        { ...stop('FALKRKG', 'Falkirk Grahamston', 'IP'), ptd: '00:26' },
+        { ...stop('EDINBUR', 'Edinburgh', 'PP'), wta: '00:56', wtd: '01:24' },
+        { ...stop('PRST', 'Preston', 'IP'), pta: '04:15' },
+        { ...stop('EUSTON', 'London Euston', 'DT'), pta: '08:00' },
+      ],
+      associations: [link('ftw', '1B01', 'Edinburgh'), link('abd', '1B16', 'Inverkeithing')],
+    })
+    const fortWilliam = svc({
+      rid: 'ftw',
+      uid: 'C04548',
+      trainId: '1B01',
+      destinationName: 'Edinburgh',
+      stops: [
+        { ...stop('FRTWLM', 'Fort William', 'OR'), ptd: '19:50' },
+        { ...stop('EDINBUR', 'Edinburgh', 'DT'), pta: '01:08' },
+      ],
+    })
+    const aberdeen = svc({
+      rid: 'abd',
+      uid: 'C04552',
+      trainId: '1B16',
+      destinationName: 'Inverkeithing',
+      stops: [
+        { ...stop('ABRDEEN', 'Aberdeen', 'OR'), ptd: '21:43' },
+        { ...stop('IVRKTHG', 'Inverkeithing', 'IP'), ptd: '00:17' },
+        { ...stop('EDINBUR', 'Edinburgh', 'PP'), wta: '00:39' },
+      ],
+    })
+    const split = buildSplitWorking(main, [fortWilliam, aberdeen])
+    expect(split?.kind).toBe('join')
+    expect(split?.splitName).toBe('London Euston')
+    expect(splitTogetherLabel(split!)).toBe('1M16 Edinburgh to London Euston')
+    expect(split?.portions.map((p) => `${p.trainId} ${p.originName} to ${p.destinationName}`)).toEqual([
+      '1M16 Inverness to Edinburgh',
+      '1B01 Fort William to Edinburgh',
+      '1B16 Aberdeen to Edinburgh',
+    ])
+    expect(splitMapStopLists(split!, main.stops).map((stops) => stops[0]?.tpl)).toEqual(['FRTWLM', 'ABRDEEN'])
   })
 
   it('ignores association partners that split at a different station', () => {
