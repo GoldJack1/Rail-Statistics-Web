@@ -14,6 +14,7 @@ import type { ServiceViewMode } from '@/components/darwin/serviceViewMode'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
 import { betweenStationsLabel, inferProgressIndex } from '@/utils/serviceProgress'
 import { pointsOnTheLeg } from '@/utils/serviceJourneyMap'
+import { advertisedTime } from '@/utils/splitWorking'
 import { useEurostarRunningMiles } from '@/hooks/useEurostarRunningMiles'
 import { formatMilesAndChains, milesAndChainsTitle } from '@/utils/milesAndChains'
 import { formatQuarterClock } from '@/utils/quarterClock'
@@ -104,18 +105,28 @@ function computeDeltaMinutes(
   return diff
 }
 
+function publicArrival(stop: ServiceStop): string | null {
+  return advertisedTime(stop.pta, [stop.wta, stop.wtd, stop.wtp])
+}
+
+function publicDeparture(stop: ServiceStop): string | null {
+  return advertisedTime(stop.ptd, [stop.wtd, stop.wta, stop.wtp])
+}
+
 function departuresAnchorTime(stop: ServiceStop, kind: StopKind): string | null {
-  if (kind === 'pass') return trimSeconds(stop.wtp || stop.wtd || stop.wta || stop.pta || stop.ptd || null) || null
-  return trimSeconds(stop.ptd || stop.pta || stop.wtd || stop.wta || stop.wtp || null) || null
+  if (kind === 'pass') return trimSeconds(stop.wtp || stop.wtd || stop.wta || publicArrival(stop) || publicDeparture(stop) || null) || null
+  return trimSeconds(publicDeparture(stop) || publicArrival(stop) || stop.wtd || stop.wta || stop.wtp || null) || null
 }
 
 function primaryTime(stop: ServiceStop, kind: StopKind): { label: string; value: string } {
   const wArr = trimSeconds(stop.wta)
   const wDep = trimSeconds(stop.wtd)
   const wPass = trimSeconds(stop.wtp)
+  const pArr = publicArrival(stop)
+  const pDep = publicDeparture(stop)
   if (kind === 'pass') return { label: 'Pass', value: wPass || wDep || wArr || '—' }
-  if (kind === 'destination') return { label: 'Arr', value: stop.pta || wArr || stop.ptd || wDep || '—' }
-  return { label: 'Dep', value: stop.ptd || wDep || stop.pta || wArr || '—' }
+  if (kind === 'destination') return { label: 'Arr', value: pArr || wArr || pDep || wDep || '—' }
+  return { label: 'Dep', value: pDep || wDep || pArr || wArr || '—' }
 }
 
 function formatDelayLabel(delta: number | null): string {
@@ -258,15 +269,22 @@ function clockMinutes(value: string | null | undefined): number | null {
  * A pass time at a station is not a call. A working dwell of at least two
  * minutes is a booked stop even when it has no public arrival or departure.
  */
-export function asBookedCall(stop: ServiceStop): ServiceStop {
-  if (slotKind(stop.slot) !== 'pass') return stop
-  if (String(stop.wtp || '').trim()) return stop
+function dwellMinutes(stop: ServiceStop): number | null {
   const arr = clockMinutes(stop.wta)
   const dep = clockMinutes(stop.wtd)
-  if (arr == null || dep == null) return stop
+  if (arr == null || dep == null) return null
   let gap = dep - arr
   if (gap < 0) gap += 24 * 60
-  if (gap < 2 || gap >= 12 * 60) return stop
+  return gap
+}
+
+export function asBookedCall(stop: ServiceStop): ServiceStop {
+  const gap = dwellMinutes(stop)
+  const dwells = gap != null && gap >= 2 && gap < 12 * 60
+  const passOnly = Boolean(String(stop.wtp || '').trim()) && !publicArrival(stop) && !publicDeparture(stop) && !dwells
+  if (passOnly) return slotKind(stop.slot) === 'pass' ? stop : { ...stop, slot: 'PP' }
+  if (slotKind(stop.slot) !== 'pass') return stop
+  if (!dwells || String(stop.wtp || '').trim()) return stop
   return { ...stop, slot: 'IP' }
 }
 
@@ -401,8 +419,8 @@ function rowClocks(kind: StopKind, stop: ServiceStop): { booked: string | null; 
   const estimate = trimSeconds(kind === 'destination' ? (stop.eta || stop.etd) : (stop.etd || stop.eta))
   const booked = trimSeconds(
     kind === 'destination'
-      ? (stop.pta || stop.wta || stop.ptd || stop.wtd)
-      : (stop.ptd || stop.wtd || stop.pta || stop.wta),
+      ? (publicArrival(stop) || stop.wta || publicDeparture(stop) || stop.wtd)
+      : (publicDeparture(stop) || stop.wtd || publicArrival(stop) || stop.wta),
   )
   return { booked, real: actual || estimate, estimated: !actual && Boolean(estimate) }
 }
@@ -441,8 +459,8 @@ function ServiceStopRow({
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const kind = slotKind(stop.slot)
-  const pArr = stop.pta || null
-  const pDep = stop.ptd || null
+  const pArr = publicArrival(stop)
+  const pDep = publicDeparture(stop)
   const wArr = trimSeconds(stop.wta) || null
   const wDep = trimSeconds(stop.wtd) || null
   const wPass = trimSeconds(stop.wtp)

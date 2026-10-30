@@ -38,8 +38,26 @@ export function boardDestinationLabel(row: {
   return joinStationNames([published || row.destination, ...extras]) || published || String(row.destination || '')
 }
 
+/** CIF writes 00:00 when a public time is blank. That is not a midnight call. */
+export function advertisedTime(
+  value: string | null | undefined,
+  working: Array<string | null | undefined> = [],
+): string | null {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  if (raw.slice(0, 5) !== '00:00') return raw
+  const work = working.map((clock) => String(clock || '').trim().slice(0, 5)).find(Boolean)
+  if (!work || work === '00:00') return raw
+  return null
+}
+
 function stopMinutes(stop: ServiceStop): number | null {
-  const raw = stop.ptd || stop.pta || stop.wtd || stop.wta || stop.wtp
+  const raw =
+    advertisedTime(stop.ptd, [stop.wtd, stop.wta, stop.wtp]) ||
+    advertisedTime(stop.pta, [stop.wta, stop.wtd, stop.wtp]) ||
+    stop.wtd ||
+    stop.wta ||
+    stop.wtp
   if (!raw) return null
   const m = /^(\d{1,2}):(\d{2})/.exec(raw.trim())
   if (!m) return null

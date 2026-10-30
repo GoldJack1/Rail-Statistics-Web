@@ -16,7 +16,7 @@ function passStop(overrides: Partial<ServiceStop> = {}): ServiceStop {
 
 describe('asBookedCall', () => {
   it('keeps a station pass as a pass and a working dwell as a stop', () => {
-    expect(asBookedCall(passStop({ crs: 'WMB', wtp: '21:23½', wta: null, wtd: null })).slot).toBe('PP')
+    expect(asBookedCall(passStop({ crs: 'WMB', slot: 'IP', wtp: '21:23½', wta: null, wtd: null, pta: null, ptd: null })).slot).toBe('PP')
     expect(asBookedCall(passStop({ crs: 'EDB', wtp: null, wta: '03:47', wtd: '04:20' })).slot).toBe('IP')
     expect(asBookedCall(passStop({ crs: 'CHF', wtp: null, wta: '16:56', wtd: '16:57' })).slot).toBe('PP')
   })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boardDestinationLabel, buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from './splitWorking'
+import { advertisedTime, boardDestinationLabel, buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitPortionLabel, splitTogetherLabel } from './splitWorking'
 import type { ServiceDetail, ServiceStop } from '../types/darwin'
 
 function stop(tpl: string, name: string, slot: string): ServiceStop {
@@ -53,6 +53,14 @@ function svc(partial: Partial<ServiceDetail> & Pick<ServiceDetail, 'rid' | 'uid'
     ...partial,
   }
 }
+
+describe('advertisedTime', () => {
+  it('drops a blank 00:00 public time when the working time is later', () => {
+    expect(advertisedTime('00:00', ['07:15'])).toBeNull()
+    expect(advertisedTime('07:15', [])).toBe('07:15')
+    expect(advertisedTime('00:00', ['00:00'])).toBe('00:00')
+  })
+})
 
 describe('joinStationNames', () => {
   it('uses an ampersand between two stations', () => {
@@ -145,6 +153,53 @@ describe('buildSplitWorking', () => {
       '1V64 Gloucester to Cardiff Central',
     )
     expect(serviceDestinationLabel(main)).toBe('Cardiff Central & Plymouth')
+  })
+
+  it('keeps Aberdeen as the portion destination when a blank 00:00 sits on Stonehaven', () => {
+    const assoc = {
+      category: 'VV' as const,
+      tiploc: 'EDINBUR',
+      tiplocName: 'Edinburgh',
+      tiplocCrs: 'EDB',
+      mainRid: 'main',
+      assocRid: 'abd',
+      role: 'main' as const,
+      otherRid: 'abd',
+      otherUid: 'C04544',
+      otherTrainId: '1A25',
+      otherToc: 'CS',
+      otherOriginName: 'Edinburgh',
+      otherDestinationName: 'Aberdeen',
+      mainTime: null,
+      assocTime: null,
+      isCancelled: false,
+      isDeleted: false,
+    }
+    const main = svc({
+      rid: 'main',
+      uid: 'C04570',
+      trainId: '1S25',
+      stops: [
+        { ...stop('EUSTON', 'London Euston', 'OR'), ptd: '21:15' },
+        { ...stop('EDINBUR', 'Edinburgh', 'IP'), wta: '03:47', wtd: '04:20' },
+        { ...stop('IVRNESS', 'Inverness', 'DT'), pta: '09:17' },
+      ],
+      associations: [assoc],
+    })
+    const aberdeen = svc({
+      rid: 'abd',
+      uid: 'C04544',
+      trainId: '1A25',
+      destinationName: 'Aberdeen',
+      stops: [
+        { ...stop('EDINBUR', 'Edinburgh', 'OR'), ptd: '04:39' },
+        { ...stop('STONEHV', 'Stonehaven', 'IP'), pta: '07:15', ptd: '00:00', wta: '07:12', wtd: '07:15' },
+        { ...stop('ABRDEEN', 'Aberdeen', 'DT'), pta: '07:34' },
+      ],
+    })
+    const split = buildSplitWorking(main, [aberdeen])
+    expect(split?.portions.map((p) => p.destinationName)).toEqual(['Inverness', 'Aberdeen'])
+    expect(joinStationNames(split!.portions.map((p) => p.destinationName))).toBe('Inverness & Aberdeen')
   })
 
   it('ignores association partners that split at a different station', () => {

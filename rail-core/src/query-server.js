@@ -7,7 +7,7 @@ import { longRangeAheadDays } from "./cif-schedule.js";
 import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName } from "./tiploc-names.js";
-import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime, sortCallsByWttTime } from "./journey-order.js";
+import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicCallTime, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime, sortCallsByWttTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
 import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropForeignTdActuals, dropPassesOffTheLeg, dropUnreportedPasses, insertReportedPasses, overlayTdOnCalls, reportsForService, retimeInferredPasses, settleUnreportedPasses, tiplocCoords } from "./query-enrich.js";
 import { assignTrackMiles, loadGtclGraph } from "./gtcl-path.js";
@@ -816,8 +816,8 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
       seq: c.seq,
       isPassing: isWorkingPass(c),
       platform: platformText(c.platform),
-      sta: c.sta,
-      std: c.std,
+      sta: publicCallTime(c.sta, c),
+      std: publicCallTime(c.std, c),
       wta: c.wta,
       wtd: c.wtd,
       wtp: c.wtp,
