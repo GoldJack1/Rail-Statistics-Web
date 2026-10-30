@@ -106,9 +106,10 @@ function workingServiceHref(
   date: string | null | undefined,
   viewMode: ReturnType<typeof useServiceViewMode>[0],
 ): string | undefined {
-  if (!date) return undefined
+  const id = a.otherRid || a.otherUid
+  if (!date || !id) return undefined
   return serviceHref({
-    id: a.otherRid || a.otherUid,
+    id,
     date,
     section: 'calling',
     mode: viewMode,
@@ -582,12 +583,15 @@ const ServiceDetailPage: React.FC = () => {
               {(splitWorking?.associations || data.associations || [])
                 .filter((a) => a.category !== 'NP' && isPassengerHeadcode(a.otherTrainId))
                 .map((a) => {
-                const href = serviceHref({
-                  id: a.otherRid || a.otherUid,
-                  date: data.ssd || date,
-                  section: 'overview',
-                  mode: viewMode,
-                })
+                const id = a.otherRid || a.otherUid
+                const href = id
+                  ? serviceHref({
+                      id,
+                      date: data.ssd || date,
+                      section: 'overview',
+                      mode: viewMode,
+                    })
+                  : undefined
                 const kind = a.category === 'VV' ? 'Divides' : a.category === 'JJ' ? 'Joins' : 'Portion'
                 return (
                   <TextCard
@@ -761,7 +765,7 @@ const ServiceDetailPage: React.FC = () => {
                 associations={(data.associations || []).filter((a) => a.category !== 'NP')}
                 associationHref={(a) =>
                   serviceHref({
-                    id: a.otherRid || a.otherUid,
+                    id: a.otherRid || a.otherUid || '',
                     date: data.ssd || date,
                     section: 'overview',
                     mode: viewMode,
