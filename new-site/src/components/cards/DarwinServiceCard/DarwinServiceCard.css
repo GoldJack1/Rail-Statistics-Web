@@ -16,17 +16,13 @@
 }
 
 .rs-service-card.rs-station-card-stack > .rs-service-card__formation-bar.rs-station-text-card {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   gap: 10px;
   height: auto;
-  min-height: 0;
+  min-height: 66px;
+  padding-top: 15px;
   cursor: inherit;
   pointer-events: none;
-}
-
-.rs-service-card .rs-service-card__formation-bar:has(.rs-service-card__formation) {
-  padding-top: 15px;
-  min-height: 66px;
 }
 
 .rs-service-card__coaches {
