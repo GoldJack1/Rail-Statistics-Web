@@ -4,6 +4,7 @@
  */
 import { platformText } from "./db.js";
 import { tocDisplayName } from "./toc-names.js";
+import { tidyStationName } from "./tiploc-names.js";
 import { callScheduledMinutes, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
 import { isPassengerHeadcode } from "./headcode.js";
 import { maskCallAsOf, maskCallsAsOf, maskTrustOverlay, maskTrustOverlayCalls } from "./replay-at.js";
@@ -378,8 +379,8 @@ export function buildStationBoard({
     const destCrs = destCall?.crs || (destCall ? null : r.destination_crs) || null;
     const originTpl = originCall?.tiploc || r.origin_name || originCrs || "";
     const destTpl = destCall?.tiploc || r.destination_name || destCrs || "";
-    const originName = stationName(originCrs, originTpl) || r.origin_name || originCrs || originTpl;
-    const destName = stationName(destCrs, destTpl) || r.destination_name || destCrs || destTpl;
+    const originName = stationName(originCrs, originTpl) || tidyStationName(r.origin_name) || originCrs || originTpl;
+    const destName = stationName(destCrs, destTpl) || tidyStationName(r.destination_name) || destCrs || destTpl;
     const trainIdRaw = r.headcode || r.train_id || "";
     const trainId = /^[0-9][A-Z][0-9]{2}$/i.test(trainIdRaw) ? String(trainIdRaw).toUpperCase() : "";
     const isPassenger = r.service_type !== "freight";

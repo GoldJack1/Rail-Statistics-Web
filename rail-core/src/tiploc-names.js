@@ -11,7 +11,10 @@ export function tidyStationName(name) {
   if (!s) return s;
   s = s.replace(/\s+Rail Stations?$/i, "").replace(/\s+Railway Station$/i, "");
   s = s.replace(/\bCntrl\b/gi, "Central");
-  return s;
+  // Darwin/CORPUS tags the Elizabeth line CRS twin; the public name is the station.
+  s = s.replace(/\s*\(Crossrail\)/gi, "");
+  s = s.replace(/\s+Crossrail$/i, "");
+  return s.trim();
 }
 
 const SUFFIXES = [

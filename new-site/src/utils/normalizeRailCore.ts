@@ -1,4 +1,5 @@
 import type { DepartureRow, DeparturesSnapshot, ServiceDetail, ServiceStop } from '@/types/darwin'
+import { publicStationName, publicStationNameOrNull } from '@/utils/publicStationName'
 
 type RailCoreCall = {
   crs?: string | null
@@ -72,6 +73,7 @@ function hydrateStopLive(stop: ServiceStop): ServiceStop {
     (derived.liveKind === 'working' ? derived.liveTime : null)
   return {
     ...stop,
+    name: stop.name ? publicStationName(stop.name) || stop.name : stop.name,
     liveTime,
     liveKind,
     etd: stop.etd || (liveKind === 'est' ? liveTime : stop.etd) || null,
@@ -122,19 +124,21 @@ function rowFromRailCore(r: Record<string, unknown>): DepartureRow {
     platform: r.platform ? String(r.platform) : null,
     livePlatform: r.livePlatform ? String(r.livePlatform) : r.platform ? String(r.platform) : null,
     origin: String(r.origin || r.originCrs || ''),
-    originName: r.originName ? String(r.originName) : null,
+    originName: publicStationNameOrNull(r.originName),
     originCrs: r.originCrs ? String(r.originCrs) : null,
     destination: String(r.destination || r.destinationCrs || ''),
-    destinationName: r.destinationName ? String(r.destinationName) : null,
+    destinationName: publicStationNameOrNull(r.destinationName),
     destinationCrs: r.destinationCrs ? String(r.destinationCrs) : null,
     associationDestinations: Array.isArray(r.associationDestinations)
-      ? (r.associationDestinations as unknown[]).map((n) => String(n)).filter(Boolean)
+      ? (r.associationDestinations as unknown[]).map((n) => publicStationName(n)).filter(Boolean)
       : [],
-    joinedDestination: r.joinedDestination ? String(r.joinedDestination) : null,
+    joinedDestination: publicStationNameOrNull(r.joinedDestination),
     joinedVia: r.joinedVia ? String(r.joinedVia) : null,
-    via: typeof r.via === 'string' ? r.via : null,
+    via: typeof r.via === 'string' ? publicStationName(r.via) || null : null,
     callingAfter: Array.isArray(r.callingAfter) ? (r.callingAfter as string[]) : [],
-    callingAfterNames: Array.isArray(r.callingAfterNames) ? (r.callingAfterNames as (string | null)[]) : [],
+    callingAfterNames: Array.isArray(r.callingAfterNames)
+      ? (r.callingAfterNames as (string | null)[]).map((n) => (n ? publicStationName(n) || null : null))
+      : [],
     callingAfterCrs: Array.isArray(r.callingAfterCrs) ? (r.callingAfterCrs as (string | null)[]) : [],
     isPassenger: r.isPassenger !== false && String(r.serviceType || 'passenger') !== 'freight',
     cancelled,
@@ -153,11 +157,31 @@ function rowFromRailCore(r: Record<string, unknown>): DepartureRow {
   }
 }
 
+function tidyDepartureNames<T extends Partial<DepartureRow>>(row: T): T {
+  return {
+    ...row,
+    originName: publicStationNameOrNull(row.originName),
+    destinationName: publicStationNameOrNull(row.destinationName),
+    via: typeof row.via === 'string' ? publicStationName(row.via) || null : (row.via ?? null),
+    joinedDestination: publicStationNameOrNull(row.joinedDestination),
+    associationDestinations: Array.isArray(row.associationDestinations)
+      ? row.associationDestinations.map((n) => publicStationName(n)).filter(Boolean)
+      : row.associationDestinations,
+    callingAfterNames: Array.isArray(row.callingAfterNames)
+      ? row.callingAfterNames.map((n) => (n ? publicStationName(n) || null : n))
+      : row.callingAfterNames,
+  }
+}
+
 export function normalizeDeparturesSnapshot(body: unknown, fallbackCode: string): DeparturesSnapshot {
   if (body && typeof body === 'object' && Array.isArray((body as DeparturesSnapshot).departures)) {
     const snap = body as DeparturesSnapshot
-    if (!Array.isArray(snap.arrivals)) snap.arrivals = []
-    return snap
+    return {
+      ...snap,
+      stationName: publicStationName(snap.stationName) || snap.stationCrs || fallbackCode,
+      arrivals: Array.isArray(snap.arrivals) ? snap.arrivals.map(tidyDepartureNames) : [],
+      departures: snap.departures.map(tidyDepartureNames),
+    }
   }
   const o = (body && typeof body === 'object' ? body : {}) as {
     services?: Record<string, unknown>[]
@@ -176,7 +200,7 @@ export function normalizeDeparturesSnapshot(body: unknown, fallbackCode: string)
   const rows = Array.isArray(o.services) ? o.services.map(rowFromRailCore) : []
   return {
     tiploc: String(o.tiploc || crs),
-    stationName: o.stationName || o.name || crs,
+    stationName: publicStationName(o.stationName || o.name) || crs,
     stationCrs: crs,
     matchedAs: o.matchedAs === 'tiploc' ? 'tiploc' : 'crs',
     updatedAt: generatedAt,
@@ -268,9 +292,9 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
       diagramDate: b.diagramDate ? String(b.diagramDate) : null,
       isPassenger: String(b.serviceType || 'passenger') === 'passenger',
       origin: String(b.originCrs || ''),
-      originName: b.originName ? String(b.originName) : null,
+      originName: publicStationNameOrNull(b.originName),
       destination: String(b.destinationCrs || ''),
-      destinationName: b.destinationName ? String(b.destinationName) : null,
+      destinationName: publicStationNameOrNull(b.destinationName),
       cancelled: Boolean(b.cancelled),
       cancellation: null,
       partiallyCancelled: false,
@@ -289,5 +313,10 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
   }
   const detail = body as ServiceDetail
   if (!detail?.stops?.length) return detail
-  return { ...detail, stops: detail.stops.map(hydrateStopLive) }
+  return {
+    ...detail,
+    originName: publicStationNameOrNull(detail.originName),
+    destinationName: publicStationNameOrNull(detail.destinationName),
+    stops: detail.stops.map(hydrateStopLive),
+  }
 }

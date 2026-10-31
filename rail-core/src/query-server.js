@@ -6,7 +6,7 @@ import { addCalendarDays, locationBoardDays, londonCalendarYmd, londonInstant, s
 import { longRangeAheadDays } from "./cif-schedule.js";
 import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
-import { formatTiplocName } from "./tiploc-names.js";
+import { formatTiplocName, tidyStationName } from "./tiploc-names.js";
 import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicCallTime, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime, sortCallsByWttTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
 import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropForeignTdActuals, dropPassesOffTheLeg, dropUnreportedPasses, insertReportedPasses, overlayTdOnCalls, reportsForService, retimeInferredPasses, settleUnreportedPasses, tiplocCoords } from "./query-enrich.js";
@@ -217,7 +217,7 @@ function addLocationHit(seen, row) {
   const tiploc = String(row?.tiploc || "").toUpperCase();
   if (!tiploc || seen.has(tiploc)) return;
   const crs = String(row?.crs || "").toUpperCase();
-  const name = String(row?.name || "").trim() || stationName(crs, tiploc) || tiploc;
+  const name = tidyStationName(String(row?.name || "").trim()) || stationName(crs, tiploc) || tiploc;
   seen.set(tiploc, { tiploc, crs: crs.length === 3 ? crs : "", name });
 }
 
@@ -610,8 +610,8 @@ function publicEndName(db, svc) {
     db.prepare(`SELECT * FROM calls WHERE rid = ?`).all(svc.rid),
   );
   return {
-    origin: stationName(origin?.crs, origin?.tiploc) || svc.origin_name,
-    dest: stationName(dest?.crs, dest?.tiploc) || svc.destination_name,
+    origin: stationName(origin?.crs, origin?.tiploc) || tidyStationName(svc.origin_name),
+    dest: stationName(dest?.crs, dest?.tiploc) || tidyStationName(svc.destination_name),
   };
 }
 
@@ -935,7 +935,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
   } catch {
     td = null;
   }
-  const ownDest = destStop?.name || stationName(destStop?.crs, destStop?.tpl) || svc.destination_name;
+  const ownDest = destStop?.name || stationName(destStop?.crs, destStop?.tpl) || tidyStationName(svc.destination_name);
   const diagramNo = Array.isArray(consist?.allocations)
     ? consist.allocations.map((a) => a.diagramNo).find(Boolean) || null
     : null;
@@ -958,7 +958,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     diagramDate,
     isPassenger: svc.service_type !== "freight",
     origin: originStop?.crs || (originStop ? "" : svc.origin_crs) || "",
-    originName: originStop?.name || stationName(originStop?.crs, originStop?.tpl) || svc.origin_name,
+    originName: originStop?.name || stationName(originStop?.crs, originStop?.tpl) || tidyStationName(svc.origin_name),
     destination: destStop?.crs || (destStop ? "" : svc.destination_crs) || "",
     destinationName: ownDest,
     cancelled: Boolean(svc.cancelled),
@@ -1087,8 +1087,8 @@ async function unitDetail(unitId, dateRaw) {
       end: row.ssd,
       startTpl: null,
       endTpl: null,
-      startName: svc.origin_name || svc.origin_crs || null,
-      endName: svc.destination_name || svc.destination_crs || null,
+      startName: tidyStationName(svc.origin_name) || svc.origin_crs || null,
+      endName: tidyStationName(svc.destination_name) || svc.destination_crs || null,
       position: null,
       reversed: false,
     });

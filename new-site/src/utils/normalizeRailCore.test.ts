@@ -29,6 +29,41 @@ describe('normalizeRailCore', () => {
     expect(snap.departures[0].actualSource).toBe('darwin')
   })
 
+  it('drops the Crossrail tag from station names', () => {
+    const snap = normalizeDeparturesSnapshot(
+      {
+        generatedAt: '2026-10-31T12:00:00.000Z',
+        stationName: 'Paddington (Crossrail)',
+        stationCrs: 'PAD',
+        departures: [
+          {
+            rid: 'r1',
+            destinationName: 'Abbey Wood (Crossrail)',
+            originName: 'Paddington Crossrail',
+            via: 'Stratford (London) (Crossrail)',
+            scheduledTime: '10:00',
+          },
+        ],
+        arrivals: [],
+      },
+      'PAD',
+    )
+    expect(snap.stationName).toBe('Paddington')
+    expect(snap.departures[0].destinationName).toBe('Abbey Wood')
+    expect(snap.departures[0].originName).toBe('Paddington')
+    expect(snap.departures[0].via).toBe('Stratford (London)')
+
+    const detail = normalizeServiceDetail({
+      rid: 'r1',
+      originName: 'Paddington (Crossrail)',
+      destinationName: 'Abbey Wood (Crossrail)',
+      stops: [{ tpl: 'ABWDXR', name: 'Abbey Wood (Crossrail)', slot: 'DT' }],
+    })
+    expect(detail.originName).toBe('Paddington')
+    expect(detail.destinationName).toBe('Abbey Wood')
+    expect(detail.stops[0].name).toBe('Abbey Wood')
+  })
+
   it('fills liveKind from etd/atd on a query-server stops payload', () => {
     const detail = normalizeServiceDetail({
       rid: 'G15982',

@@ -3,6 +3,7 @@
  */
 import { useEffect, useState } from 'react'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
+import { publicStationName } from '@/utils/publicStationName'
 
 export type DarwinCatalogLocation = {
   tiploc: string
@@ -20,7 +21,7 @@ function asLocation(row: Partial<DarwinCatalogLocation> | null | undefined): Dar
   return {
     tiploc,
     crs: String(row?.crs || '').toUpperCase(),
-    name: String(row?.name || '').trim() || tiploc,
+    name: publicStationName(row?.name) || tiploc,
   }
 }
 

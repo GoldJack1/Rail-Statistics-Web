@@ -15,9 +15,11 @@
   font-weight: 400;
 }
 
-.rs-service-card .rs-service-card__formation-bar {
+.rs-service-card.rs-station-card-stack > .rs-service-card__formation-bar.rs-station-text-card {
+  flex: 0 0 auto;
   gap: 10px;
-  min-height: 40px;
+  height: auto;
+  min-height: 0;
   cursor: inherit;
   pointer-events: none;
 }

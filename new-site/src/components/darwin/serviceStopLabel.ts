@@ -1,4 +1,5 @@
 import type { ServiceDetail } from '@/types/darwin'
+import { publicStationName } from '@/utils/publicStationName'
 
 export type StopNameLookup = {
   byTiploc: Map<string, string>
@@ -85,7 +86,7 @@ export function buildStopNameLookup(stations: NamedStation[]): StopNameLookup {
   const byTiploc = new Map<string, string>()
   const byCrs = new Map<string, string>()
   for (const station of stations) {
-    const stationName = station.stationName?.trim()
+    const stationName = publicStationName(station.stationName)
     if (!stationName) continue
     const tiploc = station.tiploc?.trim().toUpperCase()
     const crsCode = station.crsCode?.trim().toUpperCase()
@@ -104,7 +105,7 @@ export function displayStopName(
   if (!stop) return ''
   const override = TIPLOC_DISPLAY_NAMES[stop.tpl?.toUpperCase()]
   if (override) return override
-  const current = stop.name?.trim()
+  const current = publicStationName(stop.name)
   if (current && !isRawTiplocName(current, stop.tpl)) return current
   const byTiplocName = fallbackNameLookup?.byTiploc.get(stop.tpl.toUpperCase())
   if (byTiplocName) return byTiplocName

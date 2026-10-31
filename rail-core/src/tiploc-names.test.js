@@ -32,4 +32,8 @@ test("Lincoln Central and NaPTAN rail-station suffix", () => {
   assert.equal(formatTiplocName("LINCLNC", "Lincoln"), "Lincoln Central");
   assert.equal(tidyStationName("Lincoln Central Rail Station"), "Lincoln Central");
   assert.equal(formatTiplocName("LVRPLCH", "Liverpool Cntrl (Northern)"), "Liverpool Central");
+  assert.equal(tidyStationName("Abbey Wood (Crossrail)"), "Abbey Wood");
+  assert.equal(tidyStationName("Paddington Crossrail"), "Paddington");
+  assert.equal(formatTiplocName("PADTON", "Paddington (Crossrail)"), "Paddington");
+  assert.equal(tidyStationName("Stratford (London) (Crossrail)"), "Stratford (London)");
 });

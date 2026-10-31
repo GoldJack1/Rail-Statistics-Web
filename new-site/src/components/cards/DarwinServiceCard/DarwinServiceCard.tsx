@@ -248,6 +248,7 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
   const visibleCoaches = coachCount != null ? Math.min(coachCount, MAX_COACH_PILLS) : 0
   const loadValues = visibleCoaches > 0 ? coachLoadValues(row, visibleCoaches) : []
   const loadAsPercent = coachLoadUsesPercent(row, loadValues)
+  const hasFormation = visibleCoaches > 0 || Boolean(formation)
 
   return (
     <article
@@ -294,48 +295,41 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
           <div className="rs-button__inner-shadow" />
         </div>
       </section>
-      {showFormation ? (
+      {showFormation && hasFormation ? (
         <section className="rs-station-text-card rs-service-card__formation-bar" aria-hidden="true">
-          <div
-            className={[
-              'rs-service-card__coaches',
-              visibleCoaches > 0 ? '' : 'rs-service-card__coaches--empty',
-              visibleCoaches > 0 && visibleCoaches <= FIXED_COACH_LIMIT
-                ? 'rs-service-card__coaches--fixed'
-                : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-          >
-            {visibleCoaches > 0
-              ? Array.from({ length: visibleCoaches }, (_, index) => {
-                  const tone = coachLoadTone(loadValues[index] ?? null, loadAsPercent)
-                  return (
-                    <span
-                      key={index}
-                      className={[
-                        coachClassName(index, visibleCoaches),
-                        tone
-                          ? `rs-service-card__coach--load-${tone} rs-button--color-${COACH_STATUS_COLOR[tone] || 'fav-action'}`
-                          : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' ')}
-                      title={
-                        loadValues[index] != null
-                          ? `Coach ${index + 1} · ${formatCoachLoad(loadValues[index]!, loadAsPercent)} loaded`
-                          : undefined
-                      }
-                    />
-                  )
-                })
-              : historicalMode
-                ? null
-                : <span className="rs-service-card__coach" />}
-          </div>
-          {showFormation && (detailedInfo || formation) ? (
-            <p className="rs-service-card__formation">{formation || '\u00a0'}</p>
+          {visibleCoaches > 0 ? (
+            <div
+              className={[
+                'rs-service-card__coaches',
+                visibleCoaches <= FIXED_COACH_LIMIT ? 'rs-service-card__coaches--fixed' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              {Array.from({ length: visibleCoaches }, (_, index) => {
+                const tone = coachLoadTone(loadValues[index] ?? null, loadAsPercent)
+                return (
+                  <span
+                    key={index}
+                    className={[
+                      coachClassName(index, visibleCoaches),
+                      tone
+                        ? `rs-service-card__coach--load-${tone} rs-button--color-${COACH_STATUS_COLOR[tone] || 'fav-action'}`
+                        : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    title={
+                      loadValues[index] != null
+                        ? `Coach ${index + 1} · ${formatCoachLoad(loadValues[index]!, loadAsPercent)} loaded`
+                        : undefined
+                    }
+                  />
+                )
+              })}
+            </div>
           ) : null}
+          {formation ? <p className="rs-service-card__formation">{formation}</p> : null}
         </section>
       ) : null}
     </article>

@@ -1,4 +1,5 @@
 import { unitIdsFromConsistRow } from "./ptac-apply.js";
+import { tidyStationName } from "./tiploc-names.js";
 import { addCalendarDays, ssdFromRid } from "./calendar-day.js";
 import { isPassengerHeadcode } from "./headcode.js";
 
@@ -314,14 +315,15 @@ function pushDivide(out, seen, main, portion, tpl, stationName, role, category =
     row.otherRid = main.svc.rid;
     row.otherUid = main.svc.uid;
     row.otherTrainId = main.svc.headcode || main.svc.train_id;
-    row.otherOriginName = stationName?.(main.calls[0].crs, main.calls[0].tiploc) || main.svc.origin_name;
+    row.otherOriginName = stationName?.(main.calls[0].crs, main.calls[0].tiploc) || tidyStationName(main.svc.origin_name);
     row.otherDestinationName =
       stationName?.(main.calls[main.calls.length - 1].crs, main.calls[main.calls.length - 1].tiploc) ||
-      main.svc.destination_name;
+      tidyStationName(main.svc.destination_name);
   } else {
-    row.otherOriginName = stationName?.(oCalls[0].crs, oCalls[0].tiploc) || other.origin_name;
+    row.otherOriginName = stationName?.(oCalls[0].crs, oCalls[0].tiploc) || tidyStationName(other.origin_name);
     row.otherDestinationName =
-      stationName?.(oCalls[oCalls.length - 1].crs, oCalls[oCalls.length - 1].tiploc) || other.destination_name;
+      stationName?.(oCalls[oCalls.length - 1].crs, oCalls[oCalls.length - 1].tiploc) ||
+      tidyStationName(other.destination_name);
   }
   out.push(row);
 }
@@ -562,25 +564,25 @@ export function inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, s
 }
 
 function destOfService(db, svc, stationName) {
-  if (!db) return svc.destination_name || null;
+  if (!db) return tidyStationName(svc.destination_name) || null;
   const row = db
     .prepare(
       `SELECT crs, tiploc FROM calls WHERE rid = ? AND IFNULL(is_passing,0)=0
        ORDER BY seq DESC LIMIT 1`,
     )
     .get(svc.rid);
-  return stationName?.(row?.crs, row?.tiploc) || svc.destination_name || row?.tiploc || null;
+  return stationName?.(row?.crs, row?.tiploc) || tidyStationName(svc.destination_name) || row?.tiploc || null;
 }
 
 function originOfService(db, svc, stationName) {
-  if (!db) return svc.origin_name || null;
+  if (!db) return tidyStationName(svc.origin_name) || null;
   const row = db
     .prepare(
       `SELECT crs, tiploc FROM calls WHERE rid = ? AND IFNULL(is_passing,0)=0
        ORDER BY seq ASC LIMIT 1`,
     )
     .get(svc.rid);
-  return stationName?.(row?.crs, row?.tiploc) || svc.origin_name || row?.tiploc || null;
+  return stationName?.(row?.crs, row?.tiploc) || tidyStationName(svc.origin_name) || row?.tiploc || null;
 }
 
 function serviceOnDays(databases, rid) {
