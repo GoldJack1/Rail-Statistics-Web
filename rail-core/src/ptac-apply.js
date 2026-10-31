@@ -40,12 +40,27 @@ function parseJson(raw) {
   }
 }
 
+/** Darwin stores a CIF uid as two ASCII digits plus the rest, so W34049 is 8734049. */
+export function consistUidAliases(uid) {
+  const s = String(uid || "").toUpperCase();
+  if (!s) return [];
+  const aliases = [s];
+  if (/^[A-Z][0-9]{5}$/.test(s)) aliases.push(String(s.charCodeAt(0)) + s.slice(1));
+  if (/^\d{7}$/.test(s)) {
+    const code = Number(s.slice(0, 2));
+    if (code >= 65 && code <= 90) aliases.push(String.fromCharCode(code) + s.slice(2));
+  }
+  return [...new Set(aliases)];
+}
+
 export function lookupConsist(catalog, keys = {}) {
-  const uid = String(keys.uid || "").toUpperCase();
+  const asked = String(keys.uid || "").toUpperCase();
+  const aliases = consistUidAliases(asked);
   const ssd = normalizePtacDay(keys.ssd || keys.operating_day, null);
   const originHHMM = clockHhmm(keys.originHHMM || keys.origin_hhmm);
   const headcode = String(keys.headcode || "").toUpperCase();
-  if (uid && ssd) {
+  for (const uid of aliases.length ? aliases : [asked]) {
+    if (!uid || !ssd) continue;
     if (originHHMM) {
       const hit = catalog
         .prepare(`SELECT * FROM consists WHERE uid = ? AND ssd = ? AND origin_hhmm = ?`)
@@ -59,15 +74,12 @@ export function lookupConsist(catalog, keys = {}) {
       if (timed) return timed;
     }
     if (rows.length) return rows[0];
-  }
-  const prev = ssd ? catalog.prepare(`SELECT * FROM consists WHERE uid = ? AND ssd = ?`).all(uid, ssd) : [];
-  if (uid && ssd && !prev.length) {
     const y = ssd.split("-").map(Number);
     const prevSsd = new Date(Date.UTC(y[0], y[1] - 1, y[2] - 1)).toISOString().slice(0, 10);
     const overnight = catalog.prepare(`SELECT * FROM consists WHERE uid = ? AND ssd = ?`).all(uid, prevSsd);
     if (overnight.length === 1) return overnight[0];
   }
-  if (headcode && ssd && !uid) {
+  if (headcode && ssd && !asked) {
     const rows = catalog.prepare(`SELECT * FROM consists WHERE headcode = ? AND ssd = ?`).all(headcode, ssd);
     if (rows.length === 1) return rows[0];
   }
@@ -76,7 +88,17 @@ export function lookupConsist(catalog, keys = {}) {
 
 export function lookupConsistsForUids(catalog, ssd, uids) {
   const map = new Map();
-  const unique = [...new Set((uids || []).map((u) => String(u || "").toUpperCase()).filter(Boolean))];
+  const queryToAsked = new Map();
+  for (const raw of uids || []) {
+    const asked = String(raw || "").toUpperCase();
+    if (!asked) continue;
+    for (const alias of consistUidAliases(asked)) {
+      const owners = queryToAsked.get(alias) || [];
+      owners.push(asked);
+      queryToAsked.set(alias, owners);
+    }
+  }
+  const unique = [...queryToAsked.keys()];
   if (!ssd || !unique.length) return map;
   const chunk = 400;
   for (let i = 0; i < unique.length; i += chunk) {
@@ -84,7 +106,11 @@ export function lookupConsistsForUids(catalog, ssd, uids) {
     const ins = part.map(() => "?").join(",");
     const rows = catalog.prepare(`SELECT * FROM consists WHERE ssd = ? AND uid IN (${ins})`).all(ssd, ...part);
     for (const row of rows) {
-      if (!map.has(row.uid)) map.set(row.uid, row);
+      const key = String(row.uid || "").toUpperCase();
+      if (!map.has(key)) map.set(key, row);
+      for (const asked of queryToAsked.get(key) || []) {
+        if (!map.has(asked)) map.set(asked, row);
+      }
     }
   }
   return map;

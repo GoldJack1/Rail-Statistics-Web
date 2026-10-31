@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "path";
 import { openCatalog } from "./db.js";
-import { applyPtacUnit, lookupConsist, replayPtac } from "./ptac-apply.js";
+import { applyPtacUnit, lookupConsist, lookupConsistsForUids, replayPtac } from "./ptac-apply.js";
 import { parsePtacMessage } from "./parse-ptac.js";
 
 const SAMPLE_XML = `<?xml version="1.0"?>
@@ -67,6 +67,26 @@ test("PTAC persist is UID+SSD and does not need a service row", () => {
   assert.ok(row);
   assert.equal(JSON.parse(row.unit_ids)[0], "185111");
   assert.equal(replayPtac(), 0);
+  cat.close();
+});
+
+test("a Darwin numeric uid finds the CIF diagram on a past board", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ptac-alias-"));
+  const cat = openCatalog(dir);
+  applyPtacUnit(cat, {
+    unit_id: "390124",
+    uid: "W34049",
+    operating_day: "2026-10-30",
+    headcode: "9G46",
+    originTpl: "EUSTON",
+    originHHMM: "21:06",
+    json: { allocations: [{ allocationOrigin: { tiploc: "EUSTON" }, allocationOriginDateTime: "21:06", allocationDestination: { tiploc: "WVRMPTN" }, allocationDestinationDateTime: "23:10", resourceGroups: [{ unitId: "390124" }] }] },
+  });
+  const row = lookupConsist(cat, { uid: "8734049", ssd: "2026-10-30" });
+  assert.equal(row.uid, "W34049");
+  const board = lookupConsistsForUids(cat, "2026-10-30", ["8734049", "Y80935"]);
+  assert.equal(JSON.parse(board.get("8734049").unit_ids)[0], "390124");
+  assert.equal(board.get("Y80935"), undefined);
   cat.close();
 });
 
