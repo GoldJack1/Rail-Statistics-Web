@@ -58,6 +58,78 @@ export interface SchedulePanelRow {
   text: string
 }
 
+export interface OverviewField {
+  label: string
+  value: string
+  note?: string
+}
+
+export interface OverviewSidebarModel {
+  lines: string[]
+  operating: string | null
+  category: string | null
+  pathed: string | null
+  extras: string[]
+  pair: OverviewField[]
+  fields: OverviewField[]
+}
+
+function daysField(schedule: ServiceDetail['schedule']): OverviewField | null {
+  const label = String(schedule?.daysRun || '').trim()
+  const from = String(schedule?.runsFrom || '').trim()
+  const to = String(schedule?.runsTo || '').trim()
+  const raw = String(schedule?.daysLabel || '').trim()
+  const split = raw.split(/\s+-\s+/)
+  if (split.length >= 2 && split[0] && split.slice(1).join(' - ')) {
+    return { label: split[0], value: split.slice(1).join(' - ') }
+  }
+  const range = [from, to].filter(Boolean).join(' to ')
+  if (label && range) return { label, value: range }
+  if (raw) return { label: label || 'Days', value: raw }
+  if (range) return { label: label || 'Days', value: range }
+  return null
+}
+
+function activatedNote(value: string | null | undefined): string | null {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const dated = raw.match(/^(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2})/)
+  if (dated) return `Activated ${dated[1]} at ${dated[2]}`
+  return /^activated\b/i.test(raw) ? raw : `Activated ${raw}`
+}
+
+/** Identity block shown in the service sidebar, matching the overview dropdown. */
+export function overviewSidebarModel(data: ServiceDetail): OverviewSidebarModel {
+  const schedule = data.schedule
+  const operating = String(schedule?.operatingLabel || '').trim() || null
+  const category = schedule?.categoryLabel || categoryText(data.trainCat) || (data.isPassenger ? 'Passenger Service' : null)
+  const pathed = schedule?.pathedAs || pathedAsText(data.powerType || schedule?.powerType, data.timingLoad || schedule?.timingLoad, schedule?.speed)
+  const extras = [schedule?.seatingLabel, schedule?.reservationsLabel].map((line) => String(line || '').trim()).filter(Boolean)
+  const lines = [operating, category, pathed, ...extras].filter((line): line is string => Boolean(line))
+
+  const headcode = String(schedule?.identity || data.trainId || '').trim()
+  const uid = String(schedule?.uid || data.uid || '').trim()
+  const pair: OverviewField[] = []
+  if (headcode) pair.push({ label: 'Headcode', value: headcode })
+  if (uid) pair.push({ label: 'UID', value: uid })
+
+  const fields: OverviewField[] = []
+  const days = daysField(schedule)
+  if (days) fields.push(days)
+  const units = (schedule?.units?.length ? schedule.units : data.units)?.map((unit) => String(unit || '').trim()).filter(Boolean) || []
+  if (units.length) fields.push({ label: 'Formed by', value: units.join(' + ') })
+  const trustId = String(schedule?.trustId || '').trim()
+  const activated = activatedNote(schedule?.activatedAt)
+  if (trustId) fields.push({ label: 'Trust ID', value: trustId, note: activated || undefined })
+  else if (activated) fields.push({ label: 'Activated', value: activated.replace(/^Activated\s+/i, '') })
+  const tsc = String(schedule?.tsc || '').trim()
+  if (tsc) fields.push({ label: 'TSC', value: tsc })
+  const retail = String(schedule?.headcode || '').trim()
+  if (retail && retail !== headcode) fields.push({ label: 'Diagram', value: retail })
+
+  return { lines, operating, category, pathed, extras, pair, fields }
+}
+
 export function schedulePanelRows(data: ServiceDetail): SchedulePanelRow[] {
   const schedule = data.schedule
   const rows: string[] = []

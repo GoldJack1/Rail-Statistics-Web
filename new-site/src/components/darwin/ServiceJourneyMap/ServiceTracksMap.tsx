@@ -8,6 +8,7 @@ import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl'
 import { Protocol } from 'pmtiles'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { BUTCircleButton } from '../../buttons'
+import { SidePane } from '../SidePane/SidePane'
 import '../../maps/MapZoomControls.css'
 import '../../maps/MapUserLocation.css'
 import { railwayDaySecondsFromClock } from '../../../utils/railwayOperatingDayUk'
@@ -635,6 +636,45 @@ export function ServiceTracksMap({
   return (
     <>
       <div ref={containerRef} className="svc-journey-map__canvas svc-journey-map__canvas--tracks" aria-label="Service journey map" />
+      <SidePane open={layersOpen} title="Map style" onClose={() => setLayersOpen(false)}>
+        {TRACKS_BASEMAP_GROUPS.map((group) => (
+          <section key={group.title} className="svc-journey-map__layer-group" aria-label={group.title}>
+            <h3 className="svc-journey-map__layer-title">{group.title}</h3>
+            <div className="svc-journey-map__layer-grid" role="radiogroup" aria-label={group.title}>
+              {group.styles.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={basemap === item.id}
+                  className={
+                    basemap === item.id
+                      ? 'svc-journey-map__layer-option svc-journey-map__layer-option--on'
+                      : 'svc-journey-map__layer-option'
+                  }
+                  onClick={() => {
+                    basemapChosen.current = true
+                    try {
+                      localStorage.setItem(BASEMAP_KEY, item.id)
+                    } catch {
+                      /* The choice still applies for this visit. */
+                    }
+                    setBasemap(item.id)
+                    setLayersOpen(false)
+                  }}
+                >
+                  <img
+                    className="svc-journey-map__layer-swatch"
+                    src={`/map-styles/${item.id}.jpg`}
+                    alt=""
+                  />
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </SidePane>
       {mapReady
         ? createPortal(
             <>
@@ -660,49 +700,8 @@ export function ServiceTracksMap({
                     pressed={layersOpen}
                     instantAction
                     icon={<Stack size={16} weight="bold" aria-hidden />}
-                    onClick={() => setLayersOpen((open) => !open)}
+                    onClick={() => setLayersOpen(true)}
                   />
-                  {layersOpen ? (
-                    <div className="svc-journey-map__layer-menu" role="menu" aria-label="Map style">
-                      {TRACKS_BASEMAP_GROUPS.map((group) => (
-                        <div key={group.title} className="svc-journey-map__layer-group">
-                          <p className="svc-journey-map__layer-title">{group.title}</p>
-                          <div className="svc-journey-map__layer-grid">
-                            {group.styles.map((item) => (
-                              <button
-                                key={item.id}
-                                type="button"
-                                role="menuitemradio"
-                                aria-checked={basemap === item.id}
-                                className={
-                                  basemap === item.id
-                                    ? 'svc-journey-map__layer-option svc-journey-map__layer-option--on'
-                                    : 'svc-journey-map__layer-option'
-                                }
-                                onClick={() => {
-                                  basemapChosen.current = true
-                                  try {
-                                    localStorage.setItem(BASEMAP_KEY, item.id)
-                                  } catch {
-                                    /* The choice still applies for this visit. */
-                                  }
-                                  setBasemap(item.id)
-                                  setLayersOpen(false)
-                                }}
-                              >
-                                <img
-                                  className="svc-journey-map__layer-swatch"
-                                  src={`/map-styles/${item.id}.jpg`}
-                                  alt=""
-                                />
-                                {item.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
                 </div>
               </div>
               {tracksBasemapCredit(basemap) ? (

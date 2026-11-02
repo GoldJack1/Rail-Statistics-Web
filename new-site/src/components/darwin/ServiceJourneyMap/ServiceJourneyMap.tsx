@@ -19,7 +19,6 @@ import type { ServiceDetail, ServiceStop } from '../../../types/darwin'
 import type { Station } from '../../../types'
 import { mapLocationBanner, portionBannerTitle, type MapLocationBanner } from './mapLocationBanner'
 import { loadGbRailGraph } from '../../../utils/tracksGraphLoad'
-import { JOERD_TERRAIN_CREDIT, TRACKS_RELIEF } from '../../../utils/tracksCredits'
 import { ServiceTracksMap, type BranchTrack } from './ServiceTracksMap'
 import '@/components/darwin/callingPatternTones.css'
 import './ServiceJourneyMap.css'
@@ -112,19 +111,21 @@ export function ServiceJourneyMap({
   stations,
   extraStops = [],
   branches = [],
+  onNominatimUsed,
 }: {
   service: ServiceDetail
   stations: Station[]
   extraStops?: ServiceStop[][]
   /** Other portions of a split, each with its own live position. */
   branches?: ServiceDetail[]
+  /** A station coordinate was filled in from Nominatim. */
+  onNominatimUsed?: () => void
 }) {
   const [banners, setBanners] = useState<MapLocationBanner[]>([])
   const [extraCoords, setExtraCoords] = useState<Record<string, { lat: number; lng: number }>>({})
   const [platformCoords, setPlatformCoords] = useState<Record<string, RoutePlatform>>({})
   const [platformQueryReady, setPlatformQueryReady] = useState<string | null>(null)
   const [geoReady, setGeoReady] = useState(false)
-  const [nominatimUsed, setNominatimUsed] = useState(false)
   const nominatimTriedRef = useRef<string | null>(null)
   const bannerKeyRef = useRef('')
   const liveInputRef = useRef({
@@ -380,7 +381,7 @@ export function ServiceJourneyMap({
       .then((body) => {
         settled = true
         if (!body || body.lat == null || body.lng == null) return
-        setNominatimUsed(true)
+        onNominatimUsed?.()
         setExtraCoords((current) => ({ ...current, [tpl]: { lat: body.lat as number, lng: body.lng as number } }))
       })
       .catch(() => {
@@ -471,32 +472,6 @@ export function ServiceJourneyMap({
           onToggleFullscreen={toggleFullscreen}
         />
       </div>
-      <p className="svc-journey-map__caption svc-journey-map__caption--licence">
-        Map data ©{' '}
-        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
-          OpenStreetMap
-        </a>
-        , via{' '}
-        <a href="https://protomaps.com/" target="_blank" rel="noreferrer">
-          Protomaps
-        </a>
-        . Rail geometry ©{' '}
-        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
-          OpenStreetMap
-        </a>
-        . Stations from Rail Statistics
-        {nominatimUsed ? (
-          <>
-            {' '}
-            and{' '}
-            <a href="https://nominatim.openstreetmap.org/" target="_blank" rel="noreferrer">
-              Nominatim
-            </a>
-          </>
-        ) : null}
-        .
-        {TRACKS_RELIEF ? ` ${JOERD_TERRAIN_CREDIT}` : null}
-      </p>
     </div>
   )
 }

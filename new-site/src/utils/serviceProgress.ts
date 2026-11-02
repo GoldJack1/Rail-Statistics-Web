@@ -52,20 +52,44 @@ export function inferProgressIndex(stops: ServiceStop[], _nowMins: number | null
   return lastActualIndex(stops)
 }
 
+function nextIndex(
+  stops: ServiceStop[],
+  from: number,
+  publicOnly: boolean,
+): number | null {
+  for (let i = from + 1; i < stops.length; i++) {
+    if (stops[i].cancelledAtStop) continue
+    if (publicOnly && isPassSlot(stops[i].slot)) continue
+    return i
+  }
+  return null
+}
+
+/**
+ * Where the train is, named from the calling pattern.
+ * Simple view names the public stations either side. The full pattern names
+ * the next timing point, including a junction the train is passing.
+ */
 export function betweenStationsLabel(
   stops: ServiceStop[],
   reported: number,
   nameAt: (index: number) => string,
+  options?: { publicOnly?: boolean },
 ): string | null {
-  const at = stops[reported]
+  const publicOnly = Boolean(options?.publicOnly)
+  let from = reported
+  if (publicOnly) {
+    while (from >= 0 && (isPassSlot(stops[from]?.slot) || stops[from]?.cancelledAtStop)) from -= 1
+  }
+  const at = stops[from]
   if (!at || at.cancelledAtStop) return null
   const publicCall = !isPassSlot(at.slot)
   const departed = Boolean(trimSeconds(at.atd)) || at.liveKind === 'actual'
-  const next = nextOpenIndex(stops, reported)
+  const next = nextIndex(stops, from, publicOnly)
   if (publicCall && !departed) {
     if (next == null) return null
-    return `Arrived at ${nameAt(reported)}`
+    return `Arrived at ${nameAt(from)}`
   }
-  if (next == null) return publicCall ? `Just departed ${nameAt(reported)}` : null
-  return `Between ${nameAt(reported)} and ${nameAt(next)}`
+  if (next == null) return publicCall ? `Just departed ${nameAt(from)}` : null
+  return `Between ${nameAt(from)} and ${nameAt(next)}`
 }

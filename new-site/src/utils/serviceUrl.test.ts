@@ -15,7 +15,7 @@ describe('service URLs', () => {
     expect(parseServicePath(['202610027101161', '2026-10-02'])).toEqual({
       id: '202610027101161',
       date: '2026-10-02',
-      section: 'overview',
+      section: 'calling',
       mode: null,
     })
   })

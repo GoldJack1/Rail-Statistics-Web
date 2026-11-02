@@ -9,7 +9,7 @@ import { tocDisplayName } from "./toc-names.js";
 import { formatTiplocName, tidyStationName } from "./tiploc-names.js";
 import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicCallTime, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime, sortCallsByWttTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
-import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropForeignTdActuals, dropPassesOffTheLeg, dropUnreportedPasses, insertReportedPasses, overlayTdOnCalls, reportsForService, retimeInferredPasses, settleUnreportedPasses, tiplocCoords } from "./query-enrich.js";
+import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropForeignTdActuals, dropPassesOffTheLeg, dropUnreportedPasses, insertModalStations, insertReportedPasses, overlayTdOnCalls, passengerStationCrs, reportsForService, retimeInferredPasses, scheduleSequences, settleUnreportedPasses, tiplocCoords } from "./query-enrich.js";
 import { assignTrackMiles, loadGtclGraph } from "./gtcl-path.js";
 import { annotateStops, publicSchedule } from "./schedule-notes.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
@@ -793,6 +793,24 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     calls = insertReportedPasses(calls, reportsForService(calls, reports, coords));
     calls = overlayTdOnCalls(db, calls, headcode, catalog);
     calls = dropForeignTdActuals(calls, { rid: resolvedRid });
+    let geoStmt = null;
+    try {
+      geoStmt = catalog?.prepare(`SELECT easting AS e, northing AS n FROM tiploc_geo WHERE tiploc = ?`);
+    } catch {
+      geoStmt = null;
+    }
+    const geoCache = new Map();
+    const locate = (tiploc) => {
+      const key = String(tiploc || "").toUpperCase();
+      if (!key) return null;
+      if (geoCache.has(key)) return geoCache.get(key);
+      const row = geoStmt?.get(key);
+      const point = row?.e == null || row?.n == null ? null : { e: Number(row.e), n: Number(row.n) };
+      geoCache.set(key, point);
+      return point;
+    };
+    calls = sortCallsByWttTime(calls);
+    calls = insertModalStations(calls, scheduleSequences(db, ymd), passengerStationCrs(catalog), locate);
     const segmentCoords = tiplocCoords(catalog, calls.map((c) => c.tiploc));
     const track = loadGtclGraph(process.env.GTCL_GRAPH || `${DATA_DIR}/gtcl-graph.sqlite`);
     calls = sortCallsByWttTime(calls);

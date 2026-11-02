@@ -72,6 +72,11 @@ describe('betweenStationsLabel', () => {
     expect(betweenStationsLabel(leedsYork, 1, (i) => leedsYork[i].name)).toBe('Between Cross Gates and Garforth')
   })
 
+  it('simple view names the public stations either side of a junction', () => {
+    const nameAt = (i: number) => leedsYork[i].name
+    expect(betweenStationsLabel(leedsYork, 2, nameAt, { publicOnly: true })).toBe('Between Leeds and York')
+  })
+
   it('does not add an Arrived-at caption once the train is at the destination', () => {
     const arrived = [
       ...leedsYork.slice(0, -1),

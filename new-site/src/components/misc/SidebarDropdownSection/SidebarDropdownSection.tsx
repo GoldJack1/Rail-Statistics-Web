@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useId, useState } from 'react'
+import type { Icon } from '@phosphor-icons/react'
 import { ChevronRightIcon } from '@/components/icons'
 import AutoAnimateCollapse from '@/components/misc/AutoAnimateCollapse/AutoAnimateCollapse'
 import { Skeleton } from '@/components/misc/Skeleton/Skeleton'
@@ -17,6 +18,8 @@ interface SidebarDropdownSectionProps {
   headerAction?: React.ReactNode
   /** Inline control rendered immediately after the section title. */
   titleAddon?: React.ReactNode
+  /** Icon shown before the section title, matching the details nav rows. */
+  icon?: Icon | null
   /** Redact title/chevron with text skeleton bars while parent content loads. */
   skeleton?: boolean
 }
@@ -30,6 +33,7 @@ const SidebarDropdownSection: React.FC<SidebarDropdownSectionProps> = ({
   className = '',
   headerAction,
   titleAddon,
+  icon: IconComponent,
   skeleton = false,
 }) => {
   const [internalOpen, setInternalOpen] = useState(defaultExpanded)
@@ -68,7 +72,12 @@ const SidebarDropdownSection: React.FC<SidebarDropdownSectionProps> = ({
                 aria-controls={panelId}
                 onClick={() => setIsOpen((current) => !current)}
               >
-                <span className="sidebar-dropdown__title">{title}</span>
+                <span className="sidebar-dropdown__title">
+                  {IconComponent ? (
+                    <IconComponent className="sidebar-dropdown__icon" size={16} weight="bold" aria-hidden />
+                  ) : null}
+                  {title}
+                </span>
               </button>
               <div className="sidebar-dropdown__title-addon">{titleAddon}</div>
             </div>
@@ -96,6 +105,9 @@ const SidebarDropdownSection: React.FC<SidebarDropdownSectionProps> = ({
             }}
           >
             <span className="sidebar-dropdown__title">
+              {!skeleton && IconComponent ? (
+                <IconComponent className="sidebar-dropdown__icon" size={16} weight="bold" aria-hidden />
+              ) : null}
               {skeleton ? <TextSkeletonLine>{title}</TextSkeletonLine> : title}
             </span>
             {skeleton ? (

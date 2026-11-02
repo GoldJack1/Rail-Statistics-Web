@@ -35,11 +35,18 @@ export function isAdvertisedCall(c) {
   return Boolean(publicCallTime(c?.sta, c) || publicCallTime(c?.std, c));
 }
 
+function junctionTiploc(c) {
+  return /(?:JN|JCN|JNCT|DJN)$/.test(String(c?.tiploc || "").toUpperCase());
+}
+
 export function isWorkingPass(c) {
   // A passenger stop needs a public time. A few seconds of working time is
   // still a pass. A real dwell, or a working arrival such as Edinburgh after
-  // Inverkeithing, is where the train is booked to stop.
+  // Inverkeithing, is where the train is booked to stop. A junction allowance
+  // is not: Abbeyhill is the first timing point east of Waverley on every
+  // East Coast train, and its working arrival and departure are not a call.
   if (isAdvertisedCall(c)) return false;
+  if (junctionTiploc(c)) return true;
   const passTime = String(c?.wtp || "").trim();
   const arr = parseHmMinutes(c?.wta);
   const dep = parseHmMinutes(c?.wtd);

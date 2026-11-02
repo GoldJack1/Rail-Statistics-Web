@@ -58,12 +58,35 @@
 }
 
 @media (max-width: 1023px) {
+  .darwin-details-page .station-details-card {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
   .darwin-details-page .svc-pattern-card,
   .darwin-details-page .svc-pattern-card.modal-section {
+    width: calc(100% + (2 * var(--stations-panel-text-inset, var(--space-2xl))));
+    max-width: none;
+    margin-inline: calc(-1 * var(--stations-panel-text-inset, var(--space-2xl)));
     margin-block: calc(-1 * var(--stations-panel-text-inset, var(--space-2xl)) - 1px);
     padding: 0;
     gap: 0;
   }
+
+  /* The pattern card now bleeds to the viewport, so the table must not bleed again. */
+  .darwin-details-page .svc-pattern-card .svc-stops-table-panel {
+    width: 100%;
+    max-width: none;
+    margin-inline: 0;
+  }
+}
+
+/* The calling card bleeds upward into the page padding with a negative bottom
+   margin. That pulls the source note up over a previous or next service bar. */
+.darwin-details-page .svc-pattern-card:has(.svc-working-bar),
+.darwin-details-page .svc-pattern-card.modal-section:has(.svc-working-bar) {
+  margin-bottom: 0;
 }
 
 .darwin-details-page .modal-section {
@@ -72,10 +95,29 @@
   gap: var(--space-lg);
 }
 
+/* The calling list stretches the grid. Percentage heights on the sidebar then
+   keep that row after the list unmounts, so the page stays tall while the map
+   itself is already the right size. Size the map row from its content. */
+.app:has(.svc-map-section) .main-content.app-main,
+.app:has(.svc-map-section) .container.container--station-details,
+.darwin-details-page:has(.svc-map-section),
+.darwin-details-page:has(.svc-map-section) .station-details-layout {
+  height: auto;
+  min-height: 0;
+}
+
+.darwin-details-page:has(.svc-map-section) .station-details-sidebar.account-sidebar,
+.darwin-details-page:has(.svc-map-section) .account-sidebar .station-details-sidebar-panel {
+  height: auto;
+  min-height: 0;
+}
+
 .darwin-details-page .station-details-main:has(.svc-map-section) {
   display: flex;
   flex-direction: column;
   padding: 0;
+  height: auto;
+  min-height: 0;
 }
 
 .darwin-details-page .station-details-main:has(.svc-map-section) .station-details-card,
@@ -83,11 +125,12 @@
 .darwin-details-page .svc-map-section {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   gap: 0;
   margin: 0;
   padding: 0;
-  min-height: 100%;
+  height: auto;
+  min-height: 0;
   width: 100%;
   max-width: none;
 }
@@ -183,11 +226,29 @@
 
 .darwin-details-page .svc-footer,
 .darwin-details-page .unit-muted.darwin-details-source {
-  margin: var(--space-xl, 1.5rem) 0 0;
+  margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
   box-shadow: none;
+}
+
+/* The map clears the main inset, so the source note keeps the same side
+   padding the calling pattern uses, plus space above it. */
+.darwin-details-page .station-details-main:has(.svc-map-section) .svc-footer {
+  padding: var(--space-xl) var(--stations-panel-text-inset, var(--space-lg)) var(--space-lg);
+  box-sizing: border-box;
+  max-width: none;
+}
+
+@media (min-width: 1024px) {
+  .darwin-details-page .station-details-main:has(.svc-map-section) .svc-footer {
+    padding: var(--space-xl) calc(var(--space-xl) + (var(--stations-content-inset, var(--space-lg)) / 4)) var(--space-lg);
+  }
+
+  .darwin-details-page .station-details-main:has(.svc-map-section) .svc-footer p {
+    max-width: 40rem;
+  }
 }
 
 .darwin-details-page .stations-table-panel {
@@ -275,7 +336,9 @@
   .darwin-details-page .svc-viewmode-switch--sidebar {
     padding: var(--space-lg) var(--space-md) var(--space-lg);
     padding-left: calc(var(--space-2xl) - var(--stations-content-inset));
-    padding-right: var(--space-md);
+    /* Same right inset as the overview and nav chevrons (the 16px glyph,
+       not the 44px hit target). */
+    padding-right: calc(var(--space-md) + (var(--stations-content-inset) / 2));
   }
 }
 

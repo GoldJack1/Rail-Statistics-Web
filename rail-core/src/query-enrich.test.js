@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { sortCallsByWttTime } from "./journey-order.js";
-import { applyLiveToInferred, carryRunningLateness, dropForeignTdActuals, dropPassesOffTheLeg, dropUnreportedOrmPasses, insertIntermediateStations, insertReportedPasses, insertSchedulePasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, reportsOnServiceTiploc, retimeInferredPasses, settleUnreportedPasses } from "./query-enrich.js";
+import { applyLiveToInferred, carryRunningLateness, dropForeignTdActuals, dropPassesOffTheLeg, dropUnreportedOrmPasses, insertIntermediateStations, insertModalStations, insertReportedPasses, insertSchedulePasses, insertSegmentJunctions, overlayTdOnCalls, reportsForService, reportsOnServiceTiploc, retimeInferredPasses, settleUnreportedPasses } from "./query-enrich.js";
 import { openDayDb } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
 import { mkdtempSync } from "node:fs";
@@ -483,6 +483,60 @@ test("a station is added only when every schedule between the booked points pass
     (tiploc) => coords.get(tiploc) || null,
   );
   assert.deepEqual(out.map((call) => call.tiploc), ["A", "MID", "JN", "B"]);
+});
+
+test("a skipped station on the usual path is filled in", () => {
+  const stopping = ["HDRSFLD", "SLTHWTE", "MRSN", "DIGGLEJ", "GFLD", "MOSSLEY", "SBYD"];
+  const express = ["HDRSFLD", "MRSN", "DIGGLEJ", "GFLD", "SBYD"];
+  const crs = new Map([
+    ["HDRSFLD", "HUD"],
+    ["SLTHWTE", "SWT"],
+    ["MRSN", "MSN"],
+    ["GFLD", "GNF"],
+    ["MOSSLEY", "MSL"],
+    ["SBYD", "SYB"],
+  ]);
+  const out = insertModalStations(
+    [
+      { tiploc: "HDRSFLD", crs: "HUD", wtd: "19:36" },
+      { tiploc: "MRSN", wtp: "19:44" },
+      { tiploc: "DIGGLEJ", wtp: "19:48" },
+      { tiploc: "GFLD", wtp: "19:50" },
+      { tiploc: "SBYD", wtp: "19:57" },
+    ],
+    [...Array.from({ length: 5 }, () => stopping), express],
+    crs,
+  );
+  assert.deepEqual(out.map((call) => call.tiploc), ["HDRSFLD", "SLTHWTE", "MRSN", "DIGGLEJ", "GFLD", "MOSSLEY", "SBYD"]);
+  assert.equal(out.find((call) => call.tiploc === "SLTHWTE").crs, "SWT");
+  assert.equal(out.find((call) => call.tiploc === "MOSSLEY").crs, "MSL");
+});
+
+test("a long gap still fills, and a busier path off the line does not", () => {
+  const stations = ["SA", "SB", "SC", "SD", "SE", "SF", "SG", "SH", "SI"];
+  const onLine = ["A", ...stations, "B", "C"];
+  const offLine = ["A", "OFFA", "OFFB", "B", "C"];
+  const crs = new Map([...stations, "OFFA", "OFFB"].map((tiploc) => [tiploc, "AAA"]));
+  const locate = (tiploc) => {
+    if (tiploc === "A") return { e: 0, n: 0 };
+    if (tiploc === "B") return { e: 0, n: 10000 };
+    if (tiploc === "C") return { e: 0, n: 12000 };
+    const along = stations.indexOf(tiploc);
+    if (along >= 0) return { e: 100, n: (along + 1) * 1000 };
+    if (tiploc === "OFFA" || tiploc === "OFFB") return { e: 40000, n: 5000 };
+    return null;
+  };
+  const out = insertModalStations(
+    [
+      { tiploc: "A", wtd: "10:00" },
+      { tiploc: "B", wta: "10:20" },
+      { tiploc: "C", wta: "10:30" },
+    ],
+    [...Array.from({ length: 4 }, () => onLine), ...Array.from({ length: 8 }, () => offLine)],
+    crs,
+    locate,
+  );
+  assert.deepEqual(out.map((call) => call.tiploc), ["A", ...stations, "B", "C"]);
 });
 
 test("schedule pass uses the path that also reaches the next stop", () => {

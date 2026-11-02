@@ -278,7 +278,15 @@ function dwellMinutes(stop: ServiceStop): number | null {
   return gap
 }
 
+/** A junction's working time is not a passenger call, even when the allowance looks like a dwell. */
+function junctionTimingPoint(stop: ServiceStop): boolean {
+  if (publicArrival(stop) || publicDeparture(stop)) return false
+  if (/junction|\bjn\b|\bjcn\b/i.test(String(stop.name || ''))) return true
+  return /(?:JN|JCN|JNCT|DJN)$/.test(String(stop.tpl || '').toUpperCase())
+}
+
 export function asBookedCall(stop: ServiceStop): ServiceStop {
+  if (junctionTimingPoint(stop)) return slotKind(stop.slot) === 'pass' ? stop : { ...stop, slot: 'PP' }
   const gap = dwellMinutes(stop)
   const dwells = gap != null && gap >= 2 && gap < 12 * 60
   const passOnly = Boolean(String(stop.wtp || '').trim()) && !publicArrival(stop) && !publicDeparture(stop) && !dwells
@@ -305,7 +313,7 @@ function simpleProgressLabel(
   reported: number,
   nameAt: (index: number) => string,
 ): string | null {
-  return betweenStationsLabel(stops, reported, nameAt)
+  return betweenStationsLabel(stops, reported, nameAt, { publicOnly: true })
 }
 
 function pairedDelay(booked: string | null | undefined, real: string | null | undefined): number | null {
@@ -529,6 +537,12 @@ function ServiceStopRow({
   const distanceTitle = detailed ? milesAndChainsTitle(distanceInput) : null
   const colCount = detailed ? 6 : 4
   const dash = (value: string) => value || '—'
+  const moveLabel = kind === 'pass' ? 'Pass' : 'Dep'
+  const clockGroups = [
+    { title: 'GBTT', rows: [{ label: 'Arr', value: gbttArr }, { label: moveLabel, value: gbttDep }] },
+    { title: 'WTT', rows: [{ label: 'Arr', value: wttArr }, { label: moveLabel, value: wttDep }] },
+    { title: 'Realtime', rows: [{ label: 'Arr', value: rtArr }, { label: moveLabel, value: rtDep }] },
+  ]
 
   return (
     <>
@@ -670,118 +684,86 @@ function ServiceStopRow({
         ].filter(Boolean).join(' ')}>
           <td colSpan={colCount}>
             <AutoAnimateCollapse isOpen={open} className="svc-stop-row__collapse">
-              <div className="svc-stop-detail">
+              <div className="svc-stop-detail" aria-label={`Working times for ${label}`}>
                 {isBetaSite() ? (
-                  <table className="svc-stop-rtt">
-                    <caption className="visually-hidden">GBTT, WTT, realtime and route for {label}</caption>
-                    <thead>
-                      <tr>
-                        <th scope="col" colSpan={2}>GBTT</th>
-                        <th scope="col" colSpan={2}>WTT</th>
-                        <th scope="col" colSpan={2}>Realtime</th>
-                        <th scope="col">Path</th>
-                        <th scope="col">Line</th>
-                      </tr>
-                      <tr>
-                        <th scope="col">Arr</th>
-                        <th scope="col">Dep</th>
-                        <th scope="col">Arr</th>
-                        <th scope="col">{kind === 'pass' ? 'Pass' : 'Dep'}</th>
-                        <th scope="col">Arr</th>
-                        <th scope="col">{kind === 'pass' ? 'Pass' : 'Dep'}</th>
-                        <th scope="col" />
-                        <th scope="col" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td className="svc-mono">{dash(gbttArr)}</td>
-                        <td className="svc-mono">{dash(gbttDep)}</td>
-                        <td className="svc-mono">{dash(wttArr)}</td>
-                        <td className="svc-mono">{dash(wttDep)}</td>
-                        <td className="svc-mono">{dash(rtArr)}</td>
-                        <td className="svc-mono">{dash(rtDep)}</td>
-                        <td className="svc-mono">{dash(stop.path || '')}</td>
-                        <td className="svc-mono">{dash(stop.line || '')}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                ) : (
-                  <>
-                <div className="svc-stop-detail__field">
-                  <span className="svc-allocation-label">PTA</span>
-                  <span className="svc-allocation-value svc-mono">{kind === 'pass' ? '—' : (pArr || '—')}</span>
-                </div>
-                <div className="svc-stop-detail__field">
-                  <span className="svc-allocation-label">PTD</span>
-                  <span className="svc-allocation-value svc-mono">{kind === 'pass' ? '—' : (pDep || '—')}</span>
-                </div>
-                <div className="svc-stop-detail__field">
-                  <span className="svc-allocation-label">WTA</span>
-                  <span className="svc-allocation-value svc-mono">{kind === 'pass' ? '—' : (wArr || '—')}</span>
-                </div>
-                <div className="svc-stop-detail__field">
-                  <span className="svc-allocation-label">WTD/WTP</span>
-                  <span className="svc-allocation-value svc-mono">{kind === 'pass' ? (wPass || '—') : (wDep || '—')}</span>
-                </div>
-                  </>
-                )}
-                <div className="svc-stop-detail__field">
-                  <span className="svc-allocation-label">Platform source</span>
-                  <span className="svc-allocation-value">
-                    {platformSource ? (
-                      <span className={`svc-platform-badge ${platformSourceClass(platformSource)}`}>{platformSource}</span>
-                    ) : '—'}
-                  </span>
-                </div>
-                <div className="svc-stop-detail__field">
-                  <span className="svc-allocation-label">Confirmed</span>
-                  <span className="svc-allocation-value">{stop.platformConfirmed ? 'Yes' : 'No'}</span>
-                </div>
-                <div className="svc-stop-detail__field svc-stop-detail__field--wide">
-                  <span className="svc-allocation-label">Activity</span>
-                  <span className="svc-allocation-value">
-                    <ActivityPill activity={stop.activity} showAll />
-                    {!stop.activity ? '—' : null}
-                  </span>
-                </div>
-                {stop.actualSource ? (
-                  <div className="svc-stop-detail__field">
-                    <span className="svc-allocation-label">Source</span>
-                    <span className="svc-allocation-value svc-mono">{stop.actualSource}</span>
+                  <div className="svc-stop-clocks">
+                    {clockGroups.map((group) => (
+                      <div key={group.title} className="svc-stop-clocks__group">
+                        <div className="svc-stop-clocks__title">{group.title}</div>
+                        {group.rows.map((row) => (
+                          <div key={row.label} className="svc-stop-clocks__row">
+                            <span className="svc-stop-clocks__label">{row.label}</span>
+                            <span className="svc-stop-clocks__value svc-mono">{dash(row.value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
                   </div>
-                ) : null}
+                ) : (
+                  <div className="svc-stop-facts">
+                    <div className="svc-stop-detail__field">
+                      <span className="svc-allocation-label">PTA</span>
+                      <span className="svc-allocation-value svc-mono">{kind === 'pass' ? '—' : (pArr || '—')}</span>
+                    </div>
+                    <div className="svc-stop-detail__field">
+                      <span className="svc-allocation-label">PTD</span>
+                      <span className="svc-allocation-value svc-mono">{kind === 'pass' ? '—' : (pDep || '—')}</span>
+                    </div>
+                    <div className="svc-stop-detail__field">
+                      <span className="svc-allocation-label">WTA</span>
+                      <span className="svc-allocation-value svc-mono">{kind === 'pass' ? '—' : (wArr || '—')}</span>
+                    </div>
+                    <div className="svc-stop-detail__field">
+                      <span className="svc-allocation-label">WTD/WTP</span>
+                      <span className="svc-allocation-value svc-mono">{kind === 'pass' ? (wPass || '—') : (wDep || '—')}</span>
+                    </div>
+                  </div>
+                )}
+                <div className="svc-stop-facts">
+                  {isBetaSite() ? (
+                    <>
+                      <div className="svc-stop-detail__field">
+                        <span className="svc-allocation-label">Path</span>
+                        <span className="svc-allocation-value svc-mono">{dash(stop.path || '')}</span>
+                      </div>
+                      <div className="svc-stop-detail__field">
+                        <span className="svc-allocation-label">Line</span>
+                        <span className="svc-allocation-value svc-mono">{dash(stop.line || '')}</span>
+                      </div>
+                    </>
+                  ) : null}
+                  <div className="svc-stop-detail__field">
+                    <span className="svc-allocation-label">Platform source</span>
+                    <span className="svc-allocation-value">
+                      {platformSource ? (
+                        <span className={`svc-platform-badge ${platformSourceClass(platformSource)}`}>{platformSource}</span>
+                      ) : '—'}
+                    </span>
+                  </div>
+                  <div className="svc-stop-detail__field">
+                    <span className="svc-allocation-label">Confirmed</span>
+                    <span className="svc-allocation-value">{stop.platformConfirmed ? 'Yes' : 'No'}</span>
+                  </div>
+                  <div className="svc-stop-detail__field">
+                    <span className="svc-allocation-label">Activity</span>
+                    <span className="svc-allocation-value">
+                      <ActivityPill activity={stop.activity} showAll />
+                      {!stop.activity ? '—' : null}
+                    </span>
+                  </div>
+                  {stop.actualSource ? (
+                    <div className="svc-stop-detail__field">
+                      <span className="svc-allocation-label">Source</span>
+                      <span className="svc-allocation-value svc-mono">{stop.actualSource}</span>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </AutoAnimateCollapse>
           </td>
         </tr>
       )}
     </>
-  )
-}
-
-const CALLING_COLOUR_KEY: { tone: string; label: string }[] = [
-  { tone: 'early', label: 'Early' },
-  { tone: 'ontime', label: 'On time' },
-  { tone: 'delay-1', label: '1–15 min late' },
-  { tone: 'delay-16', label: '16–29 min late' },
-  { tone: 'delay-30', label: '30–59 min late' },
-  { tone: 'delay-60', label: '60+ min late' },
-  { tone: 'cancelled', label: 'Cancelled' },
-]
-
-function CallingColourKey() {
-  return (
-    <ul className="svc-stops-key" aria-label="Calling pattern colour key">
-      {CALLING_COLOUR_KEY.map((item) => (
-        <li
-          key={item.tone}
-          className={`svc-stops-key__item svc-stops-key__item--${item.tone}`}
-        >
-          {item.label}
-        </li>
-      ))}
-    </ul>
   )
 }
 
@@ -796,7 +778,6 @@ export function ServiceStopList({
   location,
   associations = [],
   associationHref,
-  showLegend = true,
   showAssociations = true,
   preserveOrder = false,
   heading = null,
@@ -811,7 +792,6 @@ export function ServiceStopList({
   location?: { last?: { tiploc?: string } | null; label?: string } | null
   associations?: ServiceAssociation[]
   associationHref?: (a: ServiceAssociation) => string
-  showLegend?: boolean
   showAssociations?: boolean
   preserveOrder?: boolean
   heading?: string | null
@@ -983,11 +963,6 @@ export function ServiceStopList({
 
   return (
     <div className="stations-table-panel svc-stops-table-panel">
-      {showLegend ? (
-      <div className="svc-stops-key-wrap">
-        <CallingColourKey />
-      </div>
-      ) : null}
       {heading ? (
         <>
           <div className={`svc-stops-heading-wrap${headingOpen ? ' svc-stops-heading-wrap--open' : ''}`}>

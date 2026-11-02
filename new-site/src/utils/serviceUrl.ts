@@ -32,7 +32,7 @@ export function parseServicePath(parts: string[]): {
   const tokens = (parts || []).map((p) => decodeURIComponent(String(p || '')).trim()).filter(Boolean)
   const id = tokens[0] || ''
   let date: string | null = null
-  let section: ServiceSection = 'overview'
+  let section: ServiceSection = 'calling'
   let mode: ServiceViewMode | null = null
   for (const token of tokens.slice(1)) {
     if (isIsoDate(token)) date = token
@@ -51,7 +51,7 @@ export function serviceHref(opts: {
 }): string {
   const id = encodeURIComponent(String(opts.id || '').trim())
   const date = opts.date
-  const section = opts.section && isServiceSection(opts.section) ? opts.section : 'overview'
+  const section = opts.section && isServiceSection(opts.section) ? opts.section : 'calling'
   const mode = opts.mode && isServiceViewMode(opts.mode) ? opts.mode : readModeSafe()
   const path = `/services/${id}/${date}/${section}/${mode}`
   const at = String(opts.at || '').trim()

@@ -25,6 +25,7 @@ export type DarwinDetailsLayoutProps = {
   children: ReactNode
   minSectionCount?: number
   showQueryEnvBanner?: boolean
+  className?: string
 }
 
 /**
@@ -44,6 +45,7 @@ export function DarwinDetailsLayout({
   children,
   minSectionCount = 5,
   showQueryEnvBanner = true,
+  className,
 }: DarwinDetailsLayoutProps) {
   return (
     <div className="container container--station-details">
@@ -54,7 +56,7 @@ export function DarwinDetailsLayout({
         subtitle={subtitle}
         actionContent={actionContent}
       />
-      <div className="station-details-page darwin-details-page">
+      <div className={['station-details-page', 'darwin-details-page', className].filter(Boolean).join(' ')}>
         <div
           className="station-details-layout"
           style={{ ['--station-details-min-section-count' as string]: minSectionCount }}

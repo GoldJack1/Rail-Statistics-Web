@@ -236,13 +236,30 @@ export function scheduleSequences(db, ymd) {
   return sequences;
 }
 
-function modalMids(sequences, a, b, c) {
+function visitsOf(sequences) {
+  if (sequences.visits) return sequences.visits;
+  const visits = new Map();
+  sequences.forEach((seq, seqIndex) => {
+    seq.forEach((tiploc, at) => {
+      let list = visits.get(tiploc);
+      if (!list) {
+        list = [];
+        visits.set(tiploc, list);
+      }
+      list.push([seqIndex, at]);
+    });
+  });
+  Object.defineProperty(sequences, "visits", { value: visits });
+  return visits;
+}
+
+function matchingPaths(sequences, a, b, c, window) {
   const tallies = new Map();
-  for (const seq of sequences) {
-    const ia = seq.indexOf(a);
-    if (ia < 0) continue;
+  const visits = visitsOf(sequences);
+  for (const [seqIndex, ia] of visits.get(a) || []) {
+    const seq = sequences[seqIndex];
     let ib = -1;
-    for (let j = ia + 1; j < seq.length && j <= ia + 8; j++) {
+    for (let j = ia + 1; j < seq.length && j <= ia + window; j++) {
       if (seq[j] === b) {
         ib = j;
         break;
@@ -251,7 +268,7 @@ function modalMids(sequences, a, b, c) {
     if (ib < 0) continue;
     if (c) {
       let ic = -1;
-      for (let j = ib + 1; j < seq.length && j <= ib + 8; j++) {
+      for (let j = ib + 1; j < seq.length && j <= ib + window; j++) {
         if (seq[j] === c) {
           ic = j;
           break;
@@ -263,9 +280,59 @@ function modalMids(sequences, a, b, c) {
     if (!key) continue;
     tallies.set(key, (tallies.get(key) || 0) + 1);
   }
-  const best = [...tallies.entries()].sort((x, y) => y[1] - x[1])[0];
-  if (!best || best[1] < 3) return [];
-  return best[0].split(">").filter((tpl) => tpl && !isSignalOrElocTiploc(tpl));
+  return [...tallies.entries()]
+    .filter(([, count]) => count >= 3)
+    .map(([key, count]) => ({
+      mids: key.split(">").filter((tpl) => tpl && !isSignalOrElocTiploc(tpl)),
+      count,
+    }))
+    .filter((path) => path.mids.length);
+}
+
+function modalMids(sequences, a, b, c) {
+  const paths = matchingPaths(sequences, a, b, c, 8);
+  paths.sort((x, y) => y.count - x.count);
+  return paths[0]?.mids || [];
+}
+
+/** How far this path wanders off the straight line between the two timing points. */
+function pathStray(mids, locate, from, to) {
+  const a = locate?.(from);
+  const b = locate?.(to);
+  if (!a || !b) return 0;
+  let stray = 0;
+  let known = 0;
+  for (const tiploc of mids) {
+    const point = locate(tiploc);
+    if (!point) continue;
+    known += 1;
+    const abx = b.e - a.e;
+    const aby = b.n - a.n;
+    const len2 = abx * abx + aby * aby;
+    if (len2 < 1) continue;
+    const t = ((point.e - a.e) * abx + (point.n - a.n) * aby) / len2;
+    const dx = point.e - (a.e + t * abx);
+    const dy = point.n - (a.n + t * aby);
+    stray = Math.max(stray, Math.hypot(dx, dy));
+  }
+  return known ? stray : Number.POSITIVE_INFINITY;
+}
+
+/** A filled station has to sit on the line between these two timing points. */
+function onTheChord(locate, from, to, tiploc, maxM = 4_000) {
+  const a = locate?.(from);
+  const b = locate?.(to);
+  const point = locate?.(tiploc);
+  if (!a || !b || !point) return true;
+  const abx = b.e - a.e;
+  const aby = b.n - a.n;
+  const len2 = abx * abx + aby * aby;
+  if (len2 < 1) return false;
+  const t = ((point.e - a.e) * abx + (point.n - a.n) * aby) / len2;
+  if (t < -0.02 || t > 1.02) return false;
+  const dx = point.e - (a.e + t * abx);
+  const dy = point.n - (a.n + t * aby);
+  return Math.hypot(dx, dy) <= maxM;
 }
 
 /**
@@ -703,6 +770,60 @@ export function insertSchedulePasses(calls, sequences) {
         out.push({
           tiploc: tpl,
           crs: null,
+          is_passing: 1,
+          cancelled: 0,
+          platform: null,
+          wta: null,
+          wtd: null,
+          wtp,
+          etp: wtp,
+          ata: null,
+          atd: null,
+          atp: null,
+          live_kind: "est",
+          actual_source: "inferred",
+        });
+      });
+    }
+    out.push(spine[i]);
+  }
+  return out.map((c, seq) => ({ ...c, seq }));
+}
+
+/**
+ * A passenger station this train's schedule skips, when other trains on the
+ * same line pass it between these timing points. The search covers a long
+ * gap, and a busier timetable on a different railway loses to the path that
+ * stays between the two points.
+ */
+export function insertModalStations(calls, sequences, stationCrs, locate = null) {
+  const crsOf = (tiploc) => {
+    const code = stationCrs instanceof Map ? stationCrs.get(String(tiploc || "").toUpperCase()) : "";
+    const text = String(code || "").trim().toUpperCase();
+    return text.length === 3 && !text.startsWith("X") ? text : "";
+  };
+  const spine = (calls || []).filter((c) => c?.tiploc);
+  if (spine.length < 2 || !sequences?.length) return spine;
+  const present = new Set(spine.map((c) => String(c.tiploc).toUpperCase()));
+  const tips = spine.map((c) => String(c.tiploc).toUpperCase());
+  const out = [];
+  for (let i = 0; i < spine.length; i++) {
+    if (i > 0) {
+      const paths = matchingPaths(sequences, tips[i - 1], tips[i], tips[i + 1] || null, 40);
+      paths.sort((x, y) => pathStray(x.mids, locate, tips[i - 1], tips[i]) - pathStray(y.mids, locate, tips[i - 1], tips[i]) || y.count - x.count);
+      const chosen = paths[0];
+      const stray = chosen ? pathStray(chosen.mids, locate, tips[i - 1], tips[i]) : 0;
+      const mids = !chosen || stray > 25_000
+        ? []
+        : chosen.mids.filter((tpl) => crsOf(tpl) && !present.has(tpl) && onTheChord(locate, tips[i - 1], tips[i], tpl));
+      const t0 = leaveClock(spine[i - 1]);
+      const t1 = arriveClock(spine[i]);
+      mids.forEach((tpl, j) => {
+        present.add(tpl);
+        const wtp = interpolateHm(t0, t1, j, mids.length);
+        out.push({
+          tiploc: tpl,
+          crs: crsOf(tpl),
           is_passing: 1,
           cancelled: 0,
           platform: null,

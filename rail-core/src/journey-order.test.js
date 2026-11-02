@@ -262,6 +262,7 @@ test("a working dwell with no public time is a pass", () => {
   assert.equal(isWorkingPass({ tiploc: "EDINBUR", wta: "00:56", wtd: "01:24", is_passing: 0 }), false);
   assert.equal(isWorkingPass({ tiploc: "EDINBUR", wta: "00:39", is_passing: 0 }), false);
   assert.equal(isWorkingPass({ tiploc: "HAYMRKT", wtp: "00:34½", is_passing: 1 }), true);
+  assert.equal(isWorkingPass({ tiploc: "ABHLJN", wta: "17:31", wtd: "17:34", is_passing: 0 }), true);
 });
 
 test("working timetable order counts the half minute and ignores a later public time", () => {

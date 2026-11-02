@@ -150,6 +150,9 @@ export function AccountSectionNav({
             />
           </div>
           <MobileHeaderPanel menuOpen={menuOpen} navId={navId} onClose={closeMenu}>
+            {headerContent ? (
+              <div className="account-mobile-sections__header">{headerContent}</div>
+            ) : null}
             <nav className="header-nav header-nav--mobile" aria-label={ariaLabel}>
               <ul className="header-mobile-nav-list">
                 {sections.map((section) => {

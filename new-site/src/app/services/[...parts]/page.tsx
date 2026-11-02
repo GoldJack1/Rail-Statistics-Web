@@ -3,31 +3,28 @@
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
 import React, { useEffect, useMemo, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { ArrowsClockwise, ChartBar, Code, Info, MapPin, MapTrifold, Train } from '@phosphor-icons/react'
+import { ChartBar, Info, MapPin, MapTrifold } from '@phosphor-icons/react'
 
 import { useServiceDetail, useServiceDetails } from '@/hooks/useServiceDetail'
 import { useStations } from '@/hooks/useStations'
-import { BUTBaseButton, BUTWideButton } from '@/components/buttons'
+import { BUTTwoButtonBar, BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import { TextCard } from '@/components/cards'
 import { CarriageMap } from '@/components/darwin/CarriageMap'
-import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
 import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
 import { ServiceSchedulePanel } from '@/components/darwin/ServiceSchedulePanel'
 import { ServiceStopList } from '@/components/darwin/ServiceStopList/ServiceStopList'
-import { ServiceVehicleDetails } from '@/components/darwin/ServiceVehicleDetails'
 import { buildStopNameLookup, displayStopName } from '@/components/darwin/serviceStopLabel'
+import { ServiceDetailKey } from '@/components/darwin/ServiceDetailKey/ServiceDetailKey'
 import { ServiceViewModeToggle } from '@/components/darwin/ServiceViewModeToggle'
 import { useServiceViewMode } from '@/components/darwin/serviceViewMode'
-import StationDetailField from '@/components/models/StationDetails/StationDetailField'
 import StationSectionTitle from '@/components/models/StationDetails/StationSectionTitle'
 import type { AccountSection } from '@/components/misc/AccountSectionNav/AccountSectionNav'
 import SidebarDropdownSection from '@/components/misc/SidebarDropdownSection/SidebarDropdownSection'
 import type { ServiceDetail } from '@/types/darwin'
-import { resolveDarwinBrowserUrl } from '@/utils/darwinReadyFetch'
 import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
 import { formatLmTocName } from '@/utils/formatLmTocName'
-import { stopHasPublishedLoading } from '@/utils/darwinCoachLoading'
+import { coachCountFromConsist, coachCountFromUnitIds, stopHasPublishedLoading, unitIdsFromConsist } from '@/utils/darwinCoachLoading'
 import {
   consumeLegacyFromParam,
   isServiceSection,
@@ -37,7 +34,7 @@ import {
   serviceHref,
   type ServiceSection,
 } from '@/utils/serviceUrl'
-import { buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitMapStopLists, splitPortionLabel, splitTogetherLabel } from '@/utils/splitWorking'
+import { advertisedTime, buildSplitWorking, isPassengerHeadcode, joinStationNames, nextWorkingSentence, previousNextWorkings, previousWorkingSentence, serviceDestinationLabel, splitMapStopLists, splitPortionLabel, splitTogetherLabel } from '@/utils/splitWorking'
 import '../ServiceDetailPage.css'
 
 const loadServiceJourneyMap = () =>
@@ -49,12 +46,11 @@ const ServiceJourneyMap = dynamic(loadServiceJourneyMap, {
 })
 
 const BASE_SERVICE_SECTIONS: AccountSection[] = [
-  { id: 'overview', label: 'Overview', icon: Info },
-  { id: 'formation', label: 'Formation', icon: Train },
   { id: 'calling', label: 'Calling pattern', icon: MapPin },
   { id: 'map', label: 'Map', icon: MapTrifold },
-  { id: 'raw', label: 'Raw data', icon: Code },
 ]
+
+const HIDDEN_SERVICE_SECTIONS = new Set<ServiceSection>(['overview', 'formation', 'raw'])
 
 const LOADING_SECTION: AccountSection = { id: 'loading', label: 'Loading capacity', icon: ChartBar }
 
@@ -116,26 +112,79 @@ function workingServiceHref(
   })
 }
 
-function WorkingLinkCards({
-  workings,
+function serviceUnitIds(data: ServiceDetail): string[] {
+  const fromConsist = unitIdsFromConsist(data.consist)
+  if (fromConsist?.length) return fromConsist
+  const listed = (data.schedule?.units?.length ? data.schedule.units : data.units) || []
+  return listed.map((unit) => String(unit || '').trim()).filter(Boolean)
+}
+
+function serviceCoachCount(data: ServiceDetail): number | null {
+  const formationCount = data.formation?.coaches?.length || 0
+  if (formationCount > 0) return formationCount
+  const consistCount = coachCountFromConsist(data.consist)
+  if (consistCount) return consistCount
+  return coachCountFromUnitIds(serviceUnitIds(data))
+}
+
+function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
+  const count = serviceCoachCount(data)
+  const units = serviceUnitIds(data)
+  if (count == null && !units.length) return null
+  const visible = count != null ? Math.min(count, 12) : 0
+  const prefix = data.cancelled ? 'Was formed of' : 'Formed of'
+  const carriagePhrase = count != null ? `${count} carriage${count === 1 ? '' : 's'}` : ''
+  const title = [prefix, carriagePhrase, units.length ? `by ${units.join(' + ')}` : '']
+    .filter(Boolean)
+    .join(' ')
+  return (
+    <TextCard
+      static
+      trailingIcon={null}
+      className="svc-formation-card"
+      title={title}
+      ariaLabel={title}
+      description={visible > 0 ? (
+        <span className="svc-formation-strip__coaches">
+          {Array.from({ length: visible }, (_, index) => {
+            const place = visible === 1 ? 'solo' : index === 0 ? 'front' : index === visible - 1 ? 'rear' : 'mid'
+            return <span key={index} className={`svc-formation-strip__coach svc-formation-strip__coach--${place}`} />
+          })}
+        </span>
+      ) : undefined}
+    />
+  )
+}
+
+function WorkingFooter({
+  previous,
+  next,
   date,
   viewMode,
 }: {
-  workings: ReturnType<typeof previousNextWorkings>['previous']
+  previous: ReturnType<typeof previousNextWorkings>['previous']
+  next: ReturnType<typeof previousNextWorkings>['next']
   date: string | null | undefined
   viewMode: ReturnType<typeof useServiceViewMode>[0]
 }) {
-  if (!workings.length) return null
+  const cells = [...previous, ...next]
+  if (!cells.length) return null
   return (
-    <div className="svc-working-cards">
-      {workings.map((w) => (
-        <TextCard
-          key={`${w.kind}-${w.association.otherRid}-${w.association.tiploc}`}
-          title={w.kind === 'previous' ? previousWorkingSentence(w) : nextWorkingSentence(w)}
-          to={workingServiceHref(w.association, date, viewMode)}
-          ariaLabel={w.kind === 'previous' ? previousWorkingSentence(w) : nextWorkingSentence(w)}
-        />
-      ))}
+    <div className={`svc-working-bar${cells.length === 1 ? ' svc-working-bar--single' : ''}`}>
+      {cells.map((w) => {
+        const label = w.kind === 'previous' ? previousWorkingSentence(w) : nextWorkingSentence(w)
+        const href = workingServiceHref(w.association, date, viewMode)
+        return (
+          <TextCard
+            key={`${w.kind}-${w.association.otherRid}-${w.association.tiploc}`}
+            title={label}
+            to={href}
+            static={!href}
+            trailingIcon={href ? undefined : null}
+            ariaLabel={label}
+          />
+        )
+      })}
     </div>
   )
 }
@@ -191,106 +240,16 @@ function isScheduleDeactivatedReason(reason: string | null | undefined): boolean
   return reason.trim().toLowerCase().includes('schedule deactivated')
 }
 
-/**
- * Collapsible "raw data" panel rendered at the bottom of the service detail
- * page. Shows the full ServiceDetail payload as pretty-printed JSON, plus a
- * couple of summary chips so power users can see at a glance which feeds
- * contributed which sections. Two convenience buttons: copy-to-clipboard
- * and open-raw-API in a new tab.
- *
- * Defined inline (rather than as its own component file) because it's only
- * used on this one page and depends on the local layout tokens.
- */
-const RawDataDump: React.FC<{ data: ServiceDetail }> = ({ data }) => {
-  const [open, setOpen] = useState(false)
-  // Quick "what's populated" summary so the user can see whether a missing
-  // section is "feed didn't publish" vs "field doesn't exist". Cheap to
-  // render even on every poll, so we leave it always-on.
-  const present: Array<[string, boolean | number]> = [
-    ['Darwin formation',  !!data.formation],
-    ['PTAC consist',      !!data.consist],
-    ['Reverse formation', data.reverseFormation],
-    ['Cancellation',      data.cancelled],
-    ['Partial cancel',    data.partiallyCancelled],
-    ['Delay reason',      !!data.delayReason],
-    ['Associations',      data.associations?.length || 0],
-    ['Alerts',            data.alerts?.length || 0],
-    ['Stops',             data.stops?.length || 0],
-    ['Stops with loading', (data.stops || []).filter((s: ServiceDetail['stops'][number]) => s.coachLoading || s.loadingPercentage != null).length],
-  ]
-  const qp = new URLSearchParams()
-  if (data.historicalDate) qp.set('date', data.historicalDate)
-  if (data.historicalAt) qp.set('at', data.historicalAt)
-  const apiUrl = resolveDarwinBrowserUrl(
-    `/api/darwin/service/${encodeURIComponent(data.rid)}${qp.toString() ? `?${qp.toString()}` : ''}`,
-  )
-  return (
-    <details className="svc-rawdump" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
-      <summary className="svc-rawdump-summary">
-        <span className="svc-rawdump-title">Raw data</span>
-        <span className="svc-rawdump-hint">{open ? 'click to collapse' : 'click to expand the full daemon payload'}</span>
-      </summary>
-      <div className="modal-details-grid svc-rawdump-meta">
-        {present.map(([label, val]) => (
-          <StationDetailField
-            key={label}
-            label={label}
-            value={typeof val === 'boolean' ? (val ? 'Yes' : 'No') : String(val)}
-          />
-        ))}
-      </div>
-      <div className="svc-rawdump-actions">
-        <BUTBaseButton
-          variant="chip"
-          width="hug"
-          colorVariant="accent"
-          className="svc-rawdump-btn svc-rawdump-btn--link"
-          href={apiUrl}
-          target="_blank"
-          rel="noopener"
-        >
-          Open API URL ↗
-        </BUTBaseButton>
-      </div>
-      {/* Heavy JSON stringification + DOM is gated behind `open` so the
-       * service-detail page doesn't pay the cost on every poll while the
-       * panel is collapsed. The body is also memoised by RID + updatedAt
-       * so polls that return the same data don't trigger re-stringify. */}
-      {open && <RawDataBody data={data} />}
-    </details>
-  )
+function originDepartureClock(data: ServiceDetail): string | null {
+  const origin = data.stops.find((stop) => stop.slot === 'OR')
+    || data.stops.find((stop) => stop.tpl === data.origin)
+    || data.stops[0]
+  if (!origin) return null
+  const clock = advertisedTime(origin.ptd, [origin.wtd, origin.wta, origin.wtp])
+    || String(origin.wtd || origin.ptd || '').trim()
+  const hhmm = clock.slice(0, 5)
+  return /^\d{2}:\d{2}$/.test(hhmm) && hhmm !== '00:00' ? hhmm : null
 }
-
-/**
- * The expensive part of the raw-data dump — only mounts when the parent
- * `<details>` is open. Memoised on `(rid, updatedAt)` so a fresh data ref
- * with identical content (common with polling hooks) doesn't re-stringify.
- */
-const RawDataBody: React.FC<{ data: ServiceDetail }> = React.memo(
-  ({ data }) => {
-    const json = useMemo(() => JSON.stringify(data, null, 2), [data])
-    return (
-      <>
-        <div className="svc-rawdump-actions">
-          <BUTBaseButton
-            variant="chip"
-            width="hug"
-            colorVariant="accent"
-            instantAction
-            className="svc-rawdump-btn"
-            onClick={() => navigator.clipboard?.writeText(json).catch(() => {})}
-          >
-            Copy JSON
-          </BUTBaseButton>
-          <span className="svc-rawdump-bytes">{(json.length / 1024).toFixed(1)} KB</span>
-        </div>
-        <pre className="svc-rawdump-pre"><code>{json}</code></pre>
-      </>
-    )
-  },
-  (prev, next) =>
-    prev.data.rid === next.data.rid && prev.data.updatedAt === next.data.updatedAt
-)
 
 const ServiceDetailPage: React.FC = () => {
   const params   = useParams()
@@ -303,8 +262,17 @@ const ServiceDetailPage: React.FC = () => {
     return []
   }, [params.parts])
   const parsed = useMemo(() => parseServicePath(parts), [parts])
+  const urlSection: ServiceSection = HIDDEN_SERVICE_SECTIONS.has(parsed.section) ? 'calling' : parsed.section
+  const sectionKey = `${parsed.id}|${parsed.date || ''}|${parsed.section}`
+  const [sectionKeySeen, setSectionKeySeen] = useState(sectionKey)
+  const [section, setSection] = useState<ServiceSection>(urlSection)
+  const [mapNominatim, setMapNominatim] = useState(false)
+  if (sectionKeySeen !== sectionKey) {
+    setSectionKeySeen(sectionKey)
+    setSection(urlSection)
+    setMapNominatim(false)
+  }
   const [viewMode, selectViewMode] = useServiceViewMode()
-  const [section, setSection] = useState<ServiceSection>(parsed.section)
 
   const query = useMemo(() => new URLSearchParams(searchParams.toString()), [searchParams])
   const todayIsoDate = useMemo(() => getCurrentRailwayDayIsoUk(), [])
@@ -324,10 +292,6 @@ const ServiceDetailPage: React.FC = () => {
   }, [parsed.mode, selectViewMode])
 
   useEffect(() => {
-    setSection(parsed.section)
-  }, [parsed.section])
-
-  useEffect(() => {
     if (!serviceId) return
     if (section === 'map') {
       // Overlap the rail-network download with the map code. The worker reads the same file.
@@ -336,18 +300,23 @@ const ServiceDetailPage: React.FC = () => {
     void loadServiceJourneyMap()
   }, [serviceId, section])
 
-  const { status, data, error, ageMs, refetch } = useServiceDetail({
+  const { status, data, error, ageMs } = useServiceDetail({
     rid: serviceId,
     date: historicalDate,
     at: historicalAt,
     pollMs: historicalMode || futureTimetableMode ? 0 : 3_000,
   })
   const { stations } = useStations()
+  const pageSection: ServiceSection = HIDDEN_SERVICE_SECTIONS.has(section) ? 'calling' : section
+
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [pageSection])
   const canonicalId = data?.uid || serviceId
   const canonicalHref = serviceHref({
     id: canonicalId,
     date: data?.ssd || date,
-    section,
+    section: pageSection,
     mode: viewMode,
     at: historicalAt,
   })
@@ -430,30 +399,30 @@ const ServiceDetailPage: React.FC = () => {
   )
   const serviceSections = useMemo(() => {
     if (!hasLoading) return BASE_SERVICE_SECTIONS
-    const [overview, ...rest] = BASE_SERVICE_SECTIONS
-    return [overview, LOADING_SECTION, ...rest]
+    const [calling, ...rest] = BASE_SERVICE_SECTIONS
+    return [calling, LOADING_SECTION, ...rest]
   }, [hasLoading])
 
   useEffect(() => {
-    if (section === 'loading' && !hasLoading) setSection('overview')
+    if (section === 'loading' && !hasLoading) setSection('calling')
   }, [section, hasLoading])
 
   const fallbackStopNameLookup = useMemo(() => buildStopNameLookup(stations), [stations])
 
   const title = useMemo(() => {
-    if (!data) return serviceId
+    if (!data) return status === 'error' || status === 'not-found' ? serviceId : 'Loading'
     const dest = destinationLabel || data.destinationName || data.destination
-    return `${data.trainId} · ${data.originName || data.origin} → ${dest}`
-  }, [data, serviceId, destinationLabel])
+    const origin = data.originName || data.origin
+    const departs = originDepartureClock(data)
+    const route = `${departs ? `${departs} ` : ''}${origin} → ${dest}`
+    if (viewMode === 'simple') return route
+    return `${data.trainId} · ${route}`
+  }, [data, serviceId, destinationLabel, status, viewMode])
 
   const subtitle = useMemo(() => {
     const serviceDate = data?.ssd ? formatDateOnly(data.ssd) : null
-    const uidLine = data?.uid ? `UID ${data.uid}` : ''
     const histDate = data?.historicalDate ? formatDateOnly(data.historicalDate) : null
-    const running = serviceDate ? `Runs ${serviceDate}` : ''
-    const dateText = [uidLine, running, histDate && histDate !== serviceDate ? `Snapshot ${histDate}` : '']
-      .filter(Boolean)
-      .join(' · ')
+    const dateText = histDate && histDate !== serviceDate ? `Snapshot ${histDate}` : ''
     const liveLine = historicalMode
       ? 'Snapshot'
       : futureTimetableMode
@@ -475,15 +444,131 @@ const ServiceDetailPage: React.FC = () => {
 
   return (
     <DarwinDetailsLayout
+      className="service-detail-layout"
       title={title}
       subtitle={subtitle}
       headerClassName={`service-detail-header service-detail-header--${status}`}
       sidebarHeader={(
-        <ServiceViewModeToggle
-          className="svc-viewmode-switch--sidebar"
-          viewMode={viewMode}
-          onChange={selectViewMode}
-        />
+        <>
+          <div className="svc-mobile-section-bar">
+            <BUTTwoButtonBar
+              className="svc-section-bar"
+              colorVariant="primary"
+              selectedIndex={pageSection === 'map' ? 1 : pageSection === 'calling' ? 0 : null}
+              buttons={[
+                { label: 'Calling pattern', value: 'calling' },
+                { label: 'Map', value: 'map' },
+              ]}
+              onChange={(_, value) => {
+                if (value === 'calling' || value === 'map') setSection(value)
+              }}
+            />
+            {hasLoading ? (
+              <button
+                type="button"
+                className={pageSection === 'loading' ? 'svc-mobile-loading svc-mobile-loading--on' : 'svc-mobile-loading'}
+                aria-pressed={pageSection === 'loading'}
+                onClick={() => setSection('loading')}
+              >
+                Loading capacity
+              </button>
+            ) : null}
+          </div>
+          <ServiceViewModeToggle
+            className="svc-viewmode-switch--sidebar"
+            viewMode={viewMode}
+            onChange={selectViewMode}
+          />
+          {data && (
+            <SidebarDropdownSection title="Overview" icon={Info} className="svc-overview-dropdown" defaultExpanded>
+              <div className="svc-overview-dropdown__body">
+                {data.cancelled && data.cancellation && (
+                  <TextCard
+                    static
+                    state="redAction"
+                    title="Cancelled"
+                    description={
+                      isScheduleDeactivatedReason(data.cancellation.reason)
+                        ? undefined
+                        : `${data.cancellation.reason}${data.cancellation.code ? ` (code ${data.cancellation.code})` : ''}`
+                    }
+                  />
+                )}
+                {!data.cancelled && data.partiallyCancelled && (() => {
+                  const cancelledStops = data.stops.filter((s) => s.cancelledAtStop && s.slot !== 'PP' && s.slot !== 'OPPP')
+                  const names = cancelledStops.map((s) => {
+                    const i = data.stops.findIndex((x) => x.tpl === s.tpl && x.slot === s.slot)
+                    return i >= 0 ? displayStopName(data.stops, i, fallbackStopNameLookup) : (s.name || s.tpl)
+                  }).filter(Boolean)
+                  const summary = names.length === 0
+                    ? 'Some calling points are not being served.'
+                    : names.length <= 4
+                      ? `Not calling at: ${names.join(', ')}.`
+                      : `Not calling at ${names.length} stops including ${names.slice(0, 3).join(', ')}.`
+                  const distinctReason = cancelledStops.find((s) => s.cancelReasonAtStop)?.cancelReasonAtStop?.reason
+                  return (
+                    <TextCard
+                      static
+                      state="redAction"
+                      title="Partial cancellation"
+                      description={[summary, distinctReason].filter(Boolean).join(' ')}
+                    />
+                  )
+                })()}
+                {!data.cancelled && !data.partiallyCancelled && data.delayReason && (
+                  <TextCard
+                    static
+                    state="accent"
+                    title="Delay reason"
+                    description={`${data.delayReason.reason}${data.delayReason.code ? ` (code ${data.delayReason.code})` : ''}`}
+                  />
+                )}
+                {data.alerts?.map((al) => (
+                  <TextCard
+                    key={al.id}
+                    static
+                    state="accent"
+                    title={al.source ? `Alert · ${al.source}` : 'Alert'}
+                    description={al.text}
+                  />
+                ))}
+                {(splitWorking?.associations || data.associations || [])
+                  .filter((a) => a.category !== 'NP' && isPassengerHeadcode(a.otherTrainId))
+                  .map((a) => {
+                    const id = a.otherRid || a.otherUid
+                    const href = id
+                      ? serviceHref({
+                          id,
+                          date: data.ssd || date,
+                          section: 'calling',
+                          mode: viewMode,
+                        })
+                      : undefined
+                    const kind = a.category === 'VV' ? 'Divides' : a.category === 'JJ' ? 'Joins' : 'Portion'
+                    return (
+                      <TextCard
+                        key={`${a.category}-${a.otherRid}-${a.tiploc}`}
+                        title={`${kind} · ${a.otherTrainId || a.otherUid || 'other portion'}`}
+                        description={describeAssociation(a)}
+                        state={a.isCancelled ? 'redAction' : 'default'}
+                        to={href}
+                        ariaLabel={`Open associated service ${a.otherTrainId || a.otherRid}`}
+                      />
+                    )
+                  })}
+                <ServiceSchedulePanel
+                  data={data}
+                  operator={formatLmTocName(
+                    data.tocName,
+                    data.toc,
+                    data.stops[0]?.crs,
+                    data.stops[data.stops.length - 1]?.crs,
+                  )}
+                />
+              </div>
+            </SidebarDropdownSection>
+          )}
+        </>
       )}
       actionContent={(
         <div className="station-details-header-actions service-detail-header-actions">
@@ -499,16 +584,7 @@ const ServiceDetailPage: React.FC = () => {
             >
               Back
             </BUTWideButton>
-            <BUTWideButton
-              width="hug"
-              instantAction
-              colorVariant="primary"
-              onClick={refetch}
-              icon={<ArrowsClockwise size={16} aria-hidden />}
-              ariaLabel="Refresh service detail"
-            >
-              Refresh
-            </BUTWideButton>
+            <ServiceDetailKey />
           </div>
           <ServiceViewModeToggle
             className="svc-viewmode-switch--header"
@@ -518,14 +594,15 @@ const ServiceDetailPage: React.FC = () => {
         </div>
       )}
       sections={serviceSections}
-      activeSectionId={section}
+      activeSectionId={pageSection === 'loading' && !hasLoading ? 'calling' : pageSection}
       onSelect={(id) => {
         if (!isServiceSection(id)) return
         if (id === 'loading' && !hasLoading) return
+        if (HIDDEN_SERVICE_SECTIONS.has(id)) return
         setSection(id)
       }}
       ariaLabel="Service sections"
-      minSectionCount={hasLoading ? 5 : 4}
+      minSectionCount={3}
     >
         {status === 'not-found' && (
           <section className="modal-section">
@@ -546,129 +623,12 @@ const ServiceDetailPage: React.FC = () => {
 
         {status === 'loading' && !data && (
           <section className="modal-section">
-            <StationSectionTitle title="Overview" icon={Info} pageHeading />
+            <StationSectionTitle title="Calling pattern" icon={MapPin} pageHeading />
             <p className="edit-hint kb-source-hint">Loading actual times…</p>
           </section>
         )}
 
-        {data && section === 'overview' && (
-          <section className="modal-section">
-            <StationSectionTitle title="Overview" icon={Info} pageHeading />
-            <div className="svc-overview-layout">
-            <ServiceSchedulePanel data={data} />
-            <section
-              className={`svc-summary-card ${data.cancelled ? 'svc-summary-card--cancelled' : ''}`}
-              aria-label="Service summary"
-            >
-              {data.cancelled && data.cancellation && (
-                <TextCard
-                  static
-                  state="redAction"
-                  title="Cancelled"
-                  description={
-                    isScheduleDeactivatedReason(data.cancellation.reason)
-                      ? undefined
-                      : `${data.cancellation.reason}${data.cancellation.code ? ` (code ${data.cancellation.code})` : ''}`
-                  }
-                />
-              )}
-              {!data.cancelled && data.partiallyCancelled && (() => {
-                const cancelledStops = data.stops.filter((s) => s.cancelledAtStop && s.slot !== 'PP' && s.slot !== 'OPPP');
-                const names = cancelledStops.map((s) => {
-                  const i = data.stops.findIndex((x) => x.tpl === s.tpl && x.slot === s.slot)
-                  return i >= 0 ? displayStopName(data.stops, i, fallbackStopNameLookup) : (s.name || s.tpl)
-                }).filter(Boolean);
-                const summary = names.length === 0
-                  ? 'Some calling points are not being served.'
-                  : names.length <= 4
-                    ? `Not calling at: ${names.join(', ')}.`
-                    : `Not calling at ${names.length} stops including ${names.slice(0, 3).join(', ')}.`;
-                const distinctReason = cancelledStops.find((s) => s.cancelReasonAtStop)?.cancelReasonAtStop?.reason;
-                return (
-                  <TextCard
-                    static
-                    state="redAction"
-                    title="Partial cancellation"
-                    description={[summary, distinctReason].filter(Boolean).join(' ')}
-                  />
-                );
-              })()}
-              {!data.cancelled && !data.partiallyCancelled && data.delayReason && (
-                <TextCard
-                  static
-                  state="accent"
-                  title="Delay reason"
-                  description={`${data.delayReason.reason}${data.delayReason.code ? ` (code ${data.delayReason.code})` : ''}`}
-                />
-              )}
-
-              {data.alerts && data.alerts.length > 0 && data.alerts.map((al) => (
-                <TextCard
-                  key={al.id}
-                  static
-                  state="accent"
-                  title={al.source ? `Alert · ${al.source}` : 'Alert'}
-                  description={al.text}
-                />
-              ))}
-
-              {(splitWorking?.associations || data.associations || [])
-                .filter((a) => a.category !== 'NP' && isPassengerHeadcode(a.otherTrainId))
-                .map((a) => {
-                const id = a.otherRid || a.otherUid
-                const href = id
-                  ? serviceHref({
-                      id,
-                      date: data.ssd || date,
-                      section: 'overview',
-                      mode: viewMode,
-                    })
-                  : undefined
-                const kind = a.category === 'VV' ? 'Divides' : a.category === 'JJ' ? 'Joins' : 'Portion'
-                return (
-                  <TextCard
-                    key={`${a.category}-${a.otherRid}-${a.tiploc}`}
-                    title={`${kind} · ${a.otherTrainId || a.otherUid || 'other portion'}`}
-                    description={describeAssociation(a)}
-                    state={a.isCancelled ? 'redAction' : 'default'}
-                    to={href}
-                    ariaLabel={`Open associated service ${a.otherTrainId || a.otherRid}`}
-                  />
-                )
-              })}
-
-              <div className="modal-details-grid">
-                <StationDetailField
-                  label="Operator"
-                  value={formatLmTocName(
-                    data.tocName,
-                    data.toc,
-                    data.stops[0]?.crs,
-                    data.stops[data.stops.length - 1]?.crs,
-                  )}
-                />
-                <StationDetailField
-                  label="Headcode"
-                  value={data.trainClass ? `${data.trainId} · class ${data.trainClass}` : data.trainId}
-                />
-                <StationDetailField label="Origin" value={data.originName || data.origin} />
-                <StationDetailField label="Destination" value={destinationLabel || data.destinationName || data.destination} />
-              </div>
-            </section>
-            </div>
-            <p className="edit-hint kb-source-hint svc-footer">
-              <span>Source: Network Rail Darwin Push Port</span>
-              <span className="svc-footer-sep" aria-hidden="true">·</span>
-              <DataLicenceAttribution />
-              <span className="svc-footer-sep" aria-hidden="true">·</span>
-              <span>RID {data.rid}</span>
-              <span className="svc-footer-sep" aria-hidden="true">·</span>
-              <span>Updated {new Date(data.updatedAt).toLocaleString('en-GB', { timeZone: 'Europe/London', hourCycle: 'h23', hour12: false })}</span>
-            </p>
-          </section>
-        )}
-
-        {data && section === 'loading' && hasLoading && (
+        {data && pageSection === 'loading' && hasLoading && (
           <section className="modal-section svc-formation-section" aria-label="Loading capacity">
             <StationSectionTitle title="Loading capacity" icon={ChartBar} pageHeading />
             <CarriageMap
@@ -682,75 +642,10 @@ const ServiceDetailPage: React.FC = () => {
           </section>
         )}
 
-        {data && section === 'formation' && (
-            <section className="modal-section svc-formation-section" aria-label="Formation">
-              <StationSectionTitle title="Formation" icon={Train} pageHeading />
-              {splitWorking ? (
-                <div className="svc-split-portions">
-                  <SidebarDropdownSection title={splitTogetherLabel(splitWorking)} defaultExpanded>
-                    <CarriageMap
-                      formation={data.formation}
-                      consist={splitWorking.togetherConsist}
-                      stops={splitWorking.togetherStops}
-                      reverse={data.reverseFormation}
-                      initialTpl={loadingTpl}
-                      layout="stock-only"
-                      onUnitClick={(unitId) => {
-                        const qp = new URLSearchParams()
-                        if (historicalDate) qp.set('unitDay', historicalDate)
-                        router.push(`/units/${encodeURIComponent(unitId)}${qp.toString() ? `?${qp.toString()}` : ''}`)
-                      }}
-                    />
-                  </SidebarDropdownSection>
-                  {splitWorking.portions.map((portion) => (
-                    <SidebarDropdownSection
-                      key={portion.rid}
-                      title={splitPortionLabel(portion, splitWorking.splitName)}
-                      defaultExpanded
-                    >
-                      <CarriageMap
-                        formation={portion.rid === data.rid ? data.formation : null}
-                        consist={portion.consist}
-                        stops={portion.stops}
-                        reverse={false}
-                        layout="stock-only"
-                        onUnitClick={(unitId) => {
-                          const qp = new URLSearchParams()
-                          if (historicalDate) qp.set('unitDay', historicalDate)
-                          router.push(`/units/${encodeURIComponent(unitId)}${qp.toString() ? `?${qp.toString()}` : ''}`)
-                        }}
-                      />
-                    </SidebarDropdownSection>
-                  ))}
-                  <ServiceVehicleDetails consist={data.consist} />
-                </div>
-              ) : (
-              <div className="svc-formation-panel">
-              <SidebarDropdownSection title="Coach map" defaultExpanded>
-              <CarriageMap
-                formation={data.formation}
-                consist={data.consist}
-                stops={data.stops}
-                reverse={data.reverseFormation}
-                initialTpl={loadingTpl}
-                layout="stock-only"
-                onUnitClick={(unitId) => {
-                  const qp = new URLSearchParams()
-                  if (historicalDate) qp.set('unitDay', historicalDate)
-                  router.push(`/units/${encodeURIComponent(unitId)}${qp.toString() ? `?${qp.toString()}` : ''}`)
-                }}
-              />
-              </SidebarDropdownSection>
-              <ServiceVehicleDetails consist={data.consist} />
-              </div>
-              )}
-            </section>
-        )}
-
-        {data && section === 'calling' && (
+        {data && pageSection === 'calling' && (
             <section className="modal-section svc-pattern-card" aria-label="Calling pattern">
               <div className="svc-calling-stack">
-              <WorkingLinkCards workings={portionWorkings.previous} date={data.ssd || date} viewMode={viewMode} />
+              <ServiceFormationStrip data={data} />
               {splitWorking ? (
                 <div className="svc-split-portions">
                   <ServiceStopList
@@ -776,7 +671,6 @@ const ServiceDetailPage: React.FC = () => {
                       returnTo={canonicalHref}
                       delayReason={portion.rid === data.rid ? data.delayReason?.reason : null}
                       location={portion.rid === data.rid ? data.location : null}
-                      showLegend={false}
                       showAssociations={false}
                       preserveOrder
                       heading={splitPortionLabel(portion, splitWorking.splitName)}
@@ -799,29 +693,70 @@ const ServiceDetailPage: React.FC = () => {
                   serviceHref({
                     id: a.otherRid || a.otherUid || '',
                     date: data.ssd || date,
-                    section: 'overview',
+                    section: 'calling',
                     mode: viewMode,
                   })
                 }
               />
               )}
-              <WorkingLinkCards workings={portionWorkings.next} date={data.ssd || date} viewMode={viewMode} />
+              <WorkingFooter
+                previous={portionWorkings.previous}
+                next={portionWorkings.next}
+                date={data.ssd || date}
+                viewMode={viewMode}
+              />
               </div>
             </section>
         )}
 
-        {data && section === 'map' && (
+        {data && pageSection === 'map' && (
           <section className="modal-section svc-map-section" aria-label="Journey map">
-            <ServiceJourneyMap service={data} stations={stations} extraStops={mapBranches} branches={liveBranches} />
+            <ServiceFormationStrip data={data} />
+            <ServiceJourneyMap
+              service={data}
+              stations={stations}
+              extraStops={mapBranches}
+              branches={liveBranches}
+              onNominatimUsed={() => setMapNominatim(true)}
+            />
           </section>
         )}
 
-        {data && section === 'raw' && (
-          <section className="modal-section">
-            <StationSectionTitle title="Raw data" icon={Code} pageHeading />
-            <RawDataDump data={data} />
-          </section>
+        {data && (
+          <footer className="svc-footer">
+            <p>
+              Live times, platforms and the calling pattern come from the Network Rail Darwin Push Port.
+              Signalling actuals come from Network Rail TRUST, where shown.
+            </p>
+            <p>Contains public sector information licensed under the Open Government Licence v3.0.</p>
+            <p>
+              Map data ©{' '}
+              <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+                OpenStreetMap
+              </a>
+              , via{' '}
+              <a href="https://protomaps.com/" target="_blank" rel="noreferrer">
+                Protomaps
+              </a>
+              . Rail geometry ©{' '}
+              <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+                OpenStreetMap
+              </a>
+              . Stations from Rail Statistics
+              {mapNominatim ? (
+                <>
+                  {' '}
+                  and{' '}
+                  <a href="https://nominatim.openstreetmap.org/" target="_blank" rel="noreferrer">
+                    Nominatim
+                  </a>
+                </>
+              ) : null}
+              .
+            </p>
+          </footer>
         )}
+
     </DarwinDetailsLayout>
   )
 }
