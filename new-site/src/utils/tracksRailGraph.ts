@@ -6,12 +6,24 @@ const DENSIFY_M = 60
 const WELD_M = 200
 /** Buckets for finding a line end's neighbour. About 200 m. */
 const WELD_CELL = 0.002
+/** About 55 m. A step from one running line to the line beside it. */
+const CORRIDOR_M = 55
+const CORRIDOR_CELL = 0.0008
+/** 25 degrees. The two lines are the same corridor, not a flyover. */
+const PARALLEL_AXIS = 4_360
+/** 50 degrees. The step runs across the tracks, not along them. */
+const LATERAL_MIN = 8_720
+/** A loose end may join the rail ahead of it, not every node in a 200 m circle. */
+const WELD_AHEAD = 8_720
 const SNAP_MAX_M = 1500
 const REVERSAL_PENALTY_M = 10_000
 /** 150 degrees, in the heading units below. */
 const TURN_SHARP = 26_180
 const HEADING_PI = 31_416
 const NO_HEADING = 32_767
+
+/** Bump when the graph's shape changes, so a saved copy is rebuilt. */
+export const RAIL_GRAPH_REVISION = 1
 
 export type LngLat = [number, number]
 
@@ -48,10 +60,20 @@ function reverseHeading(h: number): number {
   return h > 0 ? h - HEADING_PI : h + HEADING_PI
 }
 
-function sharpTurn(hIn: number, hOut: number): boolean {
+function angleBetween(hIn: number, hOut: number): number {
   let d = Math.abs(hIn - hOut)
   if (d > HEADING_PI) d = HEADING_PI * 2 - d
-  return d > TURN_SHARP
+  return d
+}
+
+function sharpTurn(hIn: number, hOut: number): boolean {
+  return angleBetween(hIn, hOut) > TURN_SHARP
+}
+
+/** Same track or the opposite direction on it. */
+function sameAxis(hIn: number, hOut: number): boolean {
+  const d = angleBetween(hIn, hOut)
+  return d < PARALLEL_AXIS || d > HEADING_PI - PARALLEL_AXIS
 }
 
 function nodeKey(gx: number, gy: number): number {
@@ -82,7 +104,9 @@ function densify(line: LngLat[]): Point[] {
 
 /**
  * Passenger-rail lines become one network. Shared cells meet, long edges are
- * split, and ends within 200 m are welded so a corridor join stays routable.
+ * split, and a loose end welds once, onward along its own heading.
+ * Tracks that run side by side are stepped across, so a parallel pair in
+ * London does not send the train out via the tube.
  */
 export function buildRailGraph(lines: LngLat[][]): RailGraph {
   const index = new Map<number, number>()
@@ -142,22 +166,110 @@ export function buildRailGraph(lines: LngLat[][]): RailGraph {
   }
 
   const lineCount = linkA.length
+  const onlyNeigh = new Int32Array(lons.length)
+  onlyNeigh.fill(-1)
+  for (let i = 0; i < lineCount; i++) {
+    onlyNeigh[linkA[i]] = linkB[i]
+    onlyNeigh[linkB[i]] = linkA[i]
+  }
   for (let id = 0; id < lons.length; id++) {
     if (degree[id] !== 1) continue
+    const prev = onlyNeigh[id]
+    if (prev < 0) continue
+    const here = { lon: lons[id], lat: lats[id] }
+    const forward = heading({ lon: lons[prev], lat: lats[prev] }, here)
     const cx = Math.round(lons[id] / WELD_CELL)
     const cy = Math.round(lats[id] / WELD_CELL)
-    const here = { lon: lons[id], lat: lats[id] }
+    let best = -1
+    let bestD = WELD_M
     for (let dx = -2; dx <= 2; dx++) {
       for (let dy = -2; dy <= 2; dy++) {
         const ids = buckets.get(nodeKey(cx + dx, cy + dy))
         if (!ids) continue
         for (const other of ids) {
-          if (other === id) continue
-          const d = metres(here, { lon: lons[other], lat: lats[other] })
-          if (d < WELD_M) addLink(id, other, d)
+          if (other === id || other === prev) continue
+          const there = { lon: lons[other], lat: lats[other] }
+          const d = metres(here, there)
+          if (d >= bestD) continue
+          if (angleBetween(forward, heading(here, there)) > WELD_AHEAD) continue
+          best = other
+          bestD = d
         }
       }
     }
+    if (best >= 0) addLink(id, best, bestD)
+  }
+
+  // A fast line and the slow line beside it often never share a node. The
+  // only other join can be a flyover or the tube corridor, and the route
+  // leaves the railway it is on. Each point steps to the nearest parallel
+  // line. A bridge crosses on a different heading, so it stays unconnected.
+  const head0 = new Int16Array(lons.length)
+  const head1 = new Int16Array(lons.length)
+  head0.fill(NO_HEADING)
+  head1.fill(NO_HEADING)
+  const remember = (id: number, h: number) => {
+    if (head0[id] === NO_HEADING) head0[id] = h
+    else if (head1[id] === NO_HEADING && !sameAxis(head0[id], h)) head1[id] = h
+  }
+  for (let i = 0; i < lineCount; i++) {
+    const h = heading(
+      { lon: lons[linkA[i]], lat: lats[linkA[i]] },
+      { lon: lons[linkB[i]], lat: lats[linkB[i]] },
+    )
+    remember(linkA[i], h)
+    remember(linkB[i], reverseHeading(h))
+  }
+  const headsOf = (id: number): number[] => {
+    if (head0[id] === NO_HEADING) return []
+    return head1[id] === NO_HEADING ? [head0[id]] : [head0[id], head1[id]]
+  }
+  const corridorBuckets = new Map<number, number[]>()
+  for (let id = 0; id < lons.length; id++) {
+    if (head0[id] === NO_HEADING) continue
+    const key = nodeKey(Math.round(lons[id] / CORRIDOR_CELL), Math.round(lats[id] / CORRIDOR_CELL))
+    const bucket = corridorBuckets.get(key)
+    if (bucket) bucket.push(id)
+    else corridorBuckets.set(key, [id])
+  }
+  for (let id = 0; id < lons.length; id++) {
+    const mine = headsOf(id)
+    if (mine.length === 0) continue
+    const cx = Math.round(lons[id] / CORRIDOR_CELL)
+    const cy = Math.round(lats[id] / CORRIDOR_CELL)
+    const here = { lon: lons[id], lat: lats[id] }
+    let best = -1
+    let bestD = CORRIDOR_M
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const ids = corridorBuckets.get(nodeKey(cx + dx, cy + dy))
+        if (!ids) continue
+        for (const other of ids) {
+          if (other === id) continue
+          const there = { lon: lons[other], lat: lats[other] }
+          const d = metres(here, there)
+          if (d >= bestD) continue
+          const linkH = heading(here, there)
+          const theirs = headsOf(other)
+          let across = false
+          for (const h1 of mine) {
+            const acrossTrack = angleBetween(h1, linkH)
+            if (acrossTrack < LATERAL_MIN || acrossTrack > HEADING_PI - LATERAL_MIN) continue
+            for (const h2 of theirs) {
+              if (sameAxis(h1, h2)) {
+                across = true
+                break
+              }
+            }
+            if (across) break
+          }
+          if (!across) continue
+          best = other
+          bestD = d
+        }
+      }
+    }
+    if (best >= 0) addLink(id, best, bestD)
   }
 
   const weldFrom = lineCount
@@ -360,19 +472,3 @@ export function linesFromNetwork(payload: unknown): LngLat[][] {
   return out
 }
 
-let graphPromise: Promise<RailGraph | null> | null = null
-
-/** One shared graph for every service page. A missing file routes each leg elsewhere. */
-export function loadGbRailGraph(): Promise<RailGraph | null> {
-  if (!graphPromise) {
-    graphPromise = fetch('/data/gb-passenger-rail.json')
-      .then(async (response) => {
-        if (!response.ok) return null
-        const lines = linesFromNetwork(await response.json())
-        if (lines.length < 1) return null
-        return buildRailGraph(lines)
-      })
-      .catch(() => null)
-  }
-  return graphPromise
-}

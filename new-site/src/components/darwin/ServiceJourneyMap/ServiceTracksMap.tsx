@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { CornersIn, CornersOut, Minus, NavigationArrow, Plus } from '@phosphor-icons/react'
+import { CornersIn, CornersOut, Minus, NavigationArrow, Plus, Stack } from '@phosphor-icons/react'
 import * as maplibregl from 'maplibre-gl'
 import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl'
 import { Protocol } from 'pmtiles'
@@ -20,7 +20,13 @@ import {
   type RoutePlatform,
 } from '../../../utils/serviceJourneyMap'
 import {
+  canonicalTracksBasemap,
+  TRACKS_BASEMAP_GROUPS,
+  tracksBasemapCredit,
   tracksMapStyle,
+  tracksRouteCasing,
+  tracksRouteOnDark,
+  type TracksBasemap,
   type TracksMapTheme,
 } from '../../../utils/tracksDarkStyle'
 import { routeTracksJourney, splitRouteGaps } from '../../../utils/tracksRailRoute'
@@ -148,6 +154,15 @@ function withHeadcode(trainId: string, label: string): string {
 /** Same stroke width as the Leaflet service line, in the operator colour. */
 const ROUTE_LINE_WIDTH = 5
 const ROUTE_LINE_OPACITY = 1
+const BASEMAP_KEY = 'rs.service-map.basemap'
+
+function storedBasemap(): TracksBasemap | null {
+  try {
+    return canonicalTracksBasemap(localStorage.getItem(BASEMAP_KEY))
+  } catch {
+    return null
+  }
+}
 
 function tipHtml(label: string): string {
   const text = label.replace(/[&<>"']/g, (ch) => (
@@ -227,14 +242,20 @@ export function ServiceTracksMap({
   const [zoom, setZoom] = useState(8)
   const pathRef = useRef<LatLngTuple[] | null>(null)
   const branchPathsRef = useRef<Map<string, LatLngTuple[]>>(new Map())
+  const userPointRef = useRef<{ lat: number; lng: number } | null>(null)
+  const [styleEpoch, setStyleEpoch] = useState(0)
   const inputRef = useRef({ stops, mapped, location, platforms, trainId, branches })
   const shownRef = useRef<{ lat: number; lng: number } | null>(null)
   const shownBranchesRef = useRef<Map<string, { lat: number; lng: number }>>(new Map())
   const userMovedRef = useRef(false)
   const framedCountRef = useRef(0)
-  const lineColor = theme === 'dark' ? liftRouteColorForDarkBasemap(routeColor) : routeColor
+  const [basemap, setBasemap] = useState<TracksBasemap>(theme === 'dark' ? 'dark' : 'detailed')
+  const [layersOpen, setLayersOpen] = useState(false)
+  const basemapChosen = useRef(false)
+  const basemapRef = useRef(basemap)
+  const lineColor = tracksRouteOnDark(basemap) ? liftRouteColorForDarkBasemap(routeColor) : routeColor
   const routeColorRef = useRef(lineColor)
-  const appliedTheme = useRef(theme)
+  const appliedBasemap = useRef(basemap)
   const tipRef = useRef<maplibregl.Popup | null>(null)
   const tipLiveRef = useRef<string | null>(null)
   // Platform marks sit within about 100 m of the station. A finer key restarts
@@ -251,7 +272,20 @@ export function ServiceTracksMap({
   useLayoutEffect(() => {
     inputRef.current = { stops, mapped, location, platforms, trainId, branches }
     routeColorRef.current = lineColor
+    basemapRef.current = basemap
   })
+
+  useEffect(() => {
+    const stored = storedBasemap()
+    if (!stored) return
+    basemapChosen.current = true
+    setBasemap(stored)
+  }, [])
+
+  useEffect(() => {
+    if (basemapChosen.current) return
+    setBasemap(theme === 'dark' ? 'dark' : 'detailed')
+  }, [theme])
 
   useEffect(() => {
     const container = containerRef.current
@@ -260,7 +294,7 @@ export function ServiceTracksMap({
     ensurePmtiles()
     const map = new maplibregl.Map({
       container,
-      style: tracksMapStyle(theme),
+      style: tracksMapStyle(basemapRef.current),
       center: center as [number, number],
       zoom: 5,
       minZoom: 4,
@@ -275,6 +309,7 @@ export function ServiceTracksMap({
     map.on('movestart', (event) => {
       if (event.originalEvent) userMovedRef.current = true
     })
+    let tipsBound = false
     const addRouteLayers = () => {
       if (map.getSource('tracks-route')) return
       map.addSource('tracks-route', { type: 'geojson', data: EMPTY })
@@ -283,6 +318,17 @@ export function ServiceTracksMap({
       map.addSource('tracks-extra-stops', { type: 'geojson', data: EMPTY })
       map.addSource('tracks-live', { type: 'geojson', data: EMPTY })
       map.addSource('tracks-user', { type: 'geojson', data: EMPTY })
+      map.addLayer({
+        id: 'tracks-route-casing',
+        type: 'line',
+        source: 'tracks-route',
+        paint: {
+          'line-color': '#ffffff',
+          'line-width': 8,
+          'line-opacity': tracksRouteCasing(basemapRef.current) ? 0.9 : 0,
+        },
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+      })
       map.addLayer({
         id: 'tracks-extra-line',
         type: 'line',
@@ -349,35 +395,42 @@ export function ServiceTracksMap({
           'circle-stroke-width': 3,
         },
       })
-      const tip = markerTip()
-      tipRef.current = tip
+      const restyle = tipsBound
       const tipLayers = ['tracks-live', 'tracks-stops', 'tracks-extra-stops', 'tracks-user'] as const
-      for (const layer of tipLayers) {
-        map.on('mouseenter', layer, (event) => {
-          const feature = event.features?.[0]
-          const label = feature?.properties?.label
-          const coords = feature?.geometry?.type === 'Point' ? feature.geometry.coordinates : null
-          if (!label || !coords) return
-          tipLiveRef.current = layer === 'tracks-live' ? String(feature?.properties?.id || label) : null
-          placeTip(map, tip, coords as [number, number], String(label), layer, feature?.properties?.kind)
-        })
-        map.on('mouseleave', layer, (event) => {
-          const hit = map.queryRenderedFeatures(event.point, { layers: [...tipLayers] })[0]
-          const label = hit?.properties?.label
-          const coords = hit?.geometry?.type === 'Point' ? hit.geometry.coordinates : null
-          if (!hit || !label || !coords) {
-            tipLiveRef.current = null
-            map.getCanvas().style.cursor = ''
-            tip.remove()
-            return
-          }
-          tipLiveRef.current = hit.layer?.id === 'tracks-live' ? String(hit.properties?.id || label) : null
-          placeTip(map, tip, coords as [number, number], String(label), hit.layer?.id, hit.properties?.kind)
-        })
+      if (!tipsBound) {
+        tipsBound = true
+        const tip = markerTip()
+        tipRef.current = tip
+        for (const layer of tipLayers) {
+          map.on('mouseenter', layer, (event) => {
+            const feature = event.features?.[0]
+            const label = feature?.properties?.label
+            const coords = feature?.geometry?.type === 'Point' ? feature.geometry.coordinates : null
+            if (!label || !coords) return
+            tipLiveRef.current = layer === 'tracks-live' ? String(feature?.properties?.id || label) : null
+            placeTip(map, tip, coords as [number, number], String(label), layer, feature?.properties?.kind)
+          })
+          map.on('mouseleave', layer, (event) => {
+            const hit = map.queryRenderedFeatures(event.point, { layers: [...tipLayers] })[0]
+            const label = hit?.properties?.label
+            const coords = hit?.geometry?.type === 'Point' ? hit.geometry.coordinates : null
+            if (!hit || !label || !coords) {
+              tipLiveRef.current = null
+              map.getCanvas().style.cursor = ''
+              tip.remove()
+              return
+            }
+            tipLiveRef.current = hit.layer?.id === 'tracks-live' ? String(hit.properties?.id || label) : null
+            placeTip(map, tip, coords as [number, number], String(label), hit.layer?.id, hit.properties?.kind)
+          })
+        }
       }
       if (pathRef.current) setSource(map, 'tracks-route', lineCollection(pathRef.current))
       setSource(map, 'tracks-stops', stopCollection(inputRef.current.mapped, pathRef.current, inputRef.current.platforms))
+      const user = userPointRef.current
+      if (user) setSource(map, 'tracks-user', pointCollection(user.lat, user.lng, 'Your location'))
       setMapReady(map)
+      if (restyle) setStyleEpoch((epoch) => epoch + 1)
       onZoom()
     }
     if (map.isStyleLoaded()) addRouteLayers()
@@ -394,10 +447,10 @@ export function ServiceTracksMap({
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map || appliedTheme.current === theme) return
-    appliedTheme.current = theme
-    map.setStyle(tracksMapStyle(theme))
-  }, [theme])
+    if (!map || appliedBasemap.current === basemap) return
+    appliedBasemap.current = basemap
+    map.setStyle(tracksMapStyle(basemap))
+  }, [basemap])
 
   useEffect(() => {
     const map = mapRef.current
@@ -411,7 +464,10 @@ export function ServiceTracksMap({
     if (!mapReady || !map?.getLayer('tracks-route-line')) return
     map.setPaintProperty('tracks-route-line', 'line-color', lineColor)
     if (map.getLayer('tracks-extra-line')) map.setPaintProperty('tracks-extra-line', 'line-color', lineColor)
-  }, [lineColor, mapReady])
+    if (map.getLayer('tracks-route-casing')) {
+      map.setPaintProperty('tracks-route-casing', 'line-opacity', tracksRouteCasing(basemap) ? 0.9 : 0)
+    }
+  }, [lineColor, basemap, mapReady])
 
   useEffect(() => {
     if (waypoints.length < 2) return
@@ -463,7 +519,7 @@ export function ServiceTracksMap({
     }
     // extraKey is the content of the branch routes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extraKey, mapReady])
+  }, [extraKey, mapReady, styleEpoch])
 
   useEffect(() => {
     if (!mapReady) return
@@ -564,6 +620,7 @@ export function ServiceTracksMap({
       (position) => {
         const lat = position.coords.latitude
         const lng = position.coords.longitude
+        userPointRef.current = { lat, lng }
         if (!map.getSource('tracks-user')) return
         setSource(map, 'tracks-user', pointCollection(lat, lng, 'Your location'))
         map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 13) })
@@ -596,7 +653,61 @@ export function ServiceTracksMap({
                   disabled={zoom <= mapReady.getMinZoom()}
                   onClick={() => mapReady.zoomOut()}
                 />
+                <div className="svc-journey-map__layer">
+                  <BUTCircleButton
+                    type="button"
+                    ariaLabel="Map style"
+                    pressed={layersOpen}
+                    instantAction
+                    icon={<Stack size={16} weight="bold" aria-hidden />}
+                    onClick={() => setLayersOpen((open) => !open)}
+                  />
+                  {layersOpen ? (
+                    <div className="svc-journey-map__layer-menu" role="menu" aria-label="Map style">
+                      {TRACKS_BASEMAP_GROUPS.map((group) => (
+                        <div key={group.title} className="svc-journey-map__layer-group">
+                          <p className="svc-journey-map__layer-title">{group.title}</p>
+                          <div className="svc-journey-map__layer-grid">
+                            {group.styles.map((item) => (
+                              <button
+                                key={item.id}
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={basemap === item.id}
+                                className={
+                                  basemap === item.id
+                                    ? 'svc-journey-map__layer-option svc-journey-map__layer-option--on'
+                                    : 'svc-journey-map__layer-option'
+                                }
+                                onClick={() => {
+                                  basemapChosen.current = true
+                                  try {
+                                    localStorage.setItem(BASEMAP_KEY, item.id)
+                                  } catch {
+                                    /* The choice still applies for this visit. */
+                                  }
+                                  setBasemap(item.id)
+                                  setLayersOpen(false)
+                                }}
+                              >
+                                <img
+                                  className="svc-journey-map__layer-swatch"
+                                  src={`/map-styles/${item.id}.jpg`}
+                                  alt=""
+                                />
+                                {item.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </div>
+              {tracksBasemapCredit(basemap) ? (
+                <p className="svc-journey-map__imagery">{tracksBasemapCredit(basemap)}</p>
+              ) : null}
               <div className="map-user-location">
                 <BUTCircleButton
                   type="button"

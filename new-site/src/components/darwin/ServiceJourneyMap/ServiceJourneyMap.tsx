@@ -18,13 +18,13 @@ import { resolveTocRouteColor } from '../../../utils/tocOperatorMap'
 import type { ServiceDetail, ServiceStop } from '../../../types/darwin'
 import type { Station } from '../../../types'
 import { mapLocationBanner, portionBannerTitle, type MapLocationBanner } from './mapLocationBanner'
-import { loadGbRailGraph } from '../../../utils/tracksRailGraph'
-import { ServiceTracksMap, type BranchTrack } from './ServiceTracksMap'
-
-if (typeof window !== 'undefined') void loadGbRailGraph()
+import { loadGbRailGraph } from '../../../utils/tracksGraphLoad'
 import { JOERD_TERRAIN_CREDIT, TRACKS_RELIEF } from '../../../utils/tracksCredits'
+import { ServiceTracksMap, type BranchTrack } from './ServiceTracksMap'
 import '@/components/darwin/callingPatternTones.css'
 import './ServiceJourneyMap.css'
+
+if (typeof window !== 'undefined') void loadGbRailGraph()
 
 const tiplocCoordCache = new Map<string, { lat: number; lng: number } | null>()
 

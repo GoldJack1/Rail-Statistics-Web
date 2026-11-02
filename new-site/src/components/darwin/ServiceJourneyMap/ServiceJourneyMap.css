@@ -162,6 +162,90 @@ html.svc-map-immersive body {
   display: none;
 }
 
+.maplibregl-map .svc-journey-map__layer {
+  position: relative;
+  pointer-events: auto;
+}
+
+.maplibregl-map .svc-journey-map__layer-menu {
+  position: absolute;
+  left: calc(100% + var(--space-sm));
+  top: 0;
+  width: 17.5rem;
+  max-height: min(70vh, 28rem);
+  overflow: auto;
+  padding: 0.35rem 0.7rem 0.7rem;
+  border-radius: 0.85rem;
+  background: var(--bg-secondary);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  pointer-events: auto;
+  z-index: 1200;
+}
+
+.maplibregl-map .svc-journey-map__layer-group + .svc-journey-map__layer-group {
+  margin-top: 0.65rem;
+}
+
+.maplibregl-map .svc-journey-map__layer-title {
+  margin: 0 0 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.maplibregl-map .svc-journey-map__layer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem;
+}
+
+.maplibregl-map .svc-journey-map__layer-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 650;
+  line-height: 1.15;
+  text-align: center;
+  padding: 0.15rem;
+  cursor: pointer;
+}
+
+.maplibregl-map .svc-journey-map__layer-swatch {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: 0.4rem;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.18);
+}
+
+.maplibregl-map .svc-journey-map__layer-option--on .svc-journey-map__layer-swatch {
+  box-shadow: 0 0 0 2px #e11d74;
+}
+
+.maplibregl-map .svc-journey-map__imagery {
+  position: absolute;
+  left: max(var(--space-md), env(safe-area-inset-left, 0px));
+  bottom: max(var(--space-sm), env(safe-area-inset-bottom, 0px));
+  z-index: 1100;
+  margin: 0;
+  max-width: 16rem;
+  color: #fff;
+  font-size: 0.65rem;
+  line-height: 1.3;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.8);
+  pointer-events: none;
+}
+
 .maplibregl-map .svc-journey-map__fullscreen {
   position: absolute;
   top: max(var(--space-md), env(safe-area-inset-top, 0px));

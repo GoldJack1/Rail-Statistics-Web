@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { roundSharpCorners } from './tracksRailRoute'
 import { buildRailGraph, linesFromNetwork, routeOnGraph } from './tracksRailGraph'
 import { nominatimInBritain, nominatimSearchUrl } from '../app/api/nominatim-station/route'
 import { tracksDarkStyle, tracksFlavor, tracksMapStyle } from './tracksDarkStyle'
@@ -59,6 +60,49 @@ describe('tracks rail graph', () => {
     expect(path!.some((point) => point[0] > 51.02)).toBe(true)
   })
 
+  it('crosses to the parallel track instead of leaving the corridor', () => {
+    // Two tracks side by side only meet by a long loop. The route steps across
+    // rather than taking that loop, which in London is the tube corridor.
+    const graph = buildRailGraph([
+      [
+        [0, 51],
+        [0, 51.02],
+      ],
+      [
+        [0.0006, 51],
+        [0.0006, 51.02],
+      ],
+      [
+        [0, 51],
+        [0.02, 51],
+        [0.02, 51.02],
+        [0.0006, 51.02],
+      ],
+    ])
+    const path = routeOnGraph(graph, { lat: 51.002, lng: 0 }, { lat: 51.018, lng: 0.0006 })
+    expect(path).not.toBeNull()
+    expect(Math.max(...path!.map((point) => point[1]))).toBeLessThan(0.005)
+  })
+
+  it('does not chord across a bend from a loose rail end', () => {
+    // A siding end within 200 m of the far side used to weld to every node
+    // in that circle, and the route cut straight across the land.
+    const graph = buildRailGraph([
+      [
+        [0, 51],
+        [0.0012, 51.0012],
+        [0.0024, 51],
+      ],
+      [
+        [0.00015, 51.00015],
+        [0.0004, 51.00005],
+      ],
+    ])
+    const path = routeOnGraph(graph, { lat: 51, lng: 0 }, { lat: 51, lng: 0.0024 })
+    expect(path).not.toBeNull()
+    expect(path!.some((point) => point[0] > 51.0008)).toBe(true)
+  })
+
   it('leaves a pin that is nowhere near the railway', () => {
     const graph = buildRailGraph([
       [
@@ -72,6 +116,30 @@ describe('tracks rail graph', () => {
   it('reads the compact network file', () => {
     expect(linesFromNetwork({ lines: [[[-1, 53], [-1.1, 53.1]]] })).toEqual([[[-1, 53], [-1.1, 53.1]]])
     expect(linesFromNetwork({})).toEqual([])
+  })
+})
+
+describe('route corner rounding', () => {
+  it('replaces a right angle with a curve inside the corner', () => {
+    const corner: [number, number] = [51, -1.49]
+    const rounded = roundSharpCorners([
+      [51, -1.5],
+      corner,
+      [51.01, -1.49],
+    ])
+    expect(rounded.some((point) => point[0] === corner[0] && point[1] === corner[1])).toBe(false)
+    expect(rounded.some((point) => point[0] > 51 && point[1] < -1.49)).toBe(true)
+    expect(rounded[0]).toEqual([51, -1.5])
+    expect(rounded[rounded.length - 1]).toEqual([51.01, -1.49])
+  })
+
+  it('leaves a gentle bend alone', () => {
+    const path: [number, number][] = [
+      [51, -1.5],
+      [51.001, -1.49],
+      [51.002, -1.48],
+    ]
+    expect(roundSharpCorners(path)).toEqual(path)
   })
 })
 
@@ -94,6 +162,22 @@ describe('tracks dark style', () => {
     const light = tracksMapStyle('light')
     expect(light.sprite).toContain('/light')
     expect(light.layers?.some((layer) => layer.id === 'roads_rail')).toBe(true)
+    const satellite = tracksMapStyle('satellite')
+    expect(satellite.sources.satellite).toMatchObject({ type: 'raster' })
+    expect(satellite.layers?.some((layer) => layer.id === 'satellite')).toBe(true)
+    const clean = tracksMapStyle('clean')
+    expect(clean.layers?.some((layer) => layer.id === 'roads_rail')).toBe(false)
+    expect(clean.layers?.some((layer) => layer.id === 'earth')).toBe(true)
+    const atlas = tracksMapStyle('atlas')
+    expect(atlas.sources.terrain).toMatchObject({ type: 'raster-dem' })
+    expect(atlas.layers?.some((layer) => layer.id === 'tracks-relief')).toBe(true)
+    const lms = tracksMapStyle('lms')
+    const earth = lms.layers?.find((layer) => layer.id === 'earth')
+    expect(earth && 'paint' in earth && earth.paint).toMatchObject({ 'fill-color': '#e3c98f' })
+    const night = tracksMapStyle('night')
+    expect(night.sources.night).toMatchObject({ type: 'raster' })
+    const live = tracksMapStyle('live')
+    expect(String((live.sources.live as { tiles?: string[] }).tiles?.[0])).toContain('MODIS_Terra')
   })
 })
 

@@ -329,8 +329,12 @@ const ServiceDetailPage: React.FC = () => {
 
   useEffect(() => {
     if (!serviceId) return
+    if (section === 'map') {
+      // Overlap the rail-network download with the map code. The worker reads the same file.
+      void fetch('/data/gb-passenger-rail.json').then((response) => response.arrayBuffer()).catch(() => {})
+    }
     void loadServiceJourneyMap()
-  }, [serviceId])
+  }, [serviceId, section])
 
   const { status, data, error, ageMs, refetch } = useServiceDetail({
     rid: serviceId,
