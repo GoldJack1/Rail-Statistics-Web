@@ -4,6 +4,10 @@
   z-index: 10020;
 }
 
+.svc-side-pane__root--elevated {
+  z-index: 10040;
+}
+
 .svc-side-pane__backdrop {
   position: absolute;
   inset: 0;
@@ -60,10 +64,24 @@
 }
 
 .svc-side-pane__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
   flex-shrink: 0;
   padding: 16px var(--space-xl) calc(16px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border-color);
   background: var(--bg-primary);
+}
+
+/* Phone sheets dismiss from the footer. Wider layouts keep the header control. */
+@media (min-width: 640px) {
+  .svc-side-pane__footer .svc-side-pane__dismiss {
+    display: none;
+  }
+
+  .svc-side-pane__footer:not(.svc-side-pane__footer--split) {
+    display: none;
+  }
 }
 
 @media (max-width: 1023px) {
@@ -78,6 +96,10 @@
   .svc-side-pane {
     width: 100vw;
     border-right: none;
+  }
+
+  .svc-side-pane > .modal-header .modal-close {
+    display: none;
   }
 }
 

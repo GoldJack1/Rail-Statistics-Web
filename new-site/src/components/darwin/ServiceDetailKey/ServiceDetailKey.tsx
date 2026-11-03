@@ -27,7 +27,7 @@ const MAP_MARKERS: { kind: string; label: string; detail: string }[] = [
   { kind: 'route', label: 'Route', detail: "This is where the train will be traveling, shown in the train operator's colour. (Please note the exact routing may not be correct.)" },
 ]
 
-export function ServiceDetailKey() {
+export function ServiceDetailKey({ disabled = false }: { disabled?: boolean }) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -36,6 +36,7 @@ export function ServiceDetailKey() {
         type="button"
         width="hug"
         instantAction
+        disabled={disabled}
         icon={<Info size={16} weight="bold" aria-hidden />}
         ariaLabel="Key"
         pressed={open}

@@ -319,8 +319,8 @@ function partnerEnds(svc: ServiceDetail | undefined): { origin: string; dest: st
   const first = stops.find((s) => s.slot !== 'PP')
   const last = [...stops].reverse().find((s) => s.slot !== 'PP')
   return {
-    origin: first?.name || svc?.originName || svc?.origin || '',
-    dest: last?.name || svc?.destinationName || svc?.destination || '',
+    origin: svc?.originName || first?.name || svc?.origin || '',
+    dest: svc?.destinationName || last?.name || svc?.destination || '',
   }
 }
 

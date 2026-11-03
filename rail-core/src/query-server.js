@@ -14,6 +14,7 @@ import { assignTrackMiles, loadGtclGraph } from "./gtcl-path.js";
 import { annotateStops, publicSchedule } from "./schedule-notes.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { cancellationForCall, serviceCancellationFields } from "./service-cancel.js";
+import { healTrustCancellations } from "./trust-apply.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
 import { osgbToWgs84 } from "./osgb.js";
@@ -355,6 +356,13 @@ async function liveDepartures(crs, opts) {
   for (const fileYmd of days) {
     const db = openDay(fileYmd);
     if (!db) continue;
+    if (!QUERY_READ_ONLY && fileYmd === today) {
+      try {
+        healTrustCancellations(db, DATA_DIR);
+      } catch {
+        /* a stored TRUST cancel must not take the board down */
+      }
+    }
     const peerDatabases = [addCalendarDays(fileYmd, -1), fileYmd, addCalendarDays(fileYmd, 1)]
       .filter(Boolean)
       .map((day) => ({ ymd: day, db: openDay(day) }))
@@ -724,6 +732,14 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     svc = hit.svc;
   }
   const resolvedRid = svc.rid;
+  if (!QUERY_READ_ONLY && ymd === londonCalendarYmd()) {
+    try {
+      healTrustCancellations(db, DATA_DIR);
+      svc = findService(db, resolvedRid, ymd) || svc;
+    } catch {
+      /* keep the detail that was already loaded */
+    }
+  }
   let rawCalls = gatherServiceCalls(ymd, svc, { keepRevisits: QUERY_ENV === "dev" });
   if (!rawCalls.length && hop < 1) {
     const np = db

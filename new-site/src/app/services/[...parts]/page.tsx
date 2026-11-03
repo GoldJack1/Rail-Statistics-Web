@@ -16,6 +16,7 @@ import { ServiceSchedulePanel } from '@/components/darwin/ServiceSchedulePanel'
 import { ServiceStopList } from '@/components/darwin/ServiceStopList/ServiceStopList'
 import { buildStopNameLookup, displayStopName } from '@/components/darwin/serviceStopLabel'
 import { ServiceDetailKey } from '@/components/darwin/ServiceDetailKey/ServiceDetailKey'
+import { SidePane } from '@/components/darwin/SidePane/SidePane'
 import { ServiceViewModeToggle } from '@/components/darwin/ServiceViewModeToggle'
 import { useServiceViewMode } from '@/components/darwin/serviceViewMode'
 import StationSectionTitle from '@/components/models/StationDetails/StationSectionTitle'
@@ -240,6 +241,13 @@ function isScheduleDeactivatedReason(reason: string | null | undefined): boolean
   return reason.trim().toLowerCase().includes('schedule deactivated')
 }
 
+function cancellationDescription(
+  reason: { reason?: string | null; code?: string | null } | null | undefined,
+): string | undefined {
+  if (!reason?.reason || isScheduleDeactivatedReason(reason.reason)) return undefined
+  return `${reason.reason}${reason.code ? ` (code ${reason.code})` : ''}`
+}
+
 function originDepartureClock(data: ServiceDetail): string | null {
   const origin = data.stops.find((stop) => stop.slot === 'OR')
     || data.stops.find((stop) => stop.tpl === data.origin)
@@ -266,6 +274,7 @@ const ServiceDetailPage: React.FC = () => {
   const sectionKey = `${parsed.id}|${parsed.date || ''}|${parsed.section}`
   const [sectionKeySeen, setSectionKeySeen] = useState(sectionKey)
   const [section, setSection] = useState<ServiceSection>(urlSection)
+  const [overviewOpen, setOverviewOpen] = useState(false)
   const [mapNominatim, setMapNominatim] = useState(false)
   if (sectionKeySeen !== sectionKey) {
     setSectionKeySeen(sectionKey)
@@ -442,6 +451,95 @@ const ServiceDetailPage: React.FC = () => {
     return dateText
   }, [status, error, ageMs, historicalMode, futureTimetableMode, data])
 
+  const renderServiceOverview = () => {
+    if (!data) return null
+    return (
+      <div className="svc-overview-dropdown__body">
+        {data.cancelled && (
+          <TextCard
+            static
+            state="redAction"
+            title="Cancelled"
+            description={cancellationDescription(data.cancellation)}
+          />
+        )}
+        {!data.cancelled && data.partiallyCancelled && (() => {
+          const cancelledStops = data.stops.filter((s) => s.cancelledAtStop && s.slot !== 'PP' && s.slot !== 'OPPP')
+          const names = cancelledStops.map((s) => {
+            const i = data.stops.findIndex((x) => x.tpl === s.tpl && x.slot === s.slot)
+            return i >= 0 ? displayStopName(data.stops, i, fallbackStopNameLookup) : (s.name || s.tpl)
+          }).filter(Boolean)
+          const summary = names.length === 0
+            ? 'Some calling points are not being served.'
+            : names.length <= 4
+              ? `Not calling at: ${names.join(', ')}.`
+              : `Not calling at ${names.length} stops including ${names.slice(0, 3).join(', ')}.`
+          const distinctReason = cancellationDescription(
+            cancelledStops.find((s) => s.cancelReasonAtStop)?.cancelReasonAtStop,
+          )
+          return (
+            <TextCard
+              static
+              state="redAction"
+              title="Partial cancellation"
+              description={[summary, distinctReason].filter(Boolean).join(' ')}
+            />
+          )
+        })()}
+        {!data.cancelled && !data.partiallyCancelled && data.delayReason && (
+          <TextCard
+            static
+            state="accent"
+            title="Delay reason"
+            description={`${data.delayReason.reason}${data.delayReason.code ? ` (code ${data.delayReason.code})` : ''}`}
+          />
+        )}
+        {data.alerts?.map((al) => (
+          <TextCard
+            key={al.id}
+            static
+            state="accent"
+            title={al.source ? `Alert · ${al.source}` : 'Alert'}
+            description={al.text}
+          />
+        ))}
+        {(splitWorking?.associations || data.associations || [])
+          .filter((a) => a.category !== 'NP' && isPassengerHeadcode(a.otherTrainId))
+          .map((a) => {
+            const id = a.otherRid || a.otherUid
+            const href = id
+              ? serviceHref({
+                  id,
+                  date: data.ssd || date,
+                  section: 'calling',
+                  mode: viewMode,
+                })
+              : undefined
+            const kind = a.category === 'VV' ? 'Divides' : a.category === 'JJ' ? 'Joins' : 'Portion'
+            return (
+              <TextCard
+                key={`${a.category}-${a.otherRid}-${a.tiploc}`}
+                title={`${kind} · ${a.otherTrainId || a.otherUid || 'other portion'}`}
+                description={describeAssociation(a)}
+                state={a.isCancelled ? 'redAction' : 'default'}
+                to={href}
+                ariaLabel={`Open associated service ${a.otherTrainId || a.otherRid}`}
+              />
+            )
+          })}
+        <ServiceSchedulePanel
+          data={data}
+          operator={formatLmTocName(
+            data.tocName,
+            data.toc,
+            data.stops[0]?.crs,
+            data.stops[data.stops.length - 1]?.crs,
+          )}
+        />
+      </div>
+    )
+  }
+
   return (
     <DarwinDetailsLayout
       className="service-detail-layout"
@@ -456,8 +554,8 @@ const ServiceDetailPage: React.FC = () => {
               colorVariant="primary"
               selectedIndex={pageSection === 'map' ? 1 : pageSection === 'calling' ? 0 : null}
               buttons={[
-                { label: 'Calling pattern', value: 'calling' },
-                { label: 'Map', value: 'map' },
+                { label: 'Calling pattern', value: 'calling', disabled: !data },
+                { label: 'Map', value: 'map', disabled: !data },
               ]}
               onChange={(_, value) => {
                 if (value === 'calling' || value === 'map') setSection(value)
@@ -477,95 +575,12 @@ const ServiceDetailPage: React.FC = () => {
           <ServiceViewModeToggle
             className="svc-viewmode-switch--sidebar"
             viewMode={viewMode}
+            disabled={!data}
             onChange={selectViewMode}
           />
           {data && (
             <SidebarDropdownSection title="Overview" icon={Info} className="svc-overview-dropdown" defaultExpanded>
-              <div className="svc-overview-dropdown__body">
-                {data.cancelled && (
-                  <TextCard
-                    static
-                    state="redAction"
-                    title="Cancelled"
-                    description={
-                      !data.cancellation || isScheduleDeactivatedReason(data.cancellation.reason)
-                        ? undefined
-                        : `${data.cancellation.reason}${data.cancellation.code ? ` (code ${data.cancellation.code})` : ''}`
-                    }
-                  />
-                )}
-                {!data.cancelled && data.partiallyCancelled && (() => {
-                  const cancelledStops = data.stops.filter((s) => s.cancelledAtStop && s.slot !== 'PP' && s.slot !== 'OPPP')
-                  const names = cancelledStops.map((s) => {
-                    const i = data.stops.findIndex((x) => x.tpl === s.tpl && x.slot === s.slot)
-                    return i >= 0 ? displayStopName(data.stops, i, fallbackStopNameLookup) : (s.name || s.tpl)
-                  }).filter(Boolean)
-                  const summary = names.length === 0
-                    ? 'Some calling points are not being served.'
-                    : names.length <= 4
-                      ? `Not calling at: ${names.join(', ')}.`
-                      : `Not calling at ${names.length} stops including ${names.slice(0, 3).join(', ')}.`
-                  const distinctReason = cancelledStops.find((s) => s.cancelReasonAtStop)?.cancelReasonAtStop?.reason
-                  return (
-                    <TextCard
-                      static
-                      state="redAction"
-                      title="Partial cancellation"
-                      description={[summary, distinctReason].filter(Boolean).join(' ')}
-                    />
-                  )
-                })()}
-                {!data.cancelled && !data.partiallyCancelled && data.delayReason && (
-                  <TextCard
-                    static
-                    state="accent"
-                    title="Delay reason"
-                    description={`${data.delayReason.reason}${data.delayReason.code ? ` (code ${data.delayReason.code})` : ''}`}
-                  />
-                )}
-                {data.alerts?.map((al) => (
-                  <TextCard
-                    key={al.id}
-                    static
-                    state="accent"
-                    title={al.source ? `Alert · ${al.source}` : 'Alert'}
-                    description={al.text}
-                  />
-                ))}
-                {(splitWorking?.associations || data.associations || [])
-                  .filter((a) => a.category !== 'NP' && isPassengerHeadcode(a.otherTrainId))
-                  .map((a) => {
-                    const id = a.otherRid || a.otherUid
-                    const href = id
-                      ? serviceHref({
-                          id,
-                          date: data.ssd || date,
-                          section: 'calling',
-                          mode: viewMode,
-                        })
-                      : undefined
-                    const kind = a.category === 'VV' ? 'Divides' : a.category === 'JJ' ? 'Joins' : 'Portion'
-                    return (
-                      <TextCard
-                        key={`${a.category}-${a.otherRid}-${a.tiploc}`}
-                        title={`${kind} · ${a.otherTrainId || a.otherUid || 'other portion'}`}
-                        description={describeAssociation(a)}
-                        state={a.isCancelled ? 'redAction' : 'default'}
-                        to={href}
-                        ariaLabel={`Open associated service ${a.otherTrainId || a.otherRid}`}
-                      />
-                    )
-                  })}
-                <ServiceSchedulePanel
-                  data={data}
-                  operator={formatLmTocName(
-                    data.tocName,
-                    data.toc,
-                    data.stops[0]?.crs,
-                    data.stops[data.stops.length - 1]?.crs,
-                  )}
-                />
-              </div>
+              {renderServiceOverview()}
             </SidebarDropdownSection>
           )}
         </>
@@ -584,11 +599,29 @@ const ServiceDetailPage: React.FC = () => {
             >
               Back
             </BUTWideButton>
-            <ServiceDetailKey />
+            <ServiceDetailKey disabled={!data} />
+            <span className="svc-overview-launch">
+              <BUTWideButton
+                type="button"
+                width="hug"
+                instantAction
+                disabled={!data}
+                icon={<Info size={16} weight="bold" aria-hidden />}
+                ariaLabel="Overview"
+                pressed={overviewOpen}
+                onClick={() => setOverviewOpen(true)}
+              >
+                Overview
+              </BUTWideButton>
+              <SidePane open={overviewOpen && Boolean(data)} title="Overview" onClose={() => setOverviewOpen(false)}>
+                {renderServiceOverview()}
+              </SidePane>
+            </span>
           </div>
           <ServiceViewModeToggle
             className="svc-viewmode-switch--header"
             viewMode={viewMode}
+            disabled={!data}
             onChange={selectViewMode}
           />
         </div>

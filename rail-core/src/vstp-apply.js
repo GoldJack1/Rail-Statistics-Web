@@ -5,6 +5,7 @@ import { addCalendarDays } from "./calendar-day.js";
 import { openDayDb, operatingDayYmd } from "./db.js";
 import { overlayOneWorking, workingFromScheduleJson } from "./cif-overlay.js";
 import { nrodCandidateDays, writeDaysForRid } from "./nrod-write-days.js";
+import { linkReinstatementForUid } from "./reinstatement.js";
 
 export function vstpMessages(raw) {
   if (raw == null) return [];
@@ -76,7 +77,10 @@ export function applyVstpFrame(dataDir, message, ymd = operatingDayYmd()) {
   let applied = false;
   for (const writeDay of days) {
     const out = overlayOneWorking(dataDir, writeDay, working);
-    if (out.services > 0 || out.inserted > 0) applied = true;
+    if (out.services > 0 || out.inserted > 0) {
+      applied = true;
+      linkReinstatementForUid(dataDir, writeDay, working.uid);
+    }
   }
   return applied;
 }

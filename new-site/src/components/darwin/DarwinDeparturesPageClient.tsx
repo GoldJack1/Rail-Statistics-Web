@@ -478,8 +478,14 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   const [historyTimeDraft, setHistoryTimeDraft] = useState<string>(historyTime || initialLiveWall.time)
   const [showLiveTime, setShowLiveTime] = useState(!historyDate && !historyTime)
   const [openPane, setOpenPane] = useState<'filters' | 'view' | 'date' | 'time' | 'lookup' | null>(null)
+  const [stackedPicker, setStackedPicker] = useState<'date' | 'time' | null>(null)
   const [isMobileLayout, setIsMobileLayout] = useState(false)
   const pickerDirtyRef = useRef(false)
+  const stackedPickerRef = useRef(stackedPicker)
+  stackedPickerRef.current = stackedPicker
+  const stackedShownRef = useRef<'date' | 'time'>('date')
+  if (stackedPicker) stackedShownRef.current = stackedPicker
+  const stackedShown = stackedPicker ?? stackedShownRef.current
   const todayIsoDate = getCurrentRailwayDayIsoUk()
   const minLookbackDateIso = addDaysIsoDate(todayIsoDate, -1)
   const [maxFutureDateIso, setMaxFutureDateIso] = useState(() => {
@@ -885,7 +891,11 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     const sync = () => {
       const mobile = media.matches
       setIsMobileLayout(mobile)
-      if (!mobile) setOpenPane((current) => (current === 'lookup' ? null : current))
+      if (!mobile) {
+        const picker = stackedPickerRef.current
+        setStackedPicker(null)
+        setOpenPane((current) => (picker ? picker : current === 'lookup' ? null : current))
+      }
     }
     sync()
     media.addEventListener('change', sync)
@@ -893,11 +903,38 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   }, [])
 
   const requestPane = (next: 'filters' | 'view' | 'date' | 'time' | 'lookup' | null) => {
-    if ((openPane === 'date' || openPane === 'time') && next !== openPane && pickerDirtyRef.current) {
+    const activePicker = stackedPickerRef.current ?? (openPane === 'date' || openPane === 'time' ? openPane : null)
+    if (activePicker && next !== activePicker && pickerDirtyRef.current) {
       if (!applyDateTimeFilter()) return
     }
-    if (next !== 'date' && next !== 'time') pickerDirtyRef.current = false
+    if (next !== 'date' && next !== 'time') {
+      pickerDirtyRef.current = false
+      setStackedPicker(null)
+    }
     setOpenPane(next)
+  }
+
+  const openDateTimePane = (which: 'date' | 'time') => {
+    if (isMobileLayout && openPane === 'lookup') {
+      setStackedPicker(which)
+      return
+    }
+    requestPane(which)
+  }
+
+  const closeStackedPicker = () => {
+    if (pickerDirtyRef.current && !applyDateTimeFilter()) return
+    pickerDirtyRef.current = false
+    setStackedPicker(null)
+  }
+
+  const closeDateTimePane = () => {
+    pickerDirtyRef.current = false
+    if (stackedPickerRef.current) {
+      setStackedPicker(null)
+      return
+    }
+    setOpenPane((current) => (current === 'date' || current === 'time' ? null : current))
   }
 
   const markPickerDirty = () => {
@@ -922,6 +959,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       next.delete('date')
       next.delete('at')
     })
+    closeDateTimePane()
   }
 
   const goToToday = () => {
@@ -935,7 +973,8 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     }
     pickerDirtyRef.current = false
     setShowLiveTime(false)
-    applyDateTimeFilter(now.date, historyTimeDraft)
+    if (!applyDateTimeFilter(now.date, historyTimeDraft)) return
+    closeDateTimePane()
   }
 
   const lookupControls = (
@@ -953,9 +992,9 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
               instantAction
               colorVariant="primary"
               className="dep-datetime-bar__time"
-              pressed={openPane === 'time'}
+              pressed={openPane === 'time' || stackedPicker === 'time'}
               ariaLabel={showLiveTime ? 'Time Now' : `Time ${historyTimeDraft}`}
-              onClick={() => requestPane('time')}
+              onClick={() => openDateTimePane('time')}
             >
               {showLiveTime ? 'Now' : historyTimeDraft}
             </BUTBaseButton>
@@ -967,16 +1006,16 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
               instantAction
               colorVariant="primary"
               className="dep-datetime-bar__date"
-              pressed={openPane === 'date'}
+              pressed={openPane === 'date' || stackedPicker === 'date'}
               ariaLabel={`Date ${formatWindowDate(historyDateDraft)}`}
-              onClick={() => requestPane('date')}
+              onClick={() => openDateTimePane('date')}
             >
               {formatBarDate(historyDateDraft)}
             </BUTBaseButton>
           </div>
         </div>
         </div>
-        {historyDateError && openPane !== 'date' && openPane !== 'time' && (
+        {historyDateError && openPane !== 'date' && openPane !== 'time' && !stackedPicker && (
           <p className="dep-history-inline-error" role="alert">{historyDateError}</p>
         )}
       </div>
@@ -1094,6 +1133,67 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       )}
       </div>
     </div>
+  )
+
+  const datePickerPane = (
+    <div className="dep-picker-pane">
+      <BoardDatePicker
+        value={historyDateDraft}
+        min={earliestBoardDate}
+        max={maxFutureDateIso}
+        isDateEnabled={isBoardDateEnabled}
+        onChange={(iso) => {
+          markPickerDirty()
+          setShowLiveTime(false)
+          setHistoryDateDraft(iso)
+          if (historyDateError) setHistoryDateError(null)
+        }}
+      />
+      {historyDateError && (
+        <p className="dep-history-inline-error" role="alert">{historyDateError}</p>
+      )}
+    </div>
+  )
+
+  const timePickerPane = (
+    <div className="dep-picker-pane">
+      <BoardTimePicker
+        value={historyTimeDraft}
+        onChange={(hhmm) => {
+          markPickerDirty()
+          setShowLiveTime(false)
+          setHistoryTimeDraft(hhmm)
+          if (historyDateError) setHistoryDateError(null)
+        }}
+      />
+      {historyDateError && (
+        <p className="dep-history-inline-error" role="alert">{historyDateError}</p>
+      )}
+    </div>
+  )
+
+  const datePaneFooter = (
+    <BUTWideButton
+      width="fill"
+      instantAction
+      colorVariant="primary"
+      state={historyDateDraft === getLiveNowPartsUk().date ? 'pressed' : 'active'}
+      onClick={goToToday}
+    >
+      Today
+    </BUTWideButton>
+  )
+
+  const timePaneFooter = (
+    <BUTWideButton
+      width="fill"
+      instantAction
+      colorVariant="primary"
+      state={showLiveTime ? 'pressed' : 'active'}
+      onClick={resetToLiveNow}
+    >
+      Live now
+    </BUTWideButton>
   )
 
   return (
@@ -1255,29 +1355,10 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       </div>
       <SidePane
         open={openPane !== null}
+        closeOnEscape={stackedPicker === null}
         title={openPane === 'view' ? 'View settings' : openPane === 'date' ? 'Date' : openPane === 'time' ? 'Time' : openPane === 'lookup' ? 'Search' : 'Filters'}
         onClose={() => requestPane(null)}
-        footer={openPane === 'time' ? (
-          <BUTWideButton
-            width="fill"
-            instantAction
-            colorVariant="primary"
-            state={showLiveTime ? 'pressed' : 'active'}
-            onClick={resetToLiveNow}
-          >
-            Live now
-          </BUTWideButton>
-        ) : openPane === 'date' ? (
-          <BUTWideButton
-            width="fill"
-            instantAction
-            colorVariant="primary"
-            state={historyDateDraft === getLiveNowPartsUk().date ? 'pressed' : 'active'}
-            onClick={goToToday}
-          >
-            Today
-          </BUTWideButton>
-        ) : null}
+        footer={openPane === 'time' ? timePaneFooter : openPane === 'date' ? datePaneFooter : null}
       >
         {openPane === 'lookup' ? lookupControls : openPane === 'view' ? (
         <div className="dep-view-settings">
@@ -1318,40 +1399,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
             />
           </div>
         </div>
-        ) : openPane === 'date' ? (
-        <div className="dep-picker-pane">
-          <BoardDatePicker
-            value={historyDateDraft}
-            min={earliestBoardDate}
-            max={maxFutureDateIso}
-            isDateEnabled={isBoardDateEnabled}
-            onChange={(iso) => {
-              markPickerDirty()
-              setShowLiveTime(false)
-              setHistoryDateDraft(iso)
-              if (historyDateError) setHistoryDateError(null)
-            }}
-          />
-          {historyDateError && (
-            <p className="dep-history-inline-error" role="alert">{historyDateError}</p>
-          )}
-        </div>
-        ) : openPane === 'time' ? (
-        <div className="dep-picker-pane">
-          <BoardTimePicker
-            value={historyTimeDraft}
-            onChange={(hhmm) => {
-              markPickerDirty()
-              setShowLiveTime(false)
-              setHistoryTimeDraft(hhmm)
-              if (historyDateError) setHistoryDateError(null)
-            }}
-          />
-          {historyDateError && (
-            <p className="dep-history-inline-error" role="alert">{historyDateError}</p>
-          )}
-        </div>
-        ) : (
+        ) : openPane === 'date' ? datePickerPane : openPane === 'time' ? timePickerPane : (
         <div className="dep-filters-panel">
           <div className="dep-control-group">
             <span className="dep-filter-label">Window</span>
@@ -1499,6 +1547,15 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
           </div>
         </div>
         )}
+      </SidePane>
+      <SidePane
+        elevated
+        open={stackedPicker !== null}
+        title={stackedShown === 'time' ? 'Time' : 'Date'}
+        onClose={closeStackedPicker}
+        footer={stackedShown === 'time' ? timePaneFooter : datePaneFooter}
+      >
+        {stackedShown === 'time' ? timePickerPane : datePickerPane}
       </SidePane>
     </div>
   )

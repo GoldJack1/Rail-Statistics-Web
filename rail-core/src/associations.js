@@ -565,13 +565,25 @@ export function inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, s
 
 function destOfService(db, svc, stationName) {
   if (!db) return tidyStationName(svc.destination_name) || null;
-  const row = db
-    .prepare(
-      `SELECT crs, tiploc FROM calls WHERE rid = ? AND IFNULL(is_passing,0)=0
-       ORDER BY seq DESC LIMIT 1`,
-    )
-    .get(svc.rid);
-  return stationName?.(row?.crs, row?.tiploc) || tidyStationName(svc.destination_name) || row?.tiploc || null;
+  const crs = String(svc.destination_crs || "").toUpperCase();
+  const row = crs
+    ? db
+        .prepare(
+          `SELECT crs, tiploc FROM calls WHERE rid = ? AND IFNULL(is_passing,0)=0
+           AND UPPER(IFNULL(crs,'')) = ?
+           ORDER BY seq DESC LIMIT 1`,
+        )
+        .get(svc.rid, crs)
+    : null;
+  const last =
+    row ||
+    db
+      .prepare(
+        `SELECT crs, tiploc FROM calls WHERE rid = ? AND IFNULL(is_passing,0)=0
+         ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(svc.rid);
+  return stationName?.(last?.crs, last?.tiploc) || tidyStationName(svc.destination_name) || last?.tiploc || null;
 }
 
 function originOfService(db, svc, stationName) {

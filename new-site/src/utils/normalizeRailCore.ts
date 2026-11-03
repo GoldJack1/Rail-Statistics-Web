@@ -42,6 +42,22 @@ function liveFromCall(c: RailCoreCall): { liveTime: string | null; liveKind: Ser
   return { liveTime: null, liveKind: 'scheduled' }
 }
 
+/** Turn a stored `TRUST:0002:I8` reason into text plus the cancellation code. */
+export function presentCancellation<T extends { source: string; reason: string; code?: string } | null | undefined>(
+  reason: T,
+): T {
+  if (!reason?.reason) return reason
+  const raw = reason.reason.trim()
+  const match = /^TRUST:0002(?::([^@\s]+))?(?:@\S+)?$/.exec(raw)
+  if (!match) return reason
+  const code = reason.code || match[1] || undefined
+  return {
+    ...reason,
+    reason: raw.includes('@') ? 'Cancelled en route' : 'Cancelled',
+    ...(code ? { code } : {}),
+  }
+}
+
 function stopWasRecorded(stop: Pick<ServiceStop, 'ata' | 'atd' | 'atp'>): boolean {
   return [stop.ata, stop.atd, stop.atp].some((value) => String(value || '').trim().length > 0)
 }
@@ -52,15 +68,21 @@ function stopWasRecorded(stop: Pick<ServiceStop, 'ata' | 'atd' | 'atp'>): boolea
  * this itself; this also covers payloads that only set `cancelled`.
  */
 export function applyWholeServiceCancellation(detail: ServiceDetail): ServiceDetail {
-  if (!detail?.cancelled || !detail.stops?.length) return detail
+  if (!detail) return detail
+  const cancellation = presentCancellation(detail.cancellation)
+  const withReason = cancellation === detail.cancellation ? detail : { ...detail, cancellation }
+  if (!withReason.cancelled || !withReason.stops?.length) return withReason
   return {
-    ...detail,
-    stops: detail.stops.map((stop) => {
-      if (stop.cancelledAtStop || stopWasRecorded(stop)) return stop
+    ...withReason,
+    stops: withReason.stops.map((stop) => {
+      const cancelReasonAtStop = presentCancellation(stop.cancelReasonAtStop || withReason.cancellation)
+      if (stop.cancelledAtStop || stopWasRecorded(stop)) {
+        return cancelReasonAtStop === stop.cancelReasonAtStop ? stop : { ...stop, cancelReasonAtStop }
+      }
       return {
         ...stop,
         cancelledAtStop: true,
-        cancelReasonAtStop: stop.cancelReasonAtStop || detail.cancellation,
+        cancelReasonAtStop,
       }
     }),
   }
@@ -341,6 +363,10 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
     ...detail,
     originName: publicStationNameOrNull(detail.originName),
     destinationName: publicStationNameOrNull(detail.destinationName),
-    stops: detail.stops.map(hydrateStopLive),
+    cancellation: presentCancellation(detail.cancellation),
+    stops: detail.stops.map((stop) => ({
+      ...hydrateStopLive(stop),
+      cancelReasonAtStop: presentCancellation(stop.cancelReasonAtStop),
+    })),
   })
 }

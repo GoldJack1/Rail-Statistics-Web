@@ -3,9 +3,42 @@ export function callWasRecorded(call) {
   return [call?.ata, call?.atd, call?.atp].some((value) => String(value || "").trim());
 }
 
+/** `TRUST:0002:I8` is a whole-service cancel. `TRUST:0002:I8@YORK` starts at that TIPLOC. */
+export function parseTrustCancel(reason) {
+  const match = /^TRUST:0002(?::([^@]+))?(?:@(.+))?$/.exec(String(reason || "").trim());
+  if (!match) return null;
+  return { code: match[1] || "", tiploc: match[2] ? match[2].toUpperCase() : "" };
+}
+
+export function trustCancelReason(code, tiploc) {
+  const base = `TRUST:0002${code ? `:${String(code).trim()}` : ""}`;
+  return tiploc ? `${base}@${String(tiploc).toUpperCase()}` : base;
+}
+
 export function cancellationReason(reason) {
   const text = String(reason || "").trim();
-  return { source: "ts", reason: text || "Cancelled" };
+  const trust = parseTrustCancel(text);
+  if (!trust) return { source: "ts", reason: text || "Cancelled" };
+  const out = { source: "ts", reason: trust.tiploc ? "Cancelled en route" : "Cancelled" };
+  if (trust.code) out.code = trust.code;
+  return out;
+}
+
+/**
+ * A later Darwin timetable update does not say the train is running again.
+ * Keep the TRUST cancellation until a TRUST reinstatement clears it.
+ */
+export function mergeStoredCancel(existing, incoming) {
+  const incomingReason = incoming?.cancel_reason ?? null;
+  const trust = parseTrustCancel(existing?.cancel_reason);
+  const silentClear = !Number(incoming?.cancelled) && !String(incomingReason || "").trim();
+  if (existing && trust && silentClear) {
+    return {
+      cancelled: Number(existing.cancelled) ? 1 : 0,
+      cancel_reason: existing.cancel_reason,
+    };
+  }
+  return { cancelled: incoming?.cancelled ? 1 : 0, cancel_reason: incomingReason };
 }
 
 /**

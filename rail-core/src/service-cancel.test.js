@@ -7,7 +7,7 @@ test("a cancelled service marks only calls that have not been recorded", () => {
   const ahead = cancellationForCall({ etd: "13:28", cancelled: 0 }, 1, "TRUST:0002:I8");
   assert.equal(ran.cancelledAtStop, false);
   assert.equal(ahead.cancelledAtStop, true);
-  assert.deepEqual(ahead.cancelReasonAtStop, { source: "ts", reason: "TRUST:0002:I8" });
+  assert.deepEqual(ahead.cancelReasonAtStop, { source: "ts", reason: "Cancelled", code: "I8" });
 });
 
 test("a running service stays clear unless the call itself is cancelled", () => {
@@ -27,5 +27,16 @@ test("partial cancellation is only set when the service itself is still running"
   const whole = serviceCancellationFields({ cancelled: 1, cancel_reason: "TRUST:0002:I8" }, stops);
   assert.equal(whole.cancelled, true);
   assert.equal(whole.partiallyCancelled, false);
-  assert.equal(whole.cancellation.reason, "TRUST:0002:I8");
+  assert.equal(whole.cancellation.reason, "Cancelled");
+  assert.equal(whole.cancellation.code, "I8");
+});
+
+test("an en-route TRUST reason names the code without hiding the stored location", () => {
+  const shown = serviceCancellationFields(
+    { cancelled: 0, cancel_reason: "TRUST:0002:I8@NTR" },
+    [{ slot: "IP", cancelledAtStop: true }],
+  );
+  assert.equal(shown.cancelled, false);
+  assert.equal(shown.partiallyCancelled, true);
+  assert.equal(shown.cancellation, null);
 });

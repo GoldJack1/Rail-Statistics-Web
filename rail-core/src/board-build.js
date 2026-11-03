@@ -20,6 +20,7 @@ import {
   mergeAssociations,
 } from "./associations.js";
 import { callOnBoardDate, isOvernightSleeperJourney, londonInstant, ridVisibleOnBoard } from "./calendar-day.js";
+import { cancellationReason } from "./service-cancel.js";
 
 const UK_RAIL_ROLLOVER_MINUTES = 2 * 60;
 const LIVE_ACTUAL_HOLD_MS = 30_000;
@@ -450,7 +451,7 @@ export function buildStationBoard({
     const unitIds = consistRow
       ? unitIdsAtBoardCall(consistRow, { tiploc: sourceTpl, hhmm: schedClock, movement })
       : [];
-    const cancelInfo = r.s_cancelled || r.cancelled ? { source: "ts", reason: r.cancel_reason || "Cancelled" } : null;
+    const cancelInfo = r.s_cancelled || r.cancelled ? cancellationReason(r.cancel_reason) : null;
     const plat = platformText(r.platform);
     const isPassing = slot === "PP";
     if (passengersOnly && isPassing) continue;

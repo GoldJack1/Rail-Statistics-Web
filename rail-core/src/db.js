@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sortCallsByJourneyTime, publicJourneyEnds } from "./journey-order.js";
+import { mergeStoredCancel } from "./service-cancel.js";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const SCHEMA = readFileSync(join(ROOT, "schema-day.sql"), "utf8");
@@ -336,6 +337,9 @@ export function liveKind({ ata, atd, atp, eta, etd, etp }) {
 
 export function upsertService(db, row, opts = {}) {
   const overlay = Boolean(opts.overlay);
+  const existing = db.prepare(`SELECT cancelled, cancel_reason FROM services WHERE rid = ?`).get(row.rid);
+  const cancel = mergeStoredCancel(existing, row);
+  const stored = { ...row, cancelled: cancel.cancelled, cancel_reason: cancel.cancel_reason };
   db.prepare(
     `INSERT INTO services (rid, uid, train_id, rs_id, toc, operator_name, origin_crs, origin_name,
       destination_crs, destination_name, via, service_type, cancelled, cancel_reason, delay_reason,
@@ -363,7 +367,7 @@ export function upsertService(db, row, opts = {}) {
       power_type=COALESCE(excluded.power_type, services.power_type),
       timing_load=COALESCE(excluded.timing_load, services.timing_load),
       updated_at=excluded.updated_at`
-  ).run({ ...row, formation: row.formation ?? null, power_type: row.power_type ?? null, timing_load: row.timing_load ?? null });
+  ).run({ ...stored, formation: stored.formation ?? null, power_type: stored.power_type ?? null, timing_load: stored.timing_load ?? null });
 }
 
 function bookedVisitClock(row) {
@@ -461,6 +465,10 @@ export function upsertCall(db, row, opts = {}) {
     line: row.line ?? null,
     updated_at: row.updated_at ?? Date.now(),
   };
+  if (!payload.cancelled && existing) {
+    const prior = db.prepare(`SELECT cancelled FROM calls WHERE rid = ? AND seq = ?`).get(payload.rid, payload.seq);
+    if (Number(prior?.cancelled)) payload.cancelled = 1;
+  }
   if (existing) {
     if (opts.cifMerge) {
       db.prepare(

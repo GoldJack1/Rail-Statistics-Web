@@ -187,6 +187,7 @@ describe('normalizeRailCore', () => {
     })
     expect(detail.stops[0].cancelledAtStop).toBe(false)
     expect(detail.stops[1].cancelledAtStop).toBe(true)
-    expect(detail.stops[1].cancelReasonAtStop?.reason).toBe('TRUST:0002:I8')
+    expect(detail.stops[1].cancelReasonAtStop?.reason).toBe('Cancelled')
+    expect(detail.stops[1].cancelReasonAtStop?.code).toBe('I8')
   })
 })

@@ -47,7 +47,7 @@
     max-width: none;
     margin-inline: calc(-1 * var(--svc-pattern-bleed));
     margin-top: calc(-1 * var(--space-xl) - (var(--stations-content-inset, var(--space-lg)) / 4) - 1px);
-    margin-bottom: calc(-1 * var(--space-xl) - (var(--stations-content-inset, var(--space-lg)) / 4) - 1px);
+    margin-bottom: 0;
     padding: 0;
     gap: 0;
     background: transparent;
@@ -69,7 +69,8 @@
     width: calc(100% + (2 * var(--stations-panel-text-inset, var(--space-2xl))));
     max-width: none;
     margin-inline: calc(-1 * var(--stations-panel-text-inset, var(--space-2xl)));
-    margin-block: calc(-1 * var(--stations-panel-text-inset, var(--space-2xl)) - 1px);
+    margin-top: calc(-1 * var(--stations-panel-text-inset, var(--space-2xl)) - 1px);
+    margin-bottom: 0;
     padding: 0;
     gap: 0;
   }
@@ -82,12 +83,6 @@
   }
 }
 
-/* The calling card bleeds upward into the page padding with a negative bottom
-   margin. That pulls the source note up over a previous or next service bar. */
-.darwin-details-page .svc-pattern-card:has(.svc-working-bar),
-.darwin-details-page .svc-pattern-card.modal-section:has(.svc-working-bar) {
-  margin-bottom: 0;
-}
 
 .darwin-details-page .modal-section {
   display: flex;
@@ -305,6 +300,10 @@
   color: var(--text-secondary);
   line-height: 1.3;
   flex: 0 0 auto;
+}
+
+.svc-viewmode-switch--disabled .svc-viewmode-switch__label {
+  color: var(--text-disabled);
 }
 
 .svc-viewmode-switch__spacer {

@@ -1,5 +1,7 @@
 import { hhmm, liveKind, openCatalog, openDayDb, operatingDayYmd, upsertCall } from "./db.js";
 import { nrodCandidateDays, writeDaysForRid } from "./nrod-write-days.js";
+import { clearReinstatementLinks, linkReinstatement, refreshEnRouteFlag } from "./reinstatement.js";
+import { trustCancelReason } from "./service-cancel.js";
 import { headcodeFromTrustTrainId, tocFromTrustId } from "./toc-ids.js";
 
 function movementTimes(body) {
@@ -194,22 +196,64 @@ export function applyTrustMovement(dataDir, body, ymd = operatingDayYmd(), opts 
   }
 }
 
-function applyCancel(db, rid, body) {
+function callWasReached(call) {
+  return [call?.ata, call?.atd, call?.atp].some((value) => String(value || "").trim());
+}
+
+/**
+ * EN ROUTE cancels the journey from the cancel location forward.
+ * A call already reached stays, including an arrival at the cancel location
+ * with no departure. Every later call that has not been recorded is cancelled.
+ * Returns whether a public call exists before that location.
+ */
+function markCallsCancelledFrom(db, rid, tiploc) {
+  const calls = db
+    .prepare(`SELECT seq, tiploc, is_passing, ata, atd, atp FROM calls WHERE rid = ? ORDER BY seq`)
+    .all(rid);
+  const idx = calls.findIndex((call) => String(call.tiploc).toUpperCase() === String(tiploc).toUpperCase());
+  if (idx < 0) return { found: false, publicBefore: false };
+  const publicBefore = calls.slice(0, idx).some((call) => !Number(call.is_passing));
+  const from = callWasReached(calls[idx]) ? idx + 1 : idx;
+  for (const call of calls.slice(from)) {
+    if (callWasReached(call)) continue;
+    db.prepare(`UPDATE calls SET cancelled = 1 WHERE rid = ? AND seq = ?`).run(rid, call.seq);
+  }
+  return { found: true, publicBefore };
+}
+
+function applyCancel(db, rid, body, loc) {
   const svc = db.prepare(`SELECT cancelled, cancel_reason FROM services WHERE rid = ?`).get(rid);
   if (!svc) return false;
-  if (Number(svc.cancelled)) return true;
+  if (Number(svc.cancelled) && !String(svc.cancel_reason || "").startsWith("TRUST:")) return true;
   const code = body.canx_reason_code || body.cancel_reason_code || body.reason_code || "";
-  const reason = `TRUST:0002${code ? `:${code}` : ""}`;
-  db.prepare(`UPDATE services SET cancelled = 1, cancel_reason = ? WHERE rid = ?`).run(reason, rid);
+  const enRoute = String(body.canx_type || "").toUpperCase().replace(/\s+/g, " ").includes("EN ROUTE");
+  const tiploc = enRoute ? loc?.tiploc : "";
+  if (tiploc) {
+    const marked = markCallsCancelledFrom(db, rid, tiploc);
+    if (marked.found && marked.publicBefore) {
+      db.prepare(`UPDATE services SET cancelled = 0, cancel_reason = ? WHERE rid = ?`).run(
+        trustCancelReason(code, tiploc),
+        rid,
+      );
+      refreshEnRouteFlag(db);
+      linkReinstatement(db, rid);
+      return true;
+    }
+  }
+  db.prepare(`UPDATE services SET cancelled = 1, cancel_reason = ? WHERE rid = ?`).run(trustCancelReason(code), rid);
   return true;
 }
 
 function applyReinstate(db, rid) {
   const svc = db.prepare(`SELECT cancelled, cancel_reason FROM services WHERE rid = ?`).get(rid);
-  if (!svc || !Number(svc.cancelled)) return true;
+  if (!svc) return true;
   const reason = String(svc.cancel_reason || "");
   if (!reason.startsWith("TRUST:")) return true;
+  if (!Number(svc.cancelled) && !reason.includes("@")) return true;
+  clearReinstatementLinks(db, rid);
   db.prepare(`UPDATE services SET cancelled = 0, cancel_reason = NULL WHERE rid = ?`).run(rid);
+  db.prepare(`UPDATE calls SET cancelled = 0 WHERE rid = ?`).run(rid);
+  refreshEnRouteFlag(db);
   return true;
 }
 
@@ -290,6 +334,65 @@ function forWriteDays(dataDir, operatingDay, rid, fn) {
   return days;
 }
 
+export function healTrustCancellations(db, dataDir) {
+  const events = db
+    .prepare(
+      `SELECT train_id, event_type, json, received_at FROM trust_events
+       WHERE event_type IN ('0002', '0005') ORDER BY received_at`,
+    )
+    .all();
+  const latest = new Map();
+  for (const event of events) {
+    if (!event.train_id) continue;
+    const prev = latest.get(event.train_id);
+    if (!prev || Number(event.received_at) >= Number(prev.received_at)) latest.set(event.train_id, event);
+  }
+  for (const event of latest.values()) {
+    let message = null;
+    try {
+      message = event.json ? JSON.parse(event.json) : null;
+    } catch {
+      continue;
+    }
+    const body = { ...(message?.body || {}), train_id: event.train_id };
+    const mapped = db.prepare(`SELECT uid FROM trust_trains WHERE train_id = ?`).get(event.train_id);
+    const uid = body.train_uid || body.uid || mapped?.uid || null;
+    const loc = corpusByStanox(dataDir, body.loc_stanox);
+    const rid = resolveRid(db, { ...body, uid }, loc?.tiploc);
+    if (!rid) continue;
+    if (event.event_type === "0005") {
+      applyReinstate(db, rid);
+      continue;
+    }
+    const svc = db.prepare(`SELECT cancelled, cancel_reason FROM services WHERE rid = ?`).get(rid);
+    if (!svc) continue;
+    const code = body.canx_reason_code || body.cancel_reason_code || body.reason_code || "";
+    const enRoute = String(body.canx_type || "").toUpperCase().includes("EN ROUTE") && loc?.tiploc;
+    const expected = trustCancelReason(code, enRoute ? loc.tiploc : "");
+    if (String(svc.cancel_reason || "") === expected) {
+      if (enRoute) linkReinstatement(db, rid);
+      continue;
+    }
+    if (!enRoute && String(svc.cancel_reason || "").startsWith("TRUST:0002") && Number(svc.cancelled)) continue;
+    applyCancel(db, rid, body, loc);
+  }
+}
+
+const healedAt = new Map();
+
+function maybeHealTrustCancellations(dataDir, ymd) {
+  const key = `${dataDir}|${ymd}`;
+  const now = Date.now();
+  if (now - (healedAt.get(key) || 0) < 60_000) return;
+  healedAt.set(key, now);
+  const db = openDayDb(dataDir, ymd);
+  try {
+    healTrustCancellations(db, dataDir);
+  } finally {
+    db.close();
+  }
+}
+
 export function applyTrustFrame(dataDir, message, ymd = operatingDayYmd(), opts = {}) {
   const header = message?.header || {};
   const body = { ...(message?.body || message || {}), msg_type: header.msg_type };
@@ -315,7 +418,7 @@ export function applyTrustFrame(dataDir, message, ymd = operatingDayYmd(), opts 
       return;
     }
     if (type === "0002") {
-      if (rid) applyCancel(db, rid, body);
+      if (rid) applyCancel(db, rid, body, loc);
       return;
     }
     if (type === "0005") {
@@ -335,6 +438,7 @@ export function applyTrustFrame(dataDir, message, ymd = operatingDayYmd(), opts 
     }
   });
   if (type === "0001" || type === "0002" || type === "0003" || type === "0005" || type === "0006" || type === "0007") {
+    maybeHealTrustCancellations(dataDir, ymd);
     return true;
   }
   if (body.event_type) return Boolean(rid);

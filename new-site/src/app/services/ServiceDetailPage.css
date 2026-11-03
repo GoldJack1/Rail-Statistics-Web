@@ -1121,6 +1121,14 @@
   padding: var(--space-md);
 }
 
+.svc-overview-launch {
+  display: none;
+}
+
+.svc-side-pane .svc-overview-dropdown__body {
+  padding: 0;
+}
+
 .svc-overview-side {
   display: flex;
   flex-direction: column;
@@ -1240,6 +1248,30 @@
 }
 
 @media (max-width: 1023px) {
+  .service-detail-header.rs-page-top-header {
+    padding-bottom: var(--space-sm);
+  }
+
+  .service-detail-header .rs-page-top-header__actions-row {
+    margin-top: var(--space-md);
+  }
+
+  .service-detail-header .service-detail-header-actions {
+    gap: 10px;
+  }
+
+  .service-detail-header-actions .station-details-header-actions__controls {
+    flex-wrap: wrap;
+  }
+
+  .service-detail-layout .svc-overview-dropdown {
+    display: none;
+  }
+
+  .svc-overview-launch {
+    display: contents;
+  }
+
   .service-detail-layout .station-details-mobile-sections.account-mobile-sections {
     display: none !important;
   }
@@ -1274,8 +1306,8 @@
   .service-detail-layout .svc-mobile-section-bar {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
-    padding: var(--space-md) var(--stations-panel-text-inset, var(--space-lg)) var(--space-sm);
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--stations-panel-text-inset, var(--space-lg)) var(--space-sm);
     box-sizing: border-box;
   }
 

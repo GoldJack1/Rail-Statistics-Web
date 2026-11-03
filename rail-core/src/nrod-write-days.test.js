@@ -8,7 +8,8 @@ import { cifImportDayYmds } from "./cif-schedule.js";
 import { openCatalog, openDayDb, upsertCall, upsertService } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
 import { applyTdFrame } from "./td-apply.js";
-import { applyTrustFrame } from "./trust-apply.js";
+import { applyTrustFrame, healTrustCancellations } from "./trust-apply.js";
+import { linkReinstatement } from "./reinstatement.js";
 import { applyVstpFrame } from "./vstp-apply.js";
 import { writeDaysForRid } from "./nrod-write-days.js";
 
@@ -206,6 +207,10 @@ test("TRUST 0002/0005/0006/0007 apply; 0004 is a no-op on calls", () => {
   assert.equal(cancelled.cancelled, 1);
   assert.match(cancelled.cancel_reason, /^TRUST:0002/);
   assert.equal(db.prepare(`SELECT atd FROM calls WHERE rid = ? AND tiploc = 'DWBY'`).get(TODAY_RID).atd, "15:56");
+  upsertService(db, svc(TODAY_RID, { cancelled: 0, cancel_reason: null }));
+  const kept = db.prepare(`SELECT cancelled, cancel_reason FROM services WHERE rid = ?`).get(TODAY_RID);
+  assert.equal(kept.cancelled, 1);
+  assert.match(kept.cancel_reason, /^TRUST:0002/);
   db.close();
 
   assert.equal(applyTrustFrame(dir, { header: { msg_type: "0005" }, body: { train_id: "201P76MZ04", train_uid: UID } }, TODAY), true);
@@ -257,6 +262,79 @@ test("TRUST 0002/0005/0006/0007 apply; 0004 is a no-op on calls", () => {
   assert.equal(mapped.uid, UID);
   assert.equal(db.prepare(`SELECT train_id FROM trust_trains WHERE train_id = '201P76MZ04'`).get(), undefined);
   assert.equal(db.prepare(`SELECT atd FROM calls WHERE rid = ? AND tiploc = 'HUDDS'`).get(TODAY_RID).atd?.length, 5);
+  db.close();
+});
+
+test("EN ROUTE cancel keeps the arrival, drops the rest, and links the new headcode", () => {
+  const dir = mkdtempSync(join(tmpdir(), "trust-enroute-"));
+  seedCorpus(dir);
+  const cat = openCatalog(dir);
+  cat.prepare(`INSERT INTO corpus (tiploc, stanox, crs, name) VALUES (?, ?, ?, ?)`).run("NLRTN", "15883", "NTR", "Northallerton");
+  cat.close();
+  const db0 = openDayDb(dir, TODAY);
+  upsertService(db0, svc(TODAY_RID, { origin_crs: "RCC", destination_crs: "MIA", headcode: "1P70", train_id: "1P70" }));
+  const call = (tiploc, crs, seq, extra) =>
+    upsertCall(db0, {
+      rid: TODAY_RID,
+      tiploc,
+      crs,
+      seq,
+      is_passing: 0,
+      cancelled: 0,
+      live_kind: "scheduled",
+      updated_at: 1,
+      ...extra,
+    });
+  call("REDCARC", "RCC", 0, { std: "10:58", atd: "10:58" });
+  call("NLRTN", "NTR", 1, { std: "11:48", sta: "11:47", ata: "12:30" });
+  call("YORK", "YRK", 2, { std: "12:20", sta: "12:18" });
+  call("MNCRIAP", "MIA", 3, { sta: "14:08" });
+  call("YORK", "YRK", 9, { std: "15:10", sta: "15:08" });
+  db0.close();
+
+  applyTrustFrame(dir, { header: { msg_type: "0001" }, body: { train_id: "151P70MH03", train_uid: UID, toc_id: "20" } }, TODAY);
+  assert.equal(
+    applyTrustFrame(
+      dir,
+      {
+        header: { msg_type: "0002" },
+        body: { train_id: "151P70MH03", canx_type: "EN ROUTE", canx_reason_code: "I8", loc_stanox: "15883" },
+      },
+      TODAY,
+    ),
+    true,
+  );
+
+  let db = openDayDb(dir, TODAY);
+  db.prepare(`UPDATE services SET cancelled = 0, cancel_reason = 'TRUST:0002:I8' WHERE rid = ?`).run(TODAY_RID);
+  db.prepare(`UPDATE calls SET cancelled = 0 WHERE rid = ?`).run(TODAY_RID);
+  healTrustCancellations(db, dir);
+  const row = db.prepare(`SELECT cancelled, cancel_reason FROM services WHERE rid = ?`).get(TODAY_RID);
+  assert.equal(row.cancelled, 0);
+  assert.equal(row.cancel_reason, "TRUST:0002:I8@NLRTN");
+  assert.equal(db.prepare(`SELECT cancelled FROM calls WHERE rid = ? AND tiploc = 'NLRTN'`).get(TODAY_RID).cancelled, 0);
+  assert.equal(db.prepare(`SELECT cancelled FROM calls WHERE rid = ? AND tiploc = 'YORK'`).get(TODAY_RID).cancelled, 1);
+  upsertService(db, svc(TODAY_RID, { cancelled: 0, cancel_reason: null, origin_crs: "RCC", destination_crs: "MIA", headcode: "1P70", train_id: "1P70" }));
+  upsertCall(db, { rid: TODAY_RID, tiploc: "YORK", crs: "YRK", seq: 2, cancelled: 0, std: "12:20" });
+  assert.equal(db.prepare(`SELECT cancel_reason FROM services WHERE rid = ?`).get(TODAY_RID).cancel_reason, "TRUST:0002:I8@NLRTN");
+  assert.equal(db.prepare(`SELECT cancelled FROM calls WHERE rid = ? AND tiploc = 'YORK'`).get(TODAY_RID).cancelled, 1);
+
+  const nextRid = "202610047936906";
+  upsertService(db, svc(nextRid, { uid: "O36906", train_id: "1Z70", headcode: "1Z70", origin_crs: "YRK", destination_crs: "MIA" }));
+  upsertCall(db, { rid: nextRid, tiploc: "YORK", crs: "YRK", seq: 0, std: "12:20", sta: "12:18", is_passing: 0, cancelled: 0 });
+  upsertCall(db, { rid: nextRid, tiploc: "MNCRIAP", crs: "MIA", seq: 1, sta: "14:08", is_passing: 0, cancelled: 0 });
+  assert.equal(linkReinstatement(db, nextRid), true);
+  const link = db.prepare(`SELECT category, tiploc, main_rid, assoc_rid FROM associations WHERE category = 'NP'`).get();
+  assert.equal(link.main_rid, TODAY_RID);
+  assert.equal(link.assoc_rid, nextRid);
+  assert.equal(link.tiploc, "YORK");
+  db.close();
+
+  applyTrustFrame(dir, { header: { msg_type: "0005" }, body: { train_id: "151P70MH03", train_uid: UID } }, TODAY);
+  db = openDayDb(dir, TODAY);
+  assert.equal(db.prepare(`SELECT cancel_reason FROM services WHERE rid = ?`).get(TODAY_RID).cancel_reason, null);
+  assert.equal(db.prepare(`SELECT cancelled FROM calls WHERE rid = ? AND tiploc = 'YORK'`).get(TODAY_RID).cancelled, 0);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM associations WHERE category = 'NP'`).get().n, 0);
   db.close();
 });
 

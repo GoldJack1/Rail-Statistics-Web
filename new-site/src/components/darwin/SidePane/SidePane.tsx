@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from '@phosphor-icons/react'
 
-import { BUTCircleButton } from '@/components/buttons'
+import { BUTCircleButton, BUTWideButton } from '@/components/buttons'
 import '@/components/models/StationModal/StationModal.css'
 
 import './SidePane.css'
@@ -17,12 +17,18 @@ export function SidePane({
   onClose,
   children,
   footer,
+  elevated = false,
+  closeOnEscape = true,
 }: {
   open: boolean
   title: string
   onClose: () => void
   children: ReactNode
   footer?: ReactNode
+  /** Draws above another open pane, for a picker opened from search. */
+  elevated?: boolean
+  /** When a pane is stacked on top, the one underneath should ignore Escape. */
+  closeOnEscape?: boolean
 }) {
   const [phase, setPhase] = useState<'closed' | 'opening' | 'open' | 'closing'>('closed')
   const titleId = useId()
@@ -64,25 +70,35 @@ export function SidePane({
 
   useEffect(() => {
     if (!shown) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [shown])
+
+  useEffect(() => {
+    if (!shown || !closeOnEscape) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onCloseRef.current()
     }
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
     document.addEventListener('keydown', onKeyDown)
-    if (entered) paneRef.current?.querySelector<HTMLButtonElement>('.modal-close')?.focus()
-    return () => {
-      document.body.style.overflow = previousOverflow
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [shown, entered])
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [shown, closeOnEscape])
+
+  useEffect(() => {
+    if (!entered) return
+    const mobile = window.matchMedia('(max-width: 639px)').matches
+    const selector = mobile ? '.svc-side-pane__dismiss' : '.modal-close'
+    paneRef.current?.querySelector<HTMLButtonElement>(selector)?.focus()
+  }, [entered])
 
   if (!shown || typeof document === 'undefined') return null
 
   const portalRoot = (document.fullscreenElement as HTMLElement | null) ?? document.body
 
   return createPortal(
-    <div className={`svc-side-pane__root${entered ? ' is-open' : ''}`}>
+    <div className={`svc-side-pane__root${entered ? ' is-open' : ''}${elevated ? ' svc-side-pane__root--elevated' : ''}`}>
       <div className="svc-side-pane__backdrop" onClick={() => onCloseRef.current()} />
       <div
         ref={paneRef}
@@ -106,7 +122,19 @@ export function SidePane({
           />
         </div>
         <div className="svc-side-pane__body">{children}</div>
-        {footer ? <div className="svc-side-pane__footer">{footer}</div> : null}
+        <div className={`svc-side-pane__footer${footer ? ' svc-side-pane__footer--split' : ''}`}>
+          {footer}
+          <BUTWideButton
+            type="button"
+            width="fill"
+            instantAction
+            colorVariant="red-action"
+            className="svc-side-pane__dismiss"
+            onClick={() => onCloseRef.current()}
+          >
+            Close
+          </BUTWideButton>
+        </div>
       </div>
     </div>,
     portalRoot,
