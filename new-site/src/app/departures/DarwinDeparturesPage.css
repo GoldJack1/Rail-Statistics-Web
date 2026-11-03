@@ -43,6 +43,21 @@
   width: 100%;
 }
 
+.dep-sidebar-search .tickets-od-stack:has(.tickets-station-suggestions) {
+  padding-bottom: 0;
+}
+
+.dep-sidebar-search .tickets-od-stack:has(.tickets-station-suggestions) .tickets-station-suggestions {
+  margin-top: 0;
+  max-height: 200px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.dep-sidebar-search .tickets-station-suggestion.rs-button {
+  flex: 0 0 40px;
+}
+
 .tickets-station-suggestions {
   display: flex;
   flex-direction: column;

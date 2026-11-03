@@ -10,10 +10,12 @@ export type TXTINPBUTIconWideButtonSearchProps = Omit<TXTINPBUTBaseButtonProps, 
   searchQuery?: string
   /** Convenience hook fired on every keystroke (mirrors Android's local broadcast). */
   onQueryChange?: (query: string) => void
+  /** Fully rounded until a result list is open, then flat along the bottom. */
+  shape?: TXTINPBUTBaseButtonProps['shape']
 }
 
 const TXTINPBUTIconWideButtonSearch = forwardRef<TXTINPBUTBaseButtonHandle, TXTINPBUTIconWideButtonSearchProps>(
-  ({ searchQuery, value, onQueryChange, onChange, placeholder = 'Search', ...props }, ref) => {
+  ({ searchQuery, value, onQueryChange, onChange, placeholder = 'Search', shape = 'rounded', ...props }, ref) => {
     const handleChange = useCallback((next: string) => {
       onChange?.(next)
       onQueryChange?.(next)
@@ -23,7 +25,7 @@ const TXTINPBUTIconWideButtonSearch = forwardRef<TXTINPBUTBaseButtonHandle, TXTI
       <TXTINPBUTBaseButton
         ref={ref}
         {...props}
-        shape="rounded"
+        shape={shape}
         prefixType="icon"
         placeholder={placeholder}
         value={searchQuery ?? value}

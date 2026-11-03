@@ -281,6 +281,39 @@ const DarwinDepartureRowCard = React.memo(function DarwinDepartureRowCard({
   )
 })
 
+function stationSuggestionTitle(station: DarwinSearchHit, mode: StationSearchMode): string {
+  if (mode === 'tiploc' || mode === 'other') {
+    const code = (station.tiploc || station.crsCode || '').toUpperCase()
+    return code ? `${station.stationName} (${code})` : station.stationName
+  }
+  const crs = station.crsCode.trim().toUpperCase()
+  return crs ? `${station.stationName} (${crs})` : station.stationName
+}
+
+function stationSuggestionRank(station: DarwinSearchHit, query: string, mode: StationSearchMode): number {
+  const q = query.trim().toLowerCase()
+  const name = station.stationName.toLowerCase()
+  const crs = station.crsCode.trim().toLowerCase()
+  const tiploc = (station.tiploc || '').trim().toLowerCase()
+  if (!q) return 4
+  if (mode === 'crs') {
+    if (crs === q) return 0
+    if (crs.startsWith(q)) return 1
+    return 2
+  }
+  if (mode === 'tiploc' || mode === 'other') {
+    if (tiploc === q) return 0
+    if (tiploc.startsWith(q)) return 1
+    if (tiploc.includes(q)) return 2
+    return 3
+  }
+  if (crs === q) return 0
+  if (name.startsWith(q)) return 1
+  if (name.includes(q)) return 2
+  if (crs.includes(q)) return 3
+  return 4
+}
+
 type DarwinSearchHit = {
   id: string
   stationName: string
@@ -430,8 +463,9 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   const code = paramAsString(params.code).toUpperCase()
   const hasStationSelected = code.length > 0
   const [searchInput, setSearchInput] = useState<string>('')
-  const [submittedSearch, setSubmittedSearch] = useState('')
   const [pickedStation, setPickedStation] = useState<DarwinSearchHit | null>(null)
+  const [hideLandingSuggestions, setHideLandingSuggestions] = useState(false)
+  const appliedSelectionRef = useRef<string | null>(null)
   const [isMobileLayout, setIsMobileLayout] = useState(false)
   const [searchMode, setSearchMode] = useState<StationSearchMode>('name')
   const [searchError, setSearchError] = useState<string | null>(null)
@@ -457,7 +491,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     [stations],
   )
   const deferStationSearch = isMobileLayout && !hasStationSelected
-  const lookupQuery = deferStationSearch ? submittedSearch : searchInput
+  const lookupQuery = searchInput
   const catalogHits = useDarwinLocationSearch(lookupQuery, locationKindForMode(searchMode, lookupQuery))
   const nameSearchHits = useMemo(
     () => filterDepartureNameResults(lookupQuery, gbnrStations, catalogHits, gbnrStations.length > 0),
@@ -598,64 +632,12 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     }
   }, [boardReady, minLookbackDateIso])
 
-  const submitSearch = () => {
-    const normalizedInput = normalizeSearchInputForMode(searchInput, searchMode).trim()
-    let next: string | null = null
-    if (searchMode === 'name' || searchMode === 'other') {
-      const namedHits = searchMode === 'name' ? nameSearchHits : catalogHits
-      next = namedHits[0]?.tiploc || namedHits[0]?.crs || null
-      if (!next) {
-        setSearchError(
-          searchMode === 'other'
-            ? 'No junction, depot or other location match found.'
-            : 'No station name match found. Try the full station name or switch mode.',
-        )
-        return
-      }
-    } else if (searchMode === 'crs') {
-      if (normalizedInput.length !== 3) {
-        setSearchError('CRS must be exactly 3 uppercase letters.')
-        return
-      }
-      const byCrs = catalogHits.find((row) => row.crs === normalizedInput) || catalogHits[0]
-      next = byCrs?.tiploc || byCrs?.crs || normalizedInput
-    } else {
-      if (!normalizedInput) {
-        setSearchError('Enter a TIPLOC code (up to 10 uppercase characters).')
-        return
-      }
-      const byTiploc = catalogHits.find((row) => row.tiploc === normalizedInput) || catalogHits[0]
-      next = byTiploc?.tiploc || normalizedInput
-    }
-    const normalizedNext = String(next).toUpperCase()
-    if (normalizedNext === code) return
-    setSearchError(null)
-    router.push(`/departures/${normalizedNext}${location.search}`)
-  }
-
   const setSearchModeAndFocus = (nextMode: StationSearchMode) => {
     setSearchError(null)
-    setSubmittedSearch('')
+    setHideLandingSuggestions(false)
     setPickedStation(null)
     setSearchMode(nextMode)
     setSearchInput((prev) => normalizeSearchInputForMode(prev, nextMode))
-  }
-
-  const commitLandingSearch = () => {
-    const next = normalizeSearchInputForMode(searchInput, searchMode).trim()
-    if (!next) {
-      setSearchError('Enter a station name, CRS, or TIPLOC.')
-      setSubmittedSearch('')
-      return
-    }
-    if (searchMode === 'name' && next.length < 2) {
-      setSearchError('Enter at least two letters of the station name.')
-      setSubmittedSearch('')
-      return
-    }
-    setSearchError(null)
-    setPickedStation(null)
-    setSubmittedSearch(next)
   }
 
   const stationLabel = useMemo(() => {
@@ -864,30 +846,29 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     router.push(`/departures/${targetCode}${location.search}`)
   }
 
-  const stationFieldValue = (station: DarwinSearchHit) => {
-    if (searchMode === 'crs') return station.crsCode
-    if (searchMode === 'tiploc' || searchMode === 'other') return station.tiploc || station.crsCode || ''
-    return station.stationName
-  }
-
   const landingQuery = normalizeSearchInputForMode(searchInput, searchMode).trim()
   const pickedReady = Boolean(
-    pickedStation
-    && normalizeSearchInputForMode(stationFieldValue(pickedStation), searchMode).trim() === landingQuery,
+    pickedStation && stationSuggestionTitle(pickedStation, searchMode).trim() === searchInput.trim(),
   )
 
   const runLandingSearch = () => {
-    if (pickedReady && pickedStation) {
-      openDeparturesForStation(pickedStation)
-      return
-    }
-    commitLandingSearch()
+    const best = [...stationSuggestions].sort((a, b) => {
+      const rank = stationSuggestionRank(a, landingQuery, searchMode) - stationSuggestionRank(b, landingQuery, searchMode)
+      if (rank !== 0) return rank
+      return a.stationName.localeCompare(b.stationName, undefined, { sensitivity: 'base' })
+    })[0]
+    const station = pickedReady && pickedStation ? pickedStation : best
+    if (!station) return
+    if (openPane === 'lookup') setOpenPane(null)
+    openDeparturesForStation(station)
   }
 
   const chooseLandingStation = (station: DarwinSearchHit) => {
+    const title = stationSuggestionTitle(station, searchMode)
+    appliedSelectionRef.current = title
     setPickedStation(station)
-    setSearchInput(normalizeSearchInputForMode(stationFieldValue(station), searchMode))
-    setSubmittedSearch('')
+    setSearchInput(title)
+    setHideLandingSuggestions(true)
     setSearchError(null)
   }
 
@@ -1027,7 +1008,17 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     closeDateTimePane()
   }
 
-  const renderLookupControls = (deferred = false) => (
+  const renderLookupControls = () => {
+    const suggestionsOpen = stationSuggestions.length > 0 && !hideLandingSuggestions
+    const visibleSuggestions = suggestionsOpen
+      ? [...stationSuggestions]
+          .sort((a, b) => {
+            const rank = stationSuggestionRank(a, landingQuery, searchMode) - stationSuggestionRank(b, landingQuery, searchMode)
+            if (rank !== 0) return rank
+            return a.stationName.localeCompare(b.stationName, undefined, { sensitivity: 'base' })
+          })
+      : []
+    return (
     <div className="dep-sidebar-stack">
       <div className="dep-history-controls">
         <div className="dep-sidebar-field">
@@ -1078,18 +1069,23 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
           icon={<MagnifyingGlass size={16} aria-hidden />}
           value={searchInput}
           onChange={(value) => {
+            if (appliedSelectionRef.current && value.trim() === appliedSelectionRef.current.trim()) return
+            appliedSelectionRef.current = null
             setSearchInput(normalizeSearchInputForMode(value, searchMode))
             setPickedStation(null)
+            setHideLandingSuggestions(false)
             if (searchError) setSearchError(null)
           }}
           onClear={() => {
+            appliedSelectionRef.current = null
             setSearchInput('')
-            setSubmittedSearch('')
             setPickedStation(null)
+            setHideLandingSuggestions(false)
             setSearchError(null)
           }}
-          onSubmit={deferred ? runLandingSearch : submitSearch}
+          onSubmit={runLandingSearch}
           enterKeyHint="search"
+          shape={visibleSuggestions.length > 0 ? 'top-rounded' : 'rounded'}
           placeholder={searchPlaceholderForMode(searchMode)}
           className="search-input-shell tickets-od-input"
           colorVariant="primary"
@@ -1099,14 +1095,11 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
           autoCapitalize="off"
           spellCheck={false}
         />
-        {(!deferred || submittedSearch === normalizeSearchInputForMode(searchInput, searchMode).trim()) && stationSuggestions.length > 0 && (
+        {visibleSuggestions.length > 0 && (
           <div className="tickets-station-suggestions" role="listbox" aria-label={searchMode === 'other' ? 'Location suggestions' : 'Station suggestions'}>
-            {stationSuggestions.map((station, index) => {
-              const isLast = index === stationSuggestions.length - 1
-              const codeLabel =
-                searchMode === 'tiploc' || searchMode === 'other'
-                  ? (station.tiploc || station.crsCode || '').toUpperCase()
-                  : (station.crsCode || station.tiploc || '').toUpperCase()
+            {visibleSuggestions.map((station, index) => {
+              const isLast = index === visibleSuggestions.length - 1
+              const title = stationSuggestionTitle(station, searchMode)
               return (
                 <BUTBaseButton
                   key={station.id}
@@ -1117,18 +1110,11 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   colorVariant="primary"
                   instantAction
                   className="tickets-station-suggestion"
-                  ariaLabel={
-                    codeLabel
-                      ? `${station.stationName} (${codeLabel})`
-                      : station.stationName
-                  }
-                  onClick={() => (deferred ? chooseLandingStation(station) : openDeparturesForStation(station))}
+                  ariaLabel={title}
+                  onClick={() => chooseLandingStation(station)}
                 >
                   <span className="tickets-station-suggestion__label">
-                    <span className="tickets-station-suggestion__name">{station.stationName}</span>
-                    {codeLabel ? (
-                      <span className="tickets-station-suggestion__crs">{codeLabel}</span>
-                    ) : null}
+                    <span className="tickets-station-suggestion__name">{title}</span>
                   </span>
                 </BUTBaseButton>
               )
@@ -1185,20 +1171,19 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
         <p className="dep-history-inline-error" role="alert">{searchError}</p>
       )}
       </div>
-      {deferred ? (
-        <BUTWideButton
-          type="button"
-          width="fill"
-          instantAction
-          className="dep-landing-search"
-          disabled={landingQuery.length === 0}
-          onClick={runLandingSearch}
-        >
-          Search
-        </BUTWideButton>
-      ) : null}
+      <BUTWideButton
+        type="button"
+        width="fill"
+        instantAction
+        className="dep-landing-search"
+        disabled={landingQuery.length === 0}
+        onClick={runLandingSearch}
+      >
+        Search
+      </BUTWideButton>
     </div>
-  )
+    )
+  }
 
   const datePickerPane = (
     <div className="dep-picker-pane">
@@ -1336,7 +1321,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
               <section className="dep-main-message dep-main-message--search">
                 <h2>Search for a station</h2>
                 <p>Search by station name, CRS or TIPLOC codes, and choose a date and time.</p>
-                {renderLookupControls(true)}
+                {renderLookupControls()}
               </section>
             )}
 
