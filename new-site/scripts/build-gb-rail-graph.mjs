@@ -42,6 +42,15 @@ for (const el of raw.elements || []) {
   if (kept.length >= 2) lines.push(kept)
 }
 
+// route=train omits some passenger chords that OSM files only under route=railway.
+const extraPath = 'public/data/gb-rail-extra-lines.json'
+if (fs.existsSync(extraPath)) {
+  const extra = JSON.parse(fs.readFileSync(extraPath, 'utf8'))
+  for (const line of extra.lines || []) {
+    if (Array.isArray(line) && line.length >= 2) lines.push(line)
+  }
+}
+
 fs.writeFileSync(target, JSON.stringify({ lines }))
 const bytes = fs.statSync(target).size
 console.log(`${lines.length} lines, ${(bytes / 1e6).toFixed(1)} MB -> ${target}`)

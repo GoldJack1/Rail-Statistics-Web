@@ -90,7 +90,7 @@ async function main() {
     graph = null
   }
   if (!graph) {
-    const response = await fetch('/data/gb-passenger-rail.json')
+    const response = await fetch(`/data/gb-passenger-rail.json?v=${RAIL_GRAPH_REVISION}`, { cache: 'no-store' })
     if (!response.ok) {
       self.postMessage({ type: 'ready', ok: false })
       flushPending()

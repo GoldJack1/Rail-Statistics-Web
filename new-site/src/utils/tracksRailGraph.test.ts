@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { roundSharpCorners } from './tracksRailRoute'
 import { buildRailGraph, linesFromNetwork, routeOnGraph } from './tracksRailGraph'
@@ -116,6 +117,29 @@ describe('tracks rail graph', () => {
   it('reads the compact network file', () => {
     expect(linesFromNetwork({ lines: [[[-1, 53], [-1.1, 53.1]]] })).toEqual([[[-1, 53], [-1.1, 53.1]]])
     expect(linesFromNetwork({})).toEqual([])
+  })
+
+  it('takes the Dryclough chord from Halifax to Brighouse', () => {
+    const file = `${process.cwd()}/public/data/gb-passenger-rail.json`
+    const lines = linesFromNetwork(JSON.parse(fs.readFileSync(file, 'utf8'))).filter((line) =>
+      line.some((point) => point[1] > 53.68 && point[1] < 53.74 && point[0] > -1.92 && point[0] < -1.75),
+    )
+    const graph = buildRailGraph(lines)
+    const halifax = { lat: 53.72039, lng: -1.85398 }
+    const greetland = { lat: 53.69388, lng: -1.85756 }
+    const brighouse = { lat: 53.69821, lng: -1.77944 }
+    const path = routeOnGraph(graph, halifax, brighouse)
+    const viaGreetland = [
+      routeOnGraph(graph, halifax, greetland),
+      routeOnGraph(graph, greetland, brighouse),
+    ]
+    expect(path).not.toBeNull()
+    // Milner Royd sits west of -1.87. The booked line leaves at Dryclough and stays east of it.
+    expect(Math.min(...path!.map((point) => point[1]))).toBeGreaterThan(-1.87)
+    for (const leg of viaGreetland) {
+      expect(leg).not.toBeNull()
+      expect(Math.min(...leg!.map((point) => point[1]))).toBeGreaterThan(-1.87)
+    }
   })
 })
 

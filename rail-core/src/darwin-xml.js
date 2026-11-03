@@ -3,7 +3,6 @@ import { gunzipSync } from "node:zlib";
 import { adoptUidOntoRid, hhmm, liveKind, openCatalog, openDayDb, operatingDayYmd, platformText, upsertCall, upsertService } from "./db.js";
 import { extractDarwinAssociationsJson, extractDarwinAssociationsXml, upsertAssociation } from "./associations.js";
 import { publicJourneyEnds } from "./journey-order.js";
-import { hasEnRouteCancel, linkReinstatement } from "./reinstatement.js";
 
 function text(el) {
   if (!el) return "";
@@ -651,7 +650,6 @@ export function applyParsed(db, parsed) {
   if (!parsed.service) return Boolean(parsed.associations?.length);
   const overlay = parsed.fullJourney === false;
   upsertService(db, parsed.service, { overlay });
-  if (parsed.service?.rid && hasEnRouteCancel(db)) linkReinstatement(db, parsed.service.rid);
   if (parsed.service?.uid && parsed.service?.rid) {
     adoptUidOntoRid(db, parsed.service.uid, parsed.service.rid);
   }

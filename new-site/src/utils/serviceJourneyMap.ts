@@ -99,40 +99,52 @@ function stillAhead(from: MapPoint, point: MapPoint, next: MapPoint): boolean {
   return haversineM(point, next) < haversineM(from, next) - 15
 }
 
-/**
- * How far a point sits to the side of the straight line between two places.
- * A negative distance means it does not fall between them.
- */
-function chordOffsetM(from: MapPoint, point: MapPoint, next: MapPoint): number {
+/** Where a point sits along, and beside, the straight line between two places. */
+function chordProgress(
+  from: MapPoint,
+  point: MapPoint,
+  next: MapPoint,
+): { along: number; offset: number } | null {
   const east = next.lng - from.lng
   const north = next.lat - from.lat
   const length = east * east + north * north
-  if (length < 1e-12) return -1
+  if (length < 1e-12) return null
   const along = ((point.lng - from.lng) * east + (point.lat - from.lat) * north) / length
-  if (along <= 0.05 || along >= 0.95) return -1
-  return haversineM(point, { lat: from.lat + along * north, lng: from.lng + along * east })
+  const offset = haversineM(point, { lat: from.lat + along * north, lng: from.lng + along * east })
+  return { along, offset }
 }
 
 /**
  * Station-to-station routing takes the shortest railway, which from Leeds is
  * the line through Outwood rather than the booked line through Methley.
- * A junction well off that chord is the dogleg the train actually takes, so
- * it is sent as a via. One sitting on the chord is left as a marker: that
- * pin is often the other branch at the same diamond.
+ * A junction on the way to the next call is sent, including one near the
+ * chord: that is the booked divergence. A pin behind the train, past the
+ * call, or many kilometres off the line stays a marker. So does one listed
+ * before a pass it has already gone beyond, because that pin is the other
+ * branch and sending it would skip the pass.
  */
-function junctionSteersTheRoute(from: MapPoint, point: MapPoint, next: MapPoint): boolean {
-  const offset = chordOffsetM(from, point, next)
-  return offset >= 1_500 && offset <= 9_000
+function junctionSteersTheRoute(
+  from: MapPoint,
+  point: MapPoint,
+  next: MapPoint,
+  later?: MapPoint | null,
+): boolean {
+  const here = chordProgress(from, point, next)
+  if (!here || here.along <= 0 || here.along >= 1 || here.offset > 9_000) return false
+  if (!stillAhead(from, point, next)) return false
+  if (!later) return true
+  const after = chordProgress(from, later, next)
+  if (after && after.along < here.along - 0.01) return false
+  return true
 }
 
 /**
  * Route between stations. Calling stops and passing stations are vias when
- * they still lie ahead. A junction on the straight chord is not sent: its
- * pin often sits on the other branch. A junction off to the side, such as
- * Methley between Leeds and Wakefield Kirkgate, is sent, because otherwise
- * the router takes a shorter railway. A point listed back behind the train
- * is left out, because sending the router there and back draws a spur. A
- * booked platform moves that via onto the rail beside the platform. One
+ * they still lie ahead. A junction on the way to the next call is a via too,
+ * so the router follows the booked line instead of a shorter railway. A
+ * junction behind the train, past the call, or listed ahead of a pass it has
+ * already passed is left out: sending it draws a spur onto the other branch.
+ * A booked platform moves that via onto the rail beside the platform. One
  * point per place: a bay starts at the buffer, and a call stands on the
  * stopping mark. A second point on the same platform makes the line reverse.
  */
@@ -160,7 +172,14 @@ export function mappedRouteWaypoints(
       const from = chosen[chosen.length - 1]
       if (!next || !from) continue
       if (stop.kind === 'junction') {
-        if (!junctionSteersTheRoute(placeAt(from), placeAt(stop), placeAt(next))) continue
+        let later: JourneyMapStop | null = null
+        for (let j = placed.indexOf(stop) + 1; j < placed.length; j++) {
+          if (placed[j].kind !== 'junction') {
+            later = placed[j]
+            break
+          }
+        }
+        if (!junctionSteersTheRoute(placeAt(from), placeAt(stop), placeAt(next), later && placeAt(later))) continue
         chosen.push(stop)
         continue
       }

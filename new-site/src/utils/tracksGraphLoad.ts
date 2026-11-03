@@ -1,4 +1,4 @@
-import { buildRailGraph, linesFromNetwork, routeOnGraph } from './tracksRailGraph'
+import { buildRailGraph, linesFromNetwork, RAIL_GRAPH_REVISION, routeOnGraph } from './tracksRailGraph'
 import type { LatLngTuple } from './brouterRailRoute'
 
 type ReadyMessage = { type: 'ready'; ok: boolean }
@@ -17,7 +17,7 @@ let localGraph: Promise<Awaited<ReturnType<typeof buildRailGraph>> | null> | nul
 
 function graphOnThisThread() {
   if (!localGraph) {
-    localGraph = fetch('/data/gb-passenger-rail.json')
+    localGraph = fetch(`/data/gb-passenger-rail.json?v=${RAIL_GRAPH_REVISION}`, { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) return null
         const lines = linesFromNetwork(await response.json())

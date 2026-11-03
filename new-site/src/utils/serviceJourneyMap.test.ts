@@ -154,6 +154,7 @@ describe('serviceJourneyMap', () => {
       [53.79537, -1.54644],
       [53.76683, -1.4986],
       [53.72982, -1.40092],
+      [53.70958, -1.41324],
       [53.67839, -1.48698],
     ])
   })
@@ -178,6 +179,22 @@ describe('serviceJourneyMap', () => {
       (point) => point.slot === 'PP',
     )
     expect(curved.map((point) => point.tpl)).toEqual(['BRHOUSE', 'GRTLNDJ', 'DYCLJN'])
+  })
+
+  it('sends a junction near the start of the leg when it is the booked divergence', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('HLFX', 'Halifax', 'IP', { lat: 53.72039, lng: -1.85398 }),
+        stop('DYCLJN', 'Dryclough Junction', 'PP', { lat: 53.70883, lng: -1.85522 }),
+        stop('BRHOUSE', 'Brighouse', 'IP', { lat: 53.69821, lng: -1.77944 }),
+      ],
+      [],
+    )
+    expect(mappedRouteWaypoints(mapped)).toEqual([
+      [53.72039, -1.85398],
+      [53.70883, -1.85522],
+      [53.69821, -1.77944],
+    ])
   })
 
   it('leaves a junction off the route when it is not on the leg', () => {
@@ -244,6 +261,7 @@ describe('serviceJourneyMap', () => {
       }),
     ).toEqual([
       [53.7939, -1.5482],
+      [53.79259, -1.55573],
       [53.544, -2.632],
     ])
   })

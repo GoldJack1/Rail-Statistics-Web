@@ -369,10 +369,7 @@ export function healTrustCancellations(db, dataDir) {
     const code = body.canx_reason_code || body.cancel_reason_code || body.reason_code || "";
     const enRoute = String(body.canx_type || "").toUpperCase().includes("EN ROUTE") && loc?.tiploc;
     const expected = trustCancelReason(code, enRoute ? loc.tiploc : "");
-    if (String(svc.cancel_reason || "") === expected) {
-      if (enRoute) linkReinstatement(db, rid);
-      continue;
-    }
+    if (String(svc.cancel_reason || "") === expected) continue;
     if (!enRoute && String(svc.cancel_reason || "").startsWith("TRUST:0002") && Number(svc.cancelled)) continue;
     applyCancel(db, rid, body, loc);
   }
@@ -437,8 +434,8 @@ export function applyTrustFrame(dataDir, message, ymd = operatingDayYmd(), opts 
       overlayMovement(db, body, rid, loc);
     }
   });
+  if (type === "0002" || type === "0005") maybeHealTrustCancellations(dataDir, ymd);
   if (type === "0001" || type === "0002" || type === "0003" || type === "0005" || type === "0006" || type === "0007") {
-    maybeHealTrustCancellations(dataDir, ymd);
     return true;
   }
   if (body.event_type) return Boolean(rid);
