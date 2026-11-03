@@ -42,6 +42,30 @@ function liveFromCall(c: RailCoreCall): { liveTime: string | null; liveKind: Ser
   return { liveTime: null, liveKind: 'scheduled' }
 }
 
+function stopWasRecorded(stop: Pick<ServiceStop, 'ata' | 'atd' | 'atp'>): boolean {
+  return [stop.ata, stop.atd, stop.atp].some((value) => String(value || '').trim().length > 0)
+}
+
+/**
+ * A TRUST/Darwin service cancellation covers every call still to be served.
+ * Stops that already have an actual stay as they ran. The query API now sets
+ * this itself; this also covers payloads that only set `cancelled`.
+ */
+export function applyWholeServiceCancellation(detail: ServiceDetail): ServiceDetail {
+  if (!detail?.cancelled || !detail.stops?.length) return detail
+  return {
+    ...detail,
+    stops: detail.stops.map((stop) => {
+      if (stop.cancelledAtStop || stopWasRecorded(stop)) return stop
+      return {
+        ...stop,
+        cancelledAtStop: true,
+        cancelReasonAtStop: stop.cancelReasonAtStop || detail.cancellation,
+      }
+    }),
+  }
+}
+
 function hydrateStopLive(stop: ServiceStop): ServiceStop {
   const derived = liveFromCall({
     ata: stop.ata,
@@ -277,7 +301,7 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
         line: c.line ?? null,
       }
     })
-    return {
+    return applyWholeServiceCancellation({
       rid: String(b.rid),
       uid: String(b.uid || ''),
       trainId: String(b.headcode || ''),
@@ -309,14 +333,14 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
       location: (b.location as ServiceDetail['location']) || null,
       hspPending: Boolean(b.hspPending),
       updatedAt: new Date().toISOString(),
-    }
+    })
   }
   const detail = body as ServiceDetail
-  if (!detail?.stops?.length) return detail
-  return {
+  if (!detail?.stops?.length) return applyWholeServiceCancellation(detail)
+  return applyWholeServiceCancellation({
     ...detail,
     originName: publicStationNameOrNull(detail.originName),
     destinationName: publicStationNameOrNull(detail.destinationName),
     stops: detail.stops.map(hydrateStopLive),
-  }
+  })
 }

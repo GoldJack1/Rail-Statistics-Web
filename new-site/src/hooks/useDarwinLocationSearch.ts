@@ -11,6 +11,9 @@ export type DarwinCatalogLocation = {
   name: string
 }
 
+/** `station` is a location with a CRS. `other` is junctions, depots, yards and the rest. */
+export type DarwinLocationKind = 'station' | 'other'
+
 type LocationsListResponse = {
   locations?: DarwinCatalogLocation[]
 }
@@ -25,7 +28,7 @@ function asLocation(row: Partial<DarwinCatalogLocation> | null | undefined): Dar
   }
 }
 
-export function useDarwinLocationSearch(query: string): DarwinCatalogLocation[] {
+export function useDarwinLocationSearch(query: string, kind?: DarwinLocationKind): DarwinCatalogLocation[] {
   const [hits, setHits] = useState<DarwinCatalogLocation[]>([])
 
   useEffect(() => {
@@ -38,11 +41,21 @@ export function useDarwinLocationSearch(query: string): DarwinCatalogLocation[] 
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const res = await fetchDarwin(`/api/darwin/locations?q=${encodeURIComponent(q)}`)
+          const params = new URLSearchParams({ q })
+          if (kind) params.set('kind', kind)
+          const res = await fetchDarwin(`/api/darwin/locations?${params.toString()}`)
           if (!res.ok) return
           const body = (await res.json()) as LocationsListResponse
           if (cancelled) return
-          setHits((Array.isArray(body.locations) ? body.locations : []).map(asLocation).filter((row): row is DarwinCatalogLocation => Boolean(row)))
+          const rows = (Array.isArray(body.locations) ? body.locations : [])
+            .map(asLocation)
+            .filter((row): row is DarwinCatalogLocation => Boolean(row))
+          const scoped = kind === 'station'
+            ? rows.filter((row) => /^[A-Z]{3}$/.test(row.crs))
+            : kind === 'other'
+              ? rows.filter((row) => !/^[A-Z]{3}$/.test(row.crs))
+              : rows
+          setHits(scoped)
         } catch {
           if (!cancelled) setHits([])
         }
@@ -52,7 +65,7 @@ export function useDarwinLocationSearch(query: string): DarwinCatalogLocation[] 
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [query])
+  }, [query, kind])
 
   return hits
 }

@@ -16,11 +16,13 @@ export function SidePane({
   title,
   onClose,
   children,
+  footer,
 }: {
   open: boolean
   title: string
   onClose: () => void
   children: ReactNode
+  footer?: ReactNode
 }) {
   const [phase, setPhase] = useState<'closed' | 'opening' | 'open' | 'closing'>('closed')
   const titleId = useId()
@@ -104,6 +106,7 @@ export function SidePane({
           />
         </div>
         <div className="svc-side-pane__body">{children}</div>
+        {footer ? <div className="svc-side-pane__footer">{footer}</div> : null}
       </div>
     </div>,
     portalRoot,

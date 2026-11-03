@@ -101,9 +101,9 @@ function buildMeta(row: DepartureRow, detailedInfo: boolean, historicalMode: boo
   return parts.length > 0 ? parts.join(' | ') : null
 }
 
-function buildFormation(row: DepartureRow, historicalMode: boolean): string | null {
+function buildFormation(row: DepartureRow, includeUnits: boolean): string | null {
   const count = carriageCount(row)
-  const units = unitLabel(row)
+  const units = includeUnits ? unitLabel(row) : null
   if (count == null) {
     if (!units) return null
     return row.cancelled ? `Was formed of ${units}` : `Formed of ${units}`
@@ -242,7 +242,7 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
   const operator = formatOperatorLabel(row)
   const headline = buildHeadline(row)
   const meta = buildMeta(row, detailedInfo, historicalMode)
-  const formation = buildFormation(row, historicalMode)
+  const formation = buildFormation(row, detailedInfo)
   const status = buildStatus(row, detailedInfo, pastTimes ?? historicalMode)
   const coachCount = carriageCount(row)
   const visibleCoaches = coachCount != null ? Math.min(coachCount, MAX_COACH_PILLS) : 0

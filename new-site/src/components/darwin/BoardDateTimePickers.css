@@ -1,0 +1,307 @@
+.dep-date-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  width: 100%;
+}
+
+.dep-date-picker__bar {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  border-radius: 32px;
+  box-shadow: var(--button-drop-shadow);
+}
+
+.dep-date-picker__bar .rs-button {
+  margin: 0;
+  box-shadow: none;
+}
+
+.dep-date-picker__bar .dep-date-picker__nav-side.rs-button {
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  padding: 0;
+  flex: 0 0 40px;
+}
+
+.dep-date-picker__bar .dep-date-picker__nav-center.rs-button {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dep-date-stage {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dep-date-stage__layer.is-leaving {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.dep-date-picker__days {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dep-date-stage__layer.is-entering.is-forward {
+    animation: dep-date-in-forward 0.35s ease-in-out;
+  }
+
+  .dep-date-stage__layer.is-leaving.is-forward {
+    animation: dep-date-out-forward 0.35s ease-in-out forwards;
+  }
+
+  .dep-date-stage__layer.is-entering.is-back {
+    animation: dep-date-in-back 0.35s ease-in-out;
+  }
+
+  .dep-date-stage__layer.is-leaving.is-back {
+    animation: dep-date-out-back 0.35s ease-in-out forwards;
+  }
+}
+
+@keyframes dep-date-in-forward {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes dep-date-out-forward {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(-100%); opacity: 0; }
+}
+
+@keyframes dep-date-in-back {
+  from { transform: translateX(-100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes dep-date-out-back {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
+}
+
+.dep-date-picker__weekdays,
+.dep-date-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 40px);
+  justify-content: space-between;
+  column-gap: 12px;
+  width: 100%;
+}
+
+.dep-date-picker__weekdays {
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.dep-date-picker__weekdays span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+}
+
+.dep-date-picker__grid {
+  row-gap: 12px;
+}
+
+.dep-date-picker__choice-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  width: 100%;
+}
+
+.dep-time-picker--sunflower {
+  display: none;
+}
+
+@media (min-width: 768px) and (hover: hover) and (pointer: fine) {
+  .dep-time-picker--wheel {
+    display: none;
+  }
+
+  .dep-time-picker--sunflower {
+    display: block;
+  }
+}
+
+.dep-sun {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+  min-width: 0;
+}
+
+.dep-sun-clock {
+  position: relative;
+  width: 360px;
+  height: 360px;
+  max-width: 100%;
+  touch-action: none;
+  user-select: none;
+}
+
+.dep-sun-clock__face {
+  position: absolute;
+  inset: 48px;
+  border-radius: 50%;
+  background: var(--bg-secondary, var(--bg-tertiary));
+}
+
+.dep-sun-clock__hand {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  width: calc(50% - 16px);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text-primary);
+  transform-origin: left center;
+  transform: rotate(var(--hand-angle));
+  pointer-events: none;
+}
+
+.dep-sun-readout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+}
+
+.dep-sun-readout__time,
+.dep-sun-readout__time input {
+  font-family: var(--font-body);
+  font-size: 32px;
+  font-weight: 400;
+  font-style: normal;
+  font-variant-numeric: normal;
+  font-synthesis: none;
+  -webkit-font-variation-settings: 'CRSV' 1, 'MONO' 0, 'slnt' 0;
+  font-variation-settings: 'CRSV' 1, 'MONO' 0, 'slnt' 0;
+  line-height: 1;
+}
+
+.dep-sun-readout__time {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  color: var(--text-primary);
+}
+
+.dep-sun-readout input {
+  width: 2.6ch;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-primary);
+  text-align: center;
+  caret-color: var(--text-primary);
+  cursor: text;
+}
+
+.dep-sun-readout input:focus {
+  color: var(--text-primary);
+  border-bottom-color: var(--text-primary);
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+.dep-sun-clock__petal.rs-button,
+.dep-sun-clock__petal.rs-button:active {
+  position: absolute;
+  z-index: 2;
+  margin: 0;
+  transform: translate(-50%, -50%);
+}
+
+.dep-time-wheel {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 220px;
+  width: 100%;
+  min-width: 0;
+}
+
+.dep-time-wheel__highlight {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 44px;
+  transform: translateY(-50%);
+  border-radius: 12px;
+  background: var(--button-bg-active, var(--bg-tertiary));
+  box-shadow: var(--button-inner-shadow-active, inset 0 0 4.5px rgba(0, 0, 0, 0.2));
+  pointer-events: none;
+  z-index: 0;
+}
+
+.dep-time-wheel__col {
+  position: relative;
+  z-index: 1;
+  height: 220px;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, transparent, #000 28%, #000 72%, transparent);
+}
+
+.dep-time-wheel__col::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.dep-time-wheel__pad {
+  height: 88px;
+  flex-shrink: 0;
+}
+
+.dep-time-wheel__item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  scroll-snap-align: center;
+  cursor: pointer;
+}
+
+.dep-time-wheel__item.is-selected {
+  color: var(--text-primary);
+  font-weight: 600;
+}

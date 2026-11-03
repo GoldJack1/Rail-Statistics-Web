@@ -482,13 +482,13 @@ const ServiceDetailPage: React.FC = () => {
           {data && (
             <SidebarDropdownSection title="Overview" icon={Info} className="svc-overview-dropdown" defaultExpanded>
               <div className="svc-overview-dropdown__body">
-                {data.cancelled && data.cancellation && (
+                {data.cancelled && (
                   <TextCard
                     static
                     state="redAction"
                     title="Cancelled"
                     description={
-                      isScheduleDeactivatedReason(data.cancellation.reason)
+                      !data.cancellation || isScheduleDeactivatedReason(data.cancellation.reason)
                         ? undefined
                         : `${data.cancellation.reason}${data.cancellation.code ? ` (code ${data.cancellation.code})` : ''}`
                     }

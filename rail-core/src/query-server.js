@@ -13,6 +13,7 @@ import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropF
 import { assignTrackMiles, loadGtclGraph } from "./gtcl-path.js";
 import { annotateStops, publicSchedule } from "./schedule-notes.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
+import { cancellationForCall, serviceCancellationFields } from "./service-cancel.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
 import { osgbToWgs84 } from "./osgb.js";
@@ -213,17 +214,36 @@ function resolveBoardLocation(code) {
   return { crs: c, tiplocs: [c], matchedAs: "tiploc" };
 }
 
-function addLocationHit(seen, row) {
-  const tiploc = String(row?.tiploc || "").toUpperCase();
-  if (!tiploc || seen.has(tiploc)) return;
-  const crs = String(row?.crs || "").toUpperCase();
-  const name = tidyStationName(String(row?.name || "").trim()) || stationName(crs, tiploc) || tiploc;
-  seen.set(tiploc, { tiploc, crs: crs.length === 3 ? crs : "", name });
+/** A public station carries a CRS. Junctions, depots, yards and other timing points do not. */
+function locationIsStation(row) {
+  return /^[A-Z]{3}$/.test(String(row?.crs || "").trim().toUpperCase());
 }
 
-function searchLocations(query) {
+function locationKindClause(kind) {
+  if (kind === "station") return ` AND crs IS NOT NULL AND length(trim(crs)) = 3`;
+  if (kind === "other") return ` AND (crs IS NULL OR trim(crs) = '')`;
+  return "";
+}
+
+function addLocationHit(seen, row) {
+  const tiploc = String(row?.tiploc || "").toUpperCase();
+  if (!tiploc) return;
+  const crs = String(row?.crs || "").trim().toUpperCase();
+  const crsCode = crs.length === 3 ? crs : "";
+  const existing = seen.get(tiploc);
+  if (existing) {
+    if (!existing.crs && crsCode) existing.crs = crsCode;
+    return;
+  }
+  const name = tidyStationName(String(row?.name || "").trim()) || stationName(crsCode, tiploc) || tiploc;
+  seen.set(tiploc, { tiploc, crs: crsCode, name });
+}
+
+function searchLocations(query, kind = "") {
   const raw = String(query || "").trim();
   if (!raw) return [];
+  const scope = kind === "station" || kind === "other" ? kind : "";
+  const crsSql = locationKindClause(scope);
   const compact = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
   const nameNeedle = raw.toUpperCase().replace(/[%_]/g, "").trim();
   const seen = new Map();
@@ -232,7 +252,7 @@ function searchLocations(query) {
     const exactTpl = catalog.prepare(`SELECT tiploc, crs, name FROM tiploc WHERE tiploc = ?`).get(compact);
     addLocationHit(seen, exactCorpus);
     addLocationHit(seen, exactTpl);
-    if (compact.length === 3) {
+    if (compact.length === 3 && scope !== "other") {
       for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM corpus WHERE crs = ?`).all(compact)) {
         addLocationHit(seen, row);
       }
@@ -241,23 +261,27 @@ function searchLocations(query) {
       }
     }
     const prefix = `${compact.replace(/[%_]/g, "")}%`;
-    for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM corpus WHERE tiploc LIKE ? LIMIT 24`).all(prefix)) {
+    for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM corpus WHERE tiploc LIKE ?${crsSql} LIMIT 24`).all(prefix)) {
       addLocationHit(seen, row);
     }
-    for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM tiploc WHERE tiploc LIKE ? LIMIT 24`).all(prefix)) {
+    for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM tiploc WHERE tiploc LIKE ?${crsSql} LIMIT 24`).all(prefix)) {
       addLocationHit(seen, row);
     }
   }
   if (nameNeedle.length >= 2) {
     const like = `%${nameNeedle}%`;
-    for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM corpus WHERE UPPER(name) LIKE ? LIMIT 24`).all(like)) {
+    for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM corpus WHERE UPPER(name) LIKE ?${crsSql} LIMIT 24`).all(like)) {
       addLocationHit(seen, row);
     }
-    for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM tiploc WHERE UPPER(name) LIKE ? LIMIT 24`).all(like)) {
+    for (const row of catalog.prepare(`SELECT tiploc, crs, name FROM tiploc WHERE UPPER(name) LIKE ?${crsSql} LIMIT 24`).all(like)) {
       addLocationHit(seen, row);
     }
   }
-  const hits = [...seen.values()];
+  const hits = [...seen.values()].filter((hit) => {
+    if (scope === "station") return locationIsStation(hit);
+    if (scope === "other") return !locationIsStation(hit);
+    return true;
+  });
   const present = new Set(hits.map((hit) => hit.crs));
   const visible = hits.filter((hit) => {
     const group = stationCrsGroup(hit.crs);
@@ -872,6 +896,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
   const stops = callingPoints.map((c, i) => {
     const movement = c.isPassing ? "departure" : i === lastPax ? "arrival" : "departure";
     const clock = liveClockFromCall(c, movement);
+    const cancel = cancellationForCall(calls[i], svc.cancelled, svc.cancel_reason);
     return {
       tpl: c.tiploc,
       name: stationName(c.crs, c.tiploc),
@@ -893,8 +918,8 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
       activity: null,
       liveTime: clock.time,
       liveKind: clock.kind || "scheduled",
-      cancelledAtStop: false,
-      cancelReasonAtStop: null,
+      cancelledAtStop: cancel.cancelledAtStop,
+      cancelReasonAtStop: cancel.cancelReasonAtStop,
       loadingPercentage: c.loading_percentage ?? null,
       coachLoading: parseCoachLoading(c.coach_loading),
       actualSource: c.actualSource,
@@ -954,6 +979,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     td = null;
   }
   const ownDest = destStop?.name || stationName(destStop?.crs, destStop?.tpl) || tidyStationName(svc.destination_name);
+  const cancelFields = serviceCancellationFields(svc, notedStops);
   const diagramNo = Array.isArray(consist?.allocations)
     ? consist.allocations.map((a) => a.diagramNo).find(Boolean) || null
     : null;
@@ -979,9 +1005,9 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     originName: originStop?.name || stationName(originStop?.crs, originStop?.tpl) || tidyStationName(svc.origin_name),
     destination: destStop?.crs || (destStop ? "" : svc.destination_crs) || "",
     destinationName: ownDest,
-    cancelled: Boolean(svc.cancelled),
-    cancellation: null,
-    partiallyCancelled: false,
+    cancelled: cancelFields.cancelled,
+    cancellation: cancelFields.cancellation,
+    partiallyCancelled: cancelFields.partiallyCancelled,
     delayReason: svc.delay_reason || null,
     reverseFormation: false,
     formation: storedFormation(svc.formation),
@@ -1178,7 +1204,8 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (url.pathname === "/api/locations" || url.pathname === "/api/station") {
-      json(res, 200, { locations: searchLocations(url.searchParams.get("q") || "") }, {
+      const kind = String(url.searchParams.get("kind") || "").toLowerCase();
+      json(res, 200, { locations: searchLocations(url.searchParams.get("q") || "", kind) }, {
         "cache-control": "public, max-age=60, s-maxage=60",
       });
       return;

@@ -1,0 +1,56 @@
+[debug] [2026-10-21T13:57:33.643Z] ----------------------------------------------------------------------
+[debug] [2026-10-21T13:57:33.646Z] Command:       /opt/homebrew/Cellar/node/26.9.0/bin/node /opt/homebrew/bin/firebase projects:list --project rail-statistics-uas
+[debug] [2026-10-21T13:57:33.646Z] CLI Version:   14.15.2
+[debug] [2026-10-21T13:57:33.646Z] Platform:      darwin
+[debug] [2026-10-21T13:57:33.646Z] Node Version:  v26.9.0
+[debug] [2026-10-21T13:57:33.646Z] Time:          Wed Oct 21 2026 14:57:33 GMT+0100 (British Summer Time)
+[debug] [2026-10-21T13:57:33.646Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-21T13:57:33.648Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-10-21T13:57:33.666Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-21T13:57:33.667Z] > authorizing via signed-in user (railwaysecrets@gmail.com)
+[debug] [2026-10-21T13:57:33.669Z] Checked if tokens are valid: false, expires at: 1792329086237
+[debug] [2026-10-21T13:57:33.669Z] Checked if tokens are valid: false, expires at: 1792329086237
+[debug] [2026-10-21T13:57:33.669Z] > refreshing access token with scopes: []
+[debug] [2026-10-21T13:57:33.670Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2026-10-21T13:57:33.670Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-10-21T13:57:33.760Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 403
+[debug] [2026-10-21T13:57:33.760Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json "Blocked by sandbox network policy\nDestination: firebase-public.firebaseio.com:443\nReason: not on allow list\n"
+[warn] ⚠  Unable to fetch the CLI MOTD and remote config. This is not a fatal error, but may indicate an issue with your network connection. 
+[debug] [2026-10-21T13:57:33.761Z] Failed to fetch MOTD FirebaseError: Unable to parse JSON: SyntaxError: Unexpected token 'B', "Blocked by"... is not valid JSON
+[debug] [2026-10-21T13:57:33.858Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2026-10-21T13:57:33.858Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[error] Authentication Error: Your credentials are no longer valid. Please run firebase login --reauth
+
+For CI servers and headless environments, generate a new token with firebase login:ci
+[debug] [2026-10-21T13:57:33.859Z] Authentication Error: Your credentials are no longer valid. Please run firebase login --reauth
+
+For CI servers and headless environments, generate a new token with firebase login:ci
+[debug] [2026-10-21T13:57:33.864Z] FirebaseError: Authentication Error: Your credentials are no longer valid. Please run firebase login --reauth
+
+For CI servers and headless environments, generate a new token with firebase login:ci
+    at invalidCredentialError (/opt/homebrew/lib/node_modules/firebase-tools/lib/auth.js:167:12)
+    at refreshTokens (/opt/homebrew/lib/node_modules/firebase-tools/lib/auth.js:591:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async getAccessToken (/opt/homebrew/lib/node_modules/firebase-tools/lib/apiv2.js:42:18)
+    at async Client.addAuthHeader (/opt/homebrew/lib/node_modules/firebase-tools/lib/apiv2.js:169:21)
+    at async Client.request (/opt/homebrew/lib/node_modules/firebase-tools/lib/apiv2.js:120:34)
+    at async getProjectPage (/opt/homebrew/lib/node_modules/firebase-tools/lib/management/projects.js:267:17)
+    at async getFirebaseProjectPage (/opt/homebrew/lib/node_modules/firebase-tools/lib/management/projects.js:284:23)
+    at async listFirebaseProjects (/opt/homebrew/lib/node_modules/firebase-tools/lib/management/projects.js:315:29)
+    at async Command.actionFn (/opt/homebrew/lib/node_modules/firebase-tools/lib/commands/projects-list.js:51:20)
+[error] 
+[error] Error: Failed to list Firebase projects. See firebase-debug.log for more info.
+[debug] [2026-10-21T13:57:34.137Z] Error: EPERM: operation not permitted, open '/Users/jackwingate/.config/configstore/firebase-tools.json.2667269316'
+    at Object.openSync (node:fs:778:18)
+    at writeFile.writeFileSync [as sync] (/opt/homebrew/lib/node_modules/firebase-tools/node_modules/write-file-atomic/index.js:205:13)
+    at set all (/opt/homebrew/lib/node_modules/firebase-tools/node_modules/configstore/index.js:61:20)
+    at Configstore.delete (/opt/homebrew/lib/node_modules/firebase-tools/node_modules/configstore/index.js:101:12)
+    at process.<anonymous> (/opt/homebrew/lib/node_modules/firebase-tools/lib/bin/cli.js:65:45)
+    at process.emit (node:events:526:24)
+    at process.exit (node:internal/process/per_thread:236:15)
+    at Timeout._onTimeout (/opt/homebrew/lib/node_modules/firebase-tools/lib/errorOut.js:20:17)
+    at listOnTimeout (node:internal/timers:685:17)
+    at process.processTimers (node:internal/timers:618:7)
+[error] 
+[error] Error: An unexpected error has occurred.

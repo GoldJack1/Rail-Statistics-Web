@@ -146,4 +146,47 @@ describe('normalizeRailCore', () => {
     expect(detail.stops[0].liveTime).toBe('18:23')
     expect(detail.stops[0].etd).toBe('18:23')
   })
+
+  it('marks the unserved remainder of a cancelled service', () => {
+    const detail = normalizeServiceDetail({
+      rid: '202611036724593',
+      cancelled: true,
+      cancellation: { source: 'ts', reason: 'TRUST:0002:I8' },
+      stops: [
+        {
+          tpl: 'NTR',
+          name: 'Northallerton',
+          crs: 'NTR',
+          slot: 'IP',
+          ata: '12:30',
+          atd: null,
+          atp: null,
+          eta: null,
+          etd: null,
+          etp: null,
+          liveTime: '12:30',
+          liveKind: 'actual-arr',
+          cancelledAtStop: false,
+        },
+        {
+          tpl: 'LEEDS',
+          name: 'Leeds',
+          crs: 'LDS',
+          slot: 'IP',
+          ata: null,
+          atd: null,
+          atp: null,
+          eta: '13:26',
+          etd: '13:28',
+          etp: null,
+          liveTime: '13:28',
+          liveKind: 'est',
+          cancelledAtStop: false,
+        },
+      ],
+    })
+    expect(detail.stops[0].cancelledAtStop).toBe(false)
+    expect(detail.stops[1].cancelledAtStop).toBe(true)
+    expect(detail.stops[1].cancelReasonAtStop?.reason).toBe('TRUST:0002:I8')
+  })
 })
