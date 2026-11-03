@@ -504,6 +504,30 @@ describe('serviceJourneyMap', () => {
     expect(halfway?.to?.name).toBe('York')
   })
 
+  it('parks a finished train on the arrival, not a timing point filed after it', () => {
+    const stops = [
+      stop('EDINBUR', 'Edinburgh', 'OR', { crs: 'EDB', ptd: '04:20', atd: '04:25', lat: 55.95, lng: -3.19 }),
+      stop('FRTWLM', 'Fort William', 'DT', { crs: 'FTW', pta: '09:55', ata: '09:48', liveKind: 'actual-arr', lat: 56.82, lng: -5.11 }),
+      stop('KLPTRCK', 'Kilpatrick', 'PP', { crs: 'KPT', actualSource: 'inferred', lat: 55.92, lng: -4.45 }),
+    ]
+    const mapped = journeyMapStops(stops, [])
+    const live = liveJourneyPosition(
+      stops,
+      mapped,
+      {
+        phase: 'finished',
+        last: { tiploc: 'FRTWLM', crs: 'FTW', kind: 'stop', at: '09:48' },
+        next: null,
+        label: 'Arrived Fort William',
+      },
+      11 * 3600,
+    )
+    expect(live?.lat).toBe(56.82)
+    expect(live?.lng).toBe(-5.11)
+    expect(live?.from?.name).toBe('Fort William')
+    expect(live?.atStation).toBe(true)
+  })
+
   it('keeps an evening sleeper at the origin when a morning arrival is marked finished', () => {
     const stops = [
       stop('LEEDS', 'Leeds', 'OR', { crs: 'LDS', ptd: '21:15' }),

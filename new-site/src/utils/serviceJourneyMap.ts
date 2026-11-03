@@ -680,6 +680,35 @@ function indexOfTiploc(stops: ServiceStop[], tiploc: string | null | undefined):
   return i >= 0 ? i : null
 }
 
+function lastIndexOfTiploc(stops: ServiceStop[], tiploc: string | null | undefined): number | null {
+  const u = String(tiploc || '').trim().toUpperCase()
+  if (!u) return null
+  let found = -1
+  for (let i = 0; i < stops.length; i++) {
+    if (String(stops[i].tpl || '').toUpperCase() === u) found = i
+  }
+  return found >= 0 ? found : null
+}
+
+/** Where a finished train stands. A timing point filed after the arrival is not the train. */
+function finishedMapStop(
+  stops: ServiceStop[],
+  path: JourneyMapStop[],
+  location: ServiceLocation,
+): JourneyMapStop {
+  const arrived = lastIndexOfTiploc(stops, location.last?.tiploc)
+  if (arrived != null) {
+    const exact = path.find((point) => point.index === arrived) || mappedAtOrBefore(path, arrived)
+    if (exact) return exact
+  }
+  const reported = inferProgressIndex(stops, null)
+  if (reported != null) {
+    const atReport = path.find((point) => point.index === reported) || mappedAtOrBefore(path, reported)
+    if (atReport) return atReport
+  }
+  return path[path.length - 1]
+}
+
 function clockSeconds(raw: string | null | undefined): number | null {
   if (!raw) return null
   return railwayDaySecondsFromClock(raw)
@@ -758,8 +787,16 @@ export function liveJourneyPosition(
   let place = location
   if (location?.phase === 'finished') {
     if (originLeft) {
-      const last = path[path.length - 1]
-      return { lat: last.lat, lng: last.lng, label: location.label || `Arrived ${last.name}`, atStation: true, from: last, to: last, t: 1 }
+      const arrived = finishedMapStop(stops, path, location)
+      return {
+        lat: arrived.lat,
+        lng: arrived.lng,
+        label: location.label || `Arrived ${arrived.name}`,
+        atStation: true,
+        from: arrived,
+        to: arrived,
+        t: 1,
+      }
     }
     place = null
   }
