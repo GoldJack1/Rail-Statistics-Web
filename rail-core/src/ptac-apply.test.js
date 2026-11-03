@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "path";
 import { openCatalog } from "./db.js";
-import { applyPtacUnit, lookupConsist, lookupConsistsForUids, replayPtac } from "./ptac-apply.js";
+import { applyPtacUnit, consistFromOrigin, lookupConsist, lookupConsistsForUids, replayPtac } from "./ptac-apply.js";
 import { parsePtacMessage } from "./parse-ptac.js";
 
 const SAMPLE_XML = `<?xml version="1.0"?>
@@ -173,4 +173,30 @@ test("PTAC unit_ids follow the latest diagram and drop detached units", () => {
   const row = lookupConsist(cat, { uid: "G16307", ssd: "2026-10-02", originHHMM: "11:30" });
   assert.deepEqual(JSON.parse(row.unit_ids), ["185128", "185129"]);
   cat.close();
+});
+
+test("a continuation keeps the unit that starts at its origin", () => {
+  const doc = {
+    allocations: [
+      {
+        allocationOrigin: { tiploc: "REDCARC" },
+        allocationOriginDateTime: "2026-11-03T10:58:00",
+        allocationDestination: { tiploc: "YORK" },
+        allocationDestinationDateTime: "2026-11-03T12:18:00",
+        resourceGroups: [{ unitId: "185117", vehicles: [{ vehicleId: "1" }, { vehicleId: "2" }, { vehicleId: "3" }] }],
+      },
+      {
+        allocationOrigin: { tiploc: "YORK" },
+        allocationOriginDateTime: "2026-11-03T12:20:00",
+        allocationDestination: { tiploc: "MNCRIAP" },
+        allocationDestinationDateTime: "2026-11-03T14:08:00",
+        resourceGroups: [{ unitId: "185109", vehicles: [{ vehicleId: "4" }, { vehicleId: "5" }, { vehicleId: "6" }] }],
+      },
+    ],
+  };
+  const kept = consistFromOrigin(doc, { tiploc: "YORK", hhmm: "12:20" });
+  assert.deepEqual(
+    kept.allocations.map((a) => a.resourceGroups[0].unitId),
+    ["185109"],
+  );
 });

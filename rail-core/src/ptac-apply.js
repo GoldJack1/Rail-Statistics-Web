@@ -239,6 +239,50 @@ export function unitIdsAtBoardCall(row, { tiploc, hhmm, movement } = {}) {
   return [...ids];
 }
 
+/**
+ * A diagram can change unit along the way. A continuation that starts
+ * mid-diagram only keeps the units still on the train at that departure.
+ */
+export function consistFromOrigin(doc, { tiploc, hhmm } = {}) {
+  const allocations = doc?.allocations;
+  if (!Array.isArray(allocations) || !allocations.length) return doc;
+  const here = String(tiploc || "").toUpperCase();
+  const t = clockMinutes(hhmm);
+  if (!here && t == null) return doc;
+  const present = new Set();
+  for (const allocation of allocations) {
+    if (!allocationCoversDeparture(allocation, here, t)) continue;
+    for (const group of allocation.resourceGroups || []) {
+      if (group?.unitId) present.add(String(group.unitId));
+    }
+  }
+  if (!present.size) return null;
+  const kept = allocations.filter((allocation) => {
+    const ids = (allocation.resourceGroups || []).map((group) => String(group?.unitId || "")).filter(Boolean);
+    if (!ids.some((id) => present.has(id))) return false;
+    const end = clockMinutes(allocation.allocationDestinationDateTime);
+    const start = clockMinutes(allocation.allocationOriginDateTime);
+    if (t == null || (start == null && end == null)) return true;
+    const finish = end == null ? start : end >= (start ?? end) ? end : end + 24 * 60;
+    return finish >= t;
+  });
+  if (!kept.length) return null;
+  return { ...doc, allocations: kept };
+}
+
+function allocationCoversDeparture(allocation, here, t) {
+  const orig = String(allocation?.allocationOrigin?.tiploc || "").toUpperCase();
+  const dest = String(allocation?.allocationDestination?.tiploc || "").toUpperCase();
+  const start = clockMinutes(allocation?.allocationOriginDateTime);
+  const end = clockMinutes(allocation?.allocationDestinationDateTime);
+  if (here && orig === here) return true;
+  if (t == null || start == null || end == null) return false;
+  const finish = end >= start ? end : end + 24 * 60;
+  const depart = t;
+  if (here && dest === here && finish < depart) return false;
+  return start <= depart && finish >= depart;
+}
+
 export function endOfDayMilesForUnit(json, unitId) {
   let miles = null;
   for (const alloc of parseJson(json).allocations || []) {

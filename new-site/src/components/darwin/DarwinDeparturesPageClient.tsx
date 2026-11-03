@@ -430,6 +430,9 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   const code = paramAsString(params.code).toUpperCase()
   const hasStationSelected = code.length > 0
   const [searchInput, setSearchInput] = useState<string>('')
+  const [submittedSearch, setSubmittedSearch] = useState('')
+  const [pickedStation, setPickedStation] = useState<DarwinSearchHit | null>(null)
+  const [isMobileLayout, setIsMobileLayout] = useState(false)
   const [searchMode, setSearchMode] = useState<StationSearchMode>('name')
   const [searchError, setSearchError] = useState<string | null>(null)
   const [historyDateError, setHistoryDateError] = useState<string | null>(null)
@@ -453,10 +456,12 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     ),
     [stations],
   )
-  const catalogHits = useDarwinLocationSearch(searchInput, locationKindForMode(searchMode, searchInput))
+  const deferStationSearch = isMobileLayout && !hasStationSelected
+  const lookupQuery = deferStationSearch ? submittedSearch : searchInput
+  const catalogHits = useDarwinLocationSearch(lookupQuery, locationKindForMode(searchMode, lookupQuery))
   const nameSearchHits = useMemo(
-    () => filterDepartureNameResults(searchInput, gbnrStations, catalogHits, gbnrStations.length > 0),
-    [searchInput, gbnrStations, catalogHits],
+    () => filterDepartureNameResults(lookupQuery, gbnrStations, catalogHits, gbnrStations.length > 0),
+    [lookupQuery, gbnrStations, catalogHits],
   )
   const catalogHere = useDarwinLocationLookup(hasStationSelected ? code : '')
 
@@ -479,7 +484,6 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   const [showLiveTime, setShowLiveTime] = useState(!historyDate && !historyTime)
   const [openPane, setOpenPane] = useState<'filters' | 'view' | 'date' | 'time' | 'lookup' | null>(null)
   const [stackedPicker, setStackedPicker] = useState<'date' | 'time' | null>(null)
-  const [isMobileLayout, setIsMobileLayout] = useState(false)
   const pickerDirtyRef = useRef(false)
   const stackedPickerRef = useRef(stackedPicker)
   stackedPickerRef.current = stackedPicker
@@ -631,12 +635,31 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
 
   const setSearchModeAndFocus = (nextMode: StationSearchMode) => {
     setSearchError(null)
+    setSubmittedSearch('')
+    setPickedStation(null)
     setSearchMode(nextMode)
     setSearchInput((prev) => normalizeSearchInputForMode(prev, nextMode))
   }
 
+  const commitLandingSearch = () => {
+    const next = normalizeSearchInputForMode(searchInput, searchMode).trim()
+    if (!next) {
+      setSearchError('Enter a station name, CRS, or TIPLOC.')
+      setSubmittedSearch('')
+      return
+    }
+    if (searchMode === 'name' && next.length < 2) {
+      setSearchError('Enter at least two letters of the station name.')
+      setSubmittedSearch('')
+      return
+    }
+    setSearchError(null)
+    setPickedStation(null)
+    setSubmittedSearch(next)
+  }
+
   const stationLabel = useMemo(() => {
-    if (!hasStationSelected) return 'Live departures'
+    if (!hasStationSelected) return 'Live train times'
     if (clickedLabel.trim()) return clickedLabel.trim()
     if (catalogHere?.name && !isRawTiplocLikeName(catalogHere.name, code)) {
       return catalogHere.crs ? `${catalogHere.name} (${catalogHere.crs})` : catalogHere.name
@@ -787,7 +810,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
 
   const subtitle = useMemo<React.ReactNode>(() => {
     const movementWord = boardMode === 'departures' ? 'departures' : 'arrivals'
-    if (!hasStationSelected) return 'Search by station name, CRS, or TIPLOC'
+    if (!hasStationSelected) return 'Look up live train times for all railway stations in Great Britain.'
 
     const liveParts = !datedBoard && liveClockReady ? getLiveNowPartsUk() : null
     const windowDate = historyDate || liveParts?.date || ''
@@ -839,6 +862,33 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     setSearchError(null)
     setSearchInput('')
     router.push(`/departures/${targetCode}${location.search}`)
+  }
+
+  const stationFieldValue = (station: DarwinSearchHit) => {
+    if (searchMode === 'crs') return station.crsCode
+    if (searchMode === 'tiploc' || searchMode === 'other') return station.tiploc || station.crsCode || ''
+    return station.stationName
+  }
+
+  const landingQuery = normalizeSearchInputForMode(searchInput, searchMode).trim()
+  const pickedReady = Boolean(
+    pickedStation
+    && normalizeSearchInputForMode(stationFieldValue(pickedStation), searchMode).trim() === landingQuery,
+  )
+
+  const runLandingSearch = () => {
+    if (pickedReady && pickedStation) {
+      openDeparturesForStation(pickedStation)
+      return
+    }
+    commitLandingSearch()
+  }
+
+  const chooseLandingStation = (station: DarwinSearchHit) => {
+    setPickedStation(station)
+    setSearchInput(normalizeSearchInputForMode(stationFieldValue(station), searchMode))
+    setSubmittedSearch('')
+    setSearchError(null)
   }
 
   const availableHistoryDatesSet = useMemo(() => new Set(historyDates), [historyDates])
@@ -977,7 +1027,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     closeDateTimePane()
   }
 
-  const lookupControls = (
+  const renderLookupControls = (deferred = false) => (
     <div className="dep-sidebar-stack">
       <div className="dep-history-controls">
         <div className="dep-sidebar-field">
@@ -1029,13 +1079,16 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
           value={searchInput}
           onChange={(value) => {
             setSearchInput(normalizeSearchInputForMode(value, searchMode))
+            setPickedStation(null)
             if (searchError) setSearchError(null)
           }}
           onClear={() => {
             setSearchInput('')
+            setSubmittedSearch('')
+            setPickedStation(null)
             setSearchError(null)
           }}
-          onSubmit={submitSearch}
+          onSubmit={deferred ? runLandingSearch : submitSearch}
           enterKeyHint="search"
           placeholder={searchPlaceholderForMode(searchMode)}
           className="search-input-shell tickets-od-input"
@@ -1046,7 +1099,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
           autoCapitalize="off"
           spellCheck={false}
         />
-        {stationSuggestions.length > 0 && (
+        {(!deferred || submittedSearch === normalizeSearchInputForMode(searchInput, searchMode).trim()) && stationSuggestions.length > 0 && (
           <div className="tickets-station-suggestions" role="listbox" aria-label={searchMode === 'other' ? 'Location suggestions' : 'Station suggestions'}>
             {stationSuggestions.map((station, index) => {
               const isLast = index === stationSuggestions.length - 1
@@ -1069,7 +1122,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                       ? `${station.stationName} (${codeLabel})`
                       : station.stationName
                   }
-                  onClick={() => openDeparturesForStation(station)}
+                  onClick={() => (deferred ? chooseLandingStation(station) : openDeparturesForStation(station))}
                 >
                   <span className="tickets-station-suggestion__label">
                     <span className="tickets-station-suggestion__name">{station.stationName}</span>
@@ -1132,6 +1185,18 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
         <p className="dep-history-inline-error" role="alert">{searchError}</p>
       )}
       </div>
+      {deferred ? (
+        <BUTWideButton
+          type="button"
+          width="fill"
+          instantAction
+          className="dep-landing-search"
+          disabled={landingQuery.length === 0}
+          onClick={runLandingSearch}
+        >
+          Search
+        </BUTWideButton>
+      ) : null}
     </div>
   )
 
@@ -1237,6 +1302,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
               >
                 Filters
               </BUTWideButton>
+              {hasStationSelected ? (
               <div className="dep-header-edit">
                 <BUTWideButton
                   type="button"
@@ -1250,6 +1316,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   Edit station, date & time
                 </BUTWideButton>
               </div>
+              ) : null}
             </div>
           </>
         )}
@@ -1259,18 +1326,24 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
           <aside className="browse-sidebar" aria-label="Board controls">
             {!isMobileLayout && (
             <SidebarPanel className="browse-sidebar-panel dep-sidebar-panel">
-              {lookupControls}
+              {renderLookupControls()}
             </SidebarPanel>
             )}
           </aside>
 
           <main className="browse-main dep-main">
-            {!hasStationSelected && (
+            {!hasStationSelected && deferStationSearch && (
+              <section className="dep-main-message dep-main-message--search">
+                <h2>Search for a station</h2>
+                <p>Search by station name, CRS or TIPLOC codes, and choose a date and time.</p>
+                {renderLookupControls(true)}
+              </section>
+            )}
+
+            {!hasStationSelected && !deferStationSearch && (
               <section className="dep-main-message">
-                <h2>Choose a station to begin</h2>
-                <p>
-                  Search by station name, CRS, or TIPLOC, then pick a match from the list.
-                </p>
+                <h2>Search for a station</h2>
+                <p>Search by station name, CRS or TIPLOC codes, and choose a date and time.</p>
               </section>
             )}
 
@@ -1360,7 +1433,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
         onClose={() => requestPane(null)}
         footer={openPane === 'time' ? timePaneFooter : openPane === 'date' ? datePaneFooter : null}
       >
-        {openPane === 'lookup' ? lookupControls : openPane === 'view' ? (
+        {openPane === 'lookup' ? renderLookupControls() : openPane === 'view' ? (
         <div className="dep-view-settings">
           <div className="dep-control-group">
             <span className="dep-filter-label" id="dep-filter-board-label">Board</span>

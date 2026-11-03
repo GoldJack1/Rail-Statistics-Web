@@ -600,6 +600,28 @@
   color: var(--text-secondary);
 }
 
+.dep-main-message--search {
+  padding: 0;
+  text-align: left;
+}
+
+.dep-main-message--search .dep-sidebar-stack {
+  padding: var(--space-lg) 0 0;
+}
+
+.dep-main-message--search .dep-sidebar-search {
+  order: 1;
+}
+
+.dep-main-message--search .dep-history-controls {
+  order: 2;
+}
+
+.dep-main-message--search .dep-landing-search {
+  order: 3;
+  margin-top: calc(60px - var(--space-lg));
+}
+
 .dep-main-message h2 {
   margin: 0 0 var(--space-sm);
   font-size: var(--text-xl);
@@ -636,6 +658,14 @@
 @media (max-width: 639px) {
   .darwin-departures-shell .rs-page-top-header {
     display: block;
+  }
+
+  .darwin-departures-shell .browse-page-content {
+    align-content: start;
+  }
+
+  .darwin-departures-shell .browse-sidebar {
+    display: none;
   }
 
   .dep-cards {

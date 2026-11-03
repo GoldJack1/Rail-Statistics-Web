@@ -20,6 +20,7 @@ import type { Station } from '../../../types'
 import { mapLocationBanner, portionBannerTitle, type MapLocationBanner } from './mapLocationBanner'
 import { loadGbRailGraph } from '../../../utils/tracksGraphLoad'
 import { ServiceTracksMap, type BranchTrack } from './ServiceTracksMap'
+import type { ServiceViewMode } from '../serviceViewMode'
 import '@/components/darwin/callingPatternTones.css'
 import './ServiceJourneyMap.css'
 
@@ -112,6 +113,7 @@ export function ServiceJourneyMap({
   extraStops = [],
   branches = [],
   onNominatimUsed,
+  viewMode = 'detailed',
 }: {
   service: ServiceDetail
   stations: Station[]
@@ -120,6 +122,7 @@ export function ServiceJourneyMap({
   branches?: ServiceDetail[]
   /** A station coordinate was filled in from Nominatim. */
   onNominatimUsed?: () => void
+  viewMode?: ServiceViewMode
 }) {
   const [banners, setBanners] = useState<MapLocationBanner[]>([])
   const [extraCoords, setExtraCoords] = useState<Record<string, { lat: number; lng: number }>>({})
@@ -470,6 +473,7 @@ export function ServiceJourneyMap({
           theme={themeKey}
           fullscreen={expanded}
           onToggleFullscreen={toggleFullscreen}
+          callsOnly={viewMode === 'simple'}
         />
       </div>
     </div>

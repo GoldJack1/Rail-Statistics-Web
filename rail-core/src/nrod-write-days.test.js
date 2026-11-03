@@ -9,7 +9,7 @@ import { openCatalog, openDayDb, upsertCall, upsertService } from "./db.js";
 import { ensureSmartTables, importSmartPayload, parseSmartPayload } from "./import-smart.js";
 import { applyTdFrame } from "./td-apply.js";
 import { applyTrustFrame, healTrustCancellations } from "./trust-apply.js";
-import { linkReinstatement } from "./reinstatement.js";
+import { linkReinstatement, reinstatementDonorUid } from "./reinstatement.js";
 import { applyVstpFrame } from "./vstp-apply.js";
 import { writeDaysForRid } from "./nrod-write-days.js";
 
@@ -328,6 +328,8 @@ test("EN ROUTE cancel keeps the arrival, drops the rest, and links the new headc
   assert.equal(link.main_rid, TODAY_RID);
   assert.equal(link.assoc_rid, nextRid);
   assert.equal(link.tiploc, "YORK");
+  assert.equal(reinstatementDonorUid(db, nextRid)?.uid, UID);
+  assert.equal(reinstatementDonorUid(db, TODAY_RID), null);
   db.close();
 
   applyTrustFrame(dir, { header: { msg_type: "0005" }, body: { train_id: "151P70MH03", train_uid: UID } }, TODAY);

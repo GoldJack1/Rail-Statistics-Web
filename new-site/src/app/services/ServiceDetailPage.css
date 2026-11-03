@@ -1249,7 +1249,7 @@
 
 @media (max-width: 1023px) {
   .service-detail-header.rs-page-top-header {
-    padding-bottom: var(--space-sm);
+    padding-bottom: var(--space-md);
   }
 
   .service-detail-header .rs-page-top-header__actions-row {
@@ -1257,7 +1257,7 @@
   }
 
   .service-detail-header .service-detail-header-actions {
-    gap: 10px;
+    gap: 20px;
   }
 
   .service-detail-header-actions .station-details-header-actions__controls {
@@ -1307,7 +1307,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);
-    padding: var(--space-sm) var(--stations-panel-text-inset, var(--space-lg)) var(--space-sm);
+    padding: var(--space-md) var(--stations-panel-text-inset, var(--space-lg)) var(--space-sm);
     box-sizing: border-box;
   }
 

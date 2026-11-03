@@ -15,11 +15,12 @@ import { annotateStops, publicSchedule } from "./schedule-notes.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { cancellationForCall, serviceCancellationFields } from "./service-cancel.js";
 import { healTrustCancellations } from "./trust-apply.js";
+import { reinstatementDonorUid } from "./reinstatement.js";
 import { maskCallsAsOf, parseAtParam } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
 import { osgbToWgs84 } from "./osgb.js";
 import { ensureDayImported, ridNeedsHsp, ridsNeedHsp, startBoardHspFill } from "./ensure-history-day.js";
-import { consistDocument, endOfDayMilesForUnit, lookupConsist, normalizePtacVehicles, unitIdsFromConsistRow } from "./ptac-apply.js";
+import { consistDocument, consistFromOrigin, endOfDayMilesForUnit, lookupConsist, normalizePtacVehicles, unitIdsFromConsistRow } from "./ptac-apply.js";
 import {
   associationsForRid,
   combinedDestinationName,
@@ -507,15 +508,37 @@ function storedFormation(raw) {
   }
 }
 
-function consistForService(ymd, svc) {
+function consistForService(ymd, svc, db = null) {
   const days = [ymd, addCalendarDays(ymd, 1), addCalendarDays(ymd, -1)].filter(Boolean);
   const seen = new Set();
+  const donors = [{ uid: svc.uid, headcode: svc.headcode, fromOrigin: false }];
+  if (db && svc?.rid) {
+    const donor = reinstatementDonorUid(db, svc.rid);
+    if (donor?.uid) donors.push({ ...donor, fromOrigin: true });
+  }
+  let origin = null;
   for (const day of days) {
     if (seen.has(day)) continue;
     seen.add(day);
-    const row = lookupConsist(catalog, { uid: svc.uid, ssd: day, headcode: svc.headcode });
-    const doc = consistDocument(row, svc.toc);
-    if (doc) return doc;
+    for (const donor of donors) {
+      const row = lookupConsist(catalog, { uid: donor.uid, ssd: day, headcode: donor.headcode });
+      let doc = consistDocument(row, svc.toc);
+      if (doc && donor.fromOrigin) {
+        if (!origin && db) {
+          origin = db
+            .prepare(
+              `SELECT tiploc, std, sta, wtd, wta FROM calls
+               WHERE rid = ? AND IFNULL(is_passing, 0) = 0 ORDER BY seq LIMIT 1`,
+            )
+            .get(svc.rid);
+        }
+        doc = consistFromOrigin(doc, {
+          tiploc: origin?.tiploc,
+          hhmm: origin?.std || origin?.sta || origin?.wtd || origin?.wta,
+        });
+      }
+      if (doc) return doc;
+    }
   }
   return null;
 }
@@ -784,7 +807,7 @@ async function serviceDetail(ymd, rid, atRaw, hop = 0) {
     peerDays,
     stationName,
   );
-  const consist = consistForService(ymd, svc);
+  const consist = consistForService(ymd, svc, db);
   const consistInferred = inferAssociationsFromConsist({ db, catalog, ymd, svc, consist, stationName });
   const inferredAssoc = enrichAssociationsFromDays(
     hydrateAssociations(

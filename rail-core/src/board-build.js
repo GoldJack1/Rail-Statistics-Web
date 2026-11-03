@@ -10,6 +10,7 @@ import { isPassengerHeadcode } from "./headcode.js";
 import { maskCallAsOf, maskCallsAsOf, maskTrustOverlay, maskTrustOverlayCalls } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
 import { lookupConsistsForUids, unitIdsAtBoardCall } from "./ptac-apply.js";
+import { reinstatementDonorUid } from "./reinstatement.js";
 import {
   associationsForRid,
   combinedDestinationName,
@@ -341,6 +342,16 @@ export function buildStationBoard({
       ymd,
       rows.map((r) => r.uid),
     );
+  }
+  if (consistByUid && catalog) {
+    for (const raw of rows) {
+      const uid = String(raw.uid || "").toUpperCase();
+      if (!uid || consistByUid.has(uid)) continue;
+      const donor = reinstatementDonorUid(db, raw.s_rid);
+      if (!donor?.uid) continue;
+      const borrowed = lookupConsistsForUids(catalog, ymd, [donor.uid]).get(String(donor.uid).toUpperCase());
+      if (borrowed) consistByUid.set(uid, borrowed);
+    }
   }
   const rids = [...new Set(rows.map((r) => r.s_rid))];
   const callsByRid = new Map();

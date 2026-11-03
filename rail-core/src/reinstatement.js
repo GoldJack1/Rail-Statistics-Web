@@ -178,6 +178,40 @@ export function clearReinstatementLinks(db, rid) {
   }
 }
 
+/**
+ * The continuation has a new UID, so its own diagram is often empty. The
+ * cancelled train's allocation still describes the units, when the link is at
+ * this service's origin.
+ */
+export function reinstatementDonorUid(db, rid) {
+  let rows = [];
+  try {
+    rows = db
+      .prepare(
+        `SELECT a.tiploc, s.uid, s.headcode, s.train_id
+         FROM associations a
+         JOIN services s ON s.rid = a.main_rid
+         WHERE a.category = 'NP'
+           AND IFNULL(a.is_deleted, 0) = 0
+           AND a.assoc_rid = ?
+           AND s.cancel_reason LIKE 'TRUST:0002:%@%'`,
+      )
+      .all(rid);
+  } catch {
+    return null;
+  }
+  if (!rows.length) return null;
+  const origin = db
+    .prepare(
+      `SELECT tiploc FROM calls WHERE rid = ? AND IFNULL(is_passing, 0) = 0 ORDER BY seq LIMIT 1`,
+    )
+    .get(rid);
+  const originTpl = String(origin?.tiploc || "").toUpperCase();
+  const hit = rows.find((row) => String(row.tiploc || "").toUpperCase() === originTpl);
+  if (!hit?.uid) return null;
+  return { uid: hit.uid, headcode: hit.headcode || hit.train_id || "" };
+}
+
 export function linkReinstatementForUid(dataDir, ymd, uid) {
   const db = openDayDb(dataDir, ymd);
   try {

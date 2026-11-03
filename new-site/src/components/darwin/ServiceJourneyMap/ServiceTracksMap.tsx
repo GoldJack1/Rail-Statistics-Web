@@ -97,6 +97,10 @@ function lineCollection(path: LatLngTuple[]): GeoJSON.FeatureCollection {
   return { type: 'FeatureCollection', features }
 }
 
+function shownStops(stops: JourneyMapStop[], callsOnly: boolean): JourneyMapStop[] {
+  return callsOnly ? stops.filter((stop) => stop.calling) : stops
+}
+
 function stopCollection(
   stops: JourneyMapStop[],
   path: LatLngTuple[] | null,
@@ -222,6 +226,7 @@ export function ServiceTracksMap({
   theme,
   fullscreen,
   onToggleFullscreen,
+  callsOnly = false,
 }: {
   waypoints: LatLngTuple[]
   extraWaypoints?: LatLngTuple[][]
@@ -236,6 +241,8 @@ export function ServiceTracksMap({
   theme: TracksMapTheme
   fullscreen: boolean
   onToggleFullscreen: () => void
+  /** Simple view: passenger calls only, matching the calling list. */
+  callsOnly?: boolean
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MapLibreMap | null>(null)
@@ -245,7 +252,7 @@ export function ServiceTracksMap({
   const branchPathsRef = useRef<Map<string, LatLngTuple[]>>(new Map())
   const userPointRef = useRef<{ lat: number; lng: number } | null>(null)
   const [styleEpoch, setStyleEpoch] = useState(0)
-  const inputRef = useRef({ stops, mapped, location, platforms, trainId, branches })
+  const inputRef = useRef({ stops, mapped, extraMapped, location, platforms, trainId, branches, callsOnly })
   const shownRef = useRef<{ lat: number; lng: number } | null>(null)
   const shownBranchesRef = useRef<Map<string, { lat: number; lng: number }>>(new Map())
   const userMovedRef = useRef(false)
@@ -271,7 +278,7 @@ export function ServiceTracksMap({
   const frameStops = extraMapped.length ? [...mapped, ...extraMapped] : mapped
 
   useLayoutEffect(() => {
-    inputRef.current = { stops, mapped, location, platforms, trainId, branches }
+    inputRef.current = { stops, mapped, extraMapped, location, platforms, trainId, branches, callsOnly }
     routeColorRef.current = lineColor
     basemapRef.current = basemap
   })
@@ -427,7 +434,11 @@ export function ServiceTracksMap({
         }
       }
       if (pathRef.current) setSource(map, 'tracks-route', lineCollection(pathRef.current))
-      setSource(map, 'tracks-stops', stopCollection(inputRef.current.mapped, pathRef.current, inputRef.current.platforms))
+      setSource(map, 'tracks-stops', stopCollection(
+        shownStops(inputRef.current.mapped, inputRef.current.callsOnly),
+        pathRef.current,
+        inputRef.current.platforms,
+      ))
       const user = userPointRef.current
       if (user) setSource(map, 'tracks-user', pointCollection(user.lat, user.lng, 'Your location'))
       setMapReady(map)
@@ -480,7 +491,11 @@ export function ServiceTracksMap({
       const map = mapRef.current
       if (!map?.getSource('tracks-route')) return
       setSource(map, 'tracks-route', lineCollection(path))
-      setSource(map, 'tracks-stops', stopCollection(inputRef.current.mapped, path, inputRef.current.platforms))
+      setSource(map, 'tracks-stops', stopCollection(
+        shownStops(inputRef.current.mapped, inputRef.current.callsOnly),
+        path,
+        inputRef.current.platforms,
+      ))
     }
     void routeTracksJourney(waypoints, controller.signal, paint)
       .then(paint)
@@ -509,7 +524,11 @@ export function ServiceTracksMap({
       if (gone) return
       const features = paths.flatMap((path) => lineCollection(path).features)
       setSource(map, 'tracks-extra-route', { type: 'FeatureCollection', features })
-      setSource(map, 'tracks-extra-stops', stopCollection(extraMapped, null, {}))
+      setSource(map, 'tracks-extra-stops', stopCollection(
+        shownStops(extraMapped, inputRef.current.callsOnly),
+        null,
+        {},
+      ))
     }
     void Promise.all(
       extraWaypoints.map((route) => routeTracksJourney(route, controller.signal).catch(() => [] as LatLngTuple[])),
@@ -550,8 +569,16 @@ export function ServiceTracksMap({
   useEffect(() => {
     const map = mapRef.current
     if (!mapReady || !map?.getSource('tracks-stops')) return
-    setSource(map, 'tracks-stops', stopCollection(mapped, pathRef.current, platforms))
-  }, [mapped, platforms, mapReady])
+    const current = inputRef.current
+    setSource(map, 'tracks-stops', stopCollection(
+      shownStops(current.mapped, current.callsOnly),
+      pathRef.current,
+      current.platforms,
+    ))
+    if (map.getSource('tracks-extra-stops')) {
+      setSource(map, 'tracks-extra-stops', stopCollection(shownStops(current.extraMapped, current.callsOnly), null, {}))
+    }
+  }, [mapped, extraMapped, platforms, callsOnly, mapReady])
 
   useEffect(() => {
     const map = mapRef.current

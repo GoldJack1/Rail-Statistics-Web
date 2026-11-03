@@ -750,6 +750,7 @@ const ServiceDetailPage: React.FC = () => {
               stations={stations}
               extraStops={mapBranches}
               branches={liveBranches}
+              viewMode={viewMode}
               onNominatimUsed={() => setMapNominatim(true)}
             />
           </section>
