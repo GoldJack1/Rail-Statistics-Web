@@ -50,18 +50,40 @@ export function normalizeBerth(raw) {
 
 const EVENT_RANK = `CASE event_type WHEN 'C' THEN 0 WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'D' THEN 3 ELSE 4 END`;
 
+const preparedSql = new WeakMap();
+const corpusByStanox = new WeakMap();
+
+function cachedStmt(db, sql) {
+  let bag = preparedSql.get(db);
+  if (!bag) {
+    bag = new Map();
+    preparedSql.set(db, bag);
+  }
+  let stmt = bag.get(sql);
+  if (!stmt) {
+    stmt = db.prepare(sql);
+    bag.set(sql, stmt);
+  }
+  return stmt;
+}
+
 function lookupCorpusByStanox(catalog, stanox) {
   const s = normalizeStanox(stanox);
-  if (!s) return null;
-  let row = catalog.prepare(`SELECT tiploc, crs, name FROM corpus WHERE stanox = ? LIMIT 1`).get(s);
-  if (!row && /^0/.test(s)) {
-    row = catalog
-      .prepare(`SELECT tiploc, crs, name FROM corpus WHERE stanox = ? LIMIT 1`)
-      .get(String(Number(s)));
+  if (!s || !catalog) return null;
+  let bag = corpusByStanox.get(catalog);
+  if (!bag) {
+    bag = new Map();
+    corpusByStanox.set(catalog, bag);
   }
-  return row?.tiploc
+  if (bag.has(s)) return bag.get(s);
+  const sql = `SELECT tiploc, crs, name FROM corpus WHERE stanox = ? LIMIT 1`;
+  let row = cachedStmt(catalog, sql).get(s);
+  if (!row && /^0/.test(s)) row = cachedStmt(catalog, sql).get(String(Number(s)));
+  const found = row?.tiploc
     ? { tiploc: String(row.tiploc).toUpperCase(), crs: row.crs || null, name: row.name || null, stanox: s }
     : null;
+  bag.set(s, found);
+  return found;
 }
 
 function pickSmartStep(catalog, rows, hintTiplocs = null) {
@@ -78,47 +100,32 @@ function pickSmartStep(catalog, rows, hintTiplocs = null) {
 }
 
 function querySmartSteps(catalog, area, from, to) {
-  if (from && to) {
-    const pair = catalog
-      .prepare(
-        `SELECT stanox, event_type, platform FROM smart_steps
+  const pairSql = `SELECT stanox, event_type, platform FROM smart_steps
          WHERE td_area = ? AND from_berth = ? AND to_berth = ? AND stanox IS NOT NULL
-         ORDER BY ${EVENT_RANK}`,
-      )
-      .all(area, from, to);
+         ORDER BY ${EVENT_RANK}`;
+  const toSql = `SELECT stanox, event_type, platform FROM smart_steps
+         WHERE td_area = ? AND to_berth = ? AND stanox IS NOT NULL
+         ORDER BY ${EVENT_RANK}`;
+  if (from && to) {
+    const pair = cachedStmt(catalog, pairSql).all(area, from, to);
     if (pair.length) return pair;
   }
   if (to) {
-    const hit = catalog
-      .prepare(
-        `SELECT stanox, event_type, platform FROM smart_steps
-         WHERE td_area = ? AND to_berth = ? AND stanox IS NOT NULL
-         ORDER BY ${EVENT_RANK}`,
-      )
-      .all(area, to);
+    const hit = cachedStmt(catalog, toSql).all(area, to);
     if (hit.length) return hit;
     if (/^0/.test(to)) {
       const unpadded = String(Number(to));
-      if (unpadded !== to) {
-        return catalog
-          .prepare(
-            `SELECT stanox, event_type, platform FROM smart_steps
-             WHERE td_area = ? AND to_berth = ? AND stanox IS NOT NULL
-             ORDER BY ${EVENT_RANK}`,
-          )
-          .all(area, unpadded);
-      }
+      if (unpadded !== to) return cachedStmt(catalog, toSql).all(area, unpadded);
     }
   }
   // A CA step is the berth the train entered. The berth it left is not that place.
   if (!to && from) {
-    return catalog
-      .prepare(
-        `SELECT stanox, event_type, platform FROM smart_steps
+    return cachedStmt(
+      catalog,
+      `SELECT stanox, event_type, platform FROM smart_steps
          WHERE td_area = ? AND from_berth = ? AND stanox IS NOT NULL
          ORDER BY ${EVENT_RANK}`,
-      )
-      .all(area, from);
+    ).all(area, from);
   }
   return [];
 }

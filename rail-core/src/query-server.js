@@ -10,7 +10,7 @@ import { formatTiplocName, tidyStationName } from "./tiploc-names.js";
 import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicCallTime, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime, sortCallsByWttTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
 import { applyLiveToInferred, carryRunningLateness, collectReportedPasses, dropForeignTdActuals, dropPassesOffTheLeg, dropUnreportedPasses, insertModalStations, insertReportedPasses, overlayTdOnCalls, passengerStationCrs, reportsForService, retimeInferredPasses, scheduleSequences, settleUnreportedPasses, tiplocCoords } from "./query-enrich.js";
-import { assignTrackMiles, loadGtclGraph } from "./gtcl-path.js";
+import { assignTrackMiles, loadGtclGraph, warmTrackLookups } from "./gtcl-path.js";
 import { annotateStops, publicSchedule } from "./schedule-notes.js";
 import { buildStationBoard, collapseDuplicateBoardRows, liveClockFromCall } from "./board-build.js";
 import { cancellationForCall, serviceCancellationFields } from "./service-cancel.js";
@@ -1437,6 +1437,16 @@ const server = createServer(async (req, res) => {
     json(res, 500, { error: String(err) });
   }
 });
+
+function warmDevQuery() {
+  if (QUERY_ENV !== "dev") return;
+  const ymd = operatingDayYmd();
+  const db = openDay(ymd);
+  if (db) scheduleSequences(db, ymd);
+  warmTrackLookups(process.env.GTCL_GRAPH || `${DATA_DIR}/gtcl-graph.sqlite`, catalog);
+}
+
+warmDevQuery();
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`rail-core query on 127.0.0.1:${PORT} (${QUERY_ENV_LABEL})`);

@@ -47,6 +47,13 @@ function hopWeight(db, from, to, load, fallback) {
   return any?.secs > 0 ? any.secs : fallback;
 }
 
+export function warmTrackLookups(file, catalog) {
+  const graph = loadGtclGraph(file);
+  if (graph) ensureCells(graph);
+  if (catalog) locations(catalog);
+  return graph;
+}
+
 export function loadGtclGraph(file) {
   if (!file || !existsSync(file)) return null;
   if (cached && cachedPath === file) return cached;

@@ -9,13 +9,40 @@ import { isNonPassengerLocation, isSignalOrElocTiploc } from "./geometry-densify
 import { interpolateHm } from "./tiploc-graph.js";
 import { actualBelongsToBooked, bookedInstantForRid, isSignallingBerth, latestClockInstant, tdClockBelongsToRid } from "./td-match.js";
 
+const preparedSql = new WeakMap();
+const corpusMetaCache = new WeakMap();
+const stanoxTiplocCache = new WeakMap();
+const tdByTiplocCache = new WeakMap();
+const TD_LOOKUP_MS = 10_000;
+
+function cachedStmt(db, sql) {
+  let bag = preparedSql.get(db);
+  if (!bag) {
+    bag = new Map();
+    preparedSql.set(db, bag);
+  }
+  let stmt = bag.get(sql);
+  if (!stmt) {
+    stmt = db.prepare(sql);
+    bag.set(sql, stmt);
+  }
+  return stmt;
+}
+
 function corpusMeta(catalog, tiploc) {
   if (!catalog || !tiploc) return { name: "", crs: "" };
+  const key = String(tiploc).toUpperCase();
+  let bag = corpusMetaCache.get(catalog);
+  if (!bag) {
+    bag = new Map();
+    corpusMetaCache.set(catalog, bag);
+  }
+  if (bag.has(key)) return bag.get(key);
   try {
-    const row = catalog
-      .prepare(`SELECT name, crs FROM corpus WHERE tiploc = ? COLLATE NOCASE`)
-      .get(String(tiploc).toUpperCase());
-    return { name: row?.name || "", crs: row?.crs || "" };
+    const row = cachedStmt(catalog, `SELECT name, crs FROM corpus WHERE tiploc = ? COLLATE NOCASE`).get(key);
+    const meta = { name: row?.name || "", crs: row?.crs || "" };
+    bag.set(key, meta);
+    return meta;
   } catch {
     return { name: "", crs: "" };
   }
@@ -87,13 +114,12 @@ function latestTdByTiploc(db, headcode) {
   if (!headcode || !db) return new Map();
   let rows = [];
   try {
-    rows = db
-      .prepare(
-        `SELECT tiploc, berth, json, received_at FROM td_events
+    rows = cachedStmt(
+      db,
+      `SELECT tiploc, berth, json, received_at FROM td_events
          WHERE headcode = ? COLLATE NOCASE AND tiploc IS NOT NULL AND tiploc != ''
          ORDER BY received_at`,
-      )
-      .all(String(headcode).toUpperCase());
+    ).all(String(headcode).toUpperCase());
   } catch {
     return new Map();
   }
@@ -108,13 +134,12 @@ function latestTdByTiploc(db, headcode) {
 function tdEventsForHeadcode(db, headcode) {
   if (!headcode || !db) return [];
   try {
-    return db
-      .prepare(
-        `SELECT tiploc, area_id, berth, from_berth, json, received_at FROM td_events
+    return cachedStmt(
+      db,
+      `SELECT tiploc, area_id, berth, from_berth, json, received_at FROM td_events
          WHERE headcode = ? COLLATE NOCASE
          ORDER BY received_at`,
-      )
-      .all(String(headcode).toUpperCase());
+    ).all(String(headcode).toUpperCase());
   } catch {
     return [];
   }
@@ -897,9 +922,18 @@ export function reportsOnServiceTiploc(calls, reports, stanoxOf) {
 
 function tiplocForStanox(catalog, stanox) {
   if (!catalog || !stanox) return "";
+  const key = String(stanox);
+  let bag = stanoxTiplocCache.get(catalog);
+  if (!bag) {
+    bag = new Map();
+    stanoxTiplocCache.set(catalog, bag);
+  }
+  if (bag.has(key)) return bag.get(key);
   try {
-    const row = catalog.prepare(`SELECT tiploc FROM corpus WHERE stanox = ?`).get(String(stanox));
-    return row?.tiploc ? String(row.tiploc).toUpperCase() : "";
+    const row = cachedStmt(catalog, `SELECT tiploc FROM corpus WHERE stanox = ?`).get(key);
+    const tiploc = row?.tiploc ? String(row.tiploc).toUpperCase() : "";
+    bag.set(key, tiploc);
+    return tiploc;
   } catch {
     return "";
   }
@@ -1129,6 +1163,16 @@ export function settleUnreportedPasses(calls) {
 }
 
 function tdByTiploc(db, headcode, catalog, calls) {
+  const cacheKey = String(headcode || "").toUpperCase();
+  if (db && cacheKey) {
+    let bag = tdByTiplocCache.get(db);
+    if (!bag) {
+      bag = new Map();
+      tdByTiplocCache.set(db, bag);
+    }
+    const hit = bag.get(cacheKey);
+    if (hit && Date.now() - hit.at < TD_LOOKUP_MS) return hit.value;
+  }
   const byTpl = latestTdByTiploc(db, headcode);
   if (!catalog) return byTpl;
   const hints = new Set(
@@ -1154,6 +1198,7 @@ function tdByTiploc(db, headcode, catalog, calls) {
     const prev = out.get(item.tiploc);
     if (!prev || Number(item.row?.received_at || 0) >= Number(prev.received_at || 0)) out.set(item.tiploc, item.row);
   }
+  if (db && cacheKey) tdByTiplocCache.get(db).set(cacheKey, { at: Date.now(), value: out });
   return out;
 }
 
