@@ -514,6 +514,7 @@ function CallingColourKey() {
           className={`svc-stops-key__item svc-stops-key__item--${item.tone}`}
         >
           {item.label}
+          <span className="svc-stops-key__press" aria-hidden="true" />
         </li>
       ))}
     </ul>
