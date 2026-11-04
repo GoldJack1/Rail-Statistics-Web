@@ -52,7 +52,7 @@ function getHeaderPageTitle(pathname: string): string {
   if (pathname.startsWith('/admin/messages')) return 'Messages'
   if (pathname.startsWith('/admin/network-messages')) return 'Network Messages'
   if (pathname.startsWith('/admin/d-payg')) return 'D-PAYG'
-  if (pathname.startsWith('/departures')) return 'Departures'
+  if (pathname.startsWith('/departures')) return 'Train Times'
   if (pathname.startsWith('/bash-planner')) return 'Bash planner'
   if (pathname.startsWith('/services')) return 'Service'
   if (pathname.startsWith('/units')) return 'Units'
@@ -99,7 +99,7 @@ const Header: React.FC = () => {
     { to: '/stations/map', label: 'Maps', active: isMapActive },
     ...(showDarwinPublic
       ? [
-          { to: '/departures', label: 'Departures', active: isDeparturesActive },
+          { to: '/departures', label: 'Train Times', active: isDeparturesActive },
           { to: '/units', label: 'Units', active: isUnitsActive },
         ]
       : []),

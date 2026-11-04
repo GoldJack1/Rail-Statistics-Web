@@ -33,6 +33,13 @@ import { goToServicePath } from '@/utils/serviceUrl'
 import { boardDestinationLabel } from '@/utils/splitWorking'
 import { formatLmTocName } from '@/utils/formatLmTocName'
 import { isBetaSite } from '@/utils/localDevFlags'
+import {
+  clearDeparturesBoardFilters,
+  narrowSelection,
+  readDeparturesBoardFilters,
+  selectionFromDropdown,
+  writeDeparturesBoardFilters,
+} from '@/utils/departuresBoardFiltersStorage'
 import '@/styles/browsePageLayout.css'
 import '@/app/departures/DarwinDeparturesPage.css'
 
@@ -475,7 +482,9 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   const [platformSelection, setPlatformSelection] = useState<string[] | null>(null)
   const [statusSelection, setStatusSelection] = useState<BoardStatusFilter[] | null>(null)
   const [placeSelection, setPlaceSelection] = useState<string[] | null>(null)
-  const [selectedStopModes, setSelectedStopModes] = useState<StopModeFilter[]>(STOP_MODE_OPTIONS)
+  const [stopModeSelection, setStopModeSelection] = useState<StopModeFilter[] | null>(null)
+  const filterIdentityRef = useRef<string | null>(null)
+  const [filtersHydrated, setFiltersHydrated] = useState(false)
   const [viewMode, setViewMode] = useServiceViewMode()
   const showDetailedInfo = viewMode === 'detailed'
   const [showFormation, setShowFormation] = useState(true)
@@ -576,7 +585,6 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   useEffect(() => {
     setSearchInput('')
     setSearchError(null)
-    setBoardMode('departures')
   }, [code])
 
   useEffect(() => {
@@ -641,7 +649,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   }
 
   const stationLabel = useMemo(() => {
-    if (!hasStationSelected) return 'Live train times'
+    if (!hasStationSelected) return 'Train Times'
     if (clickedLabel.trim()) return clickedLabel.trim()
     if (catalogHere?.name && !isRawTiplocLikeName(catalogHere.name, code)) {
       return catalogHere.crs ? `${catalogHere.name} (${catalogHere.crs})` : catalogHere.name
@@ -674,7 +682,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
       .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
   }, [data, snapshotMovementRows])
 
-  const selectedTocs = tocSelection && tocSelection.length > 0 ? tocSelection : tocOptions
+  const selectedTocs = narrowSelection(tocSelection, tocOptions)
   const historyWindowStart = historyTime || (datedBoard ? '02:00' : getLiveNowPartsUk().time)
   const serviceTypeOptions = useMemo(() => {
     if (!data) return []
@@ -688,9 +696,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     }
     return ALL_SERVICE_TYPES.filter((type) => present.has(type))
   }, [data, boardMode, showDetailedInfo, historicalMode, futureTimetableMode, datedBoard, historyTime, historyWindowStart, hours])
-  const selectedServiceTypes = typeSelection && typeSelection.length > 0
-    ? typeSelection.filter((type) => serviceTypeOptions.includes(type))
-    : serviceTypeOptions
+  const selectedServiceTypes = narrowSelection(typeSelection, serviceTypeOptions)
 
   const visibleBoardRows = useMemo(() => {
     if (!data) return []
@@ -707,37 +713,76 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     return Array.from(new Set(visibleBoardRows.map((row) => platformFilterLabel(row, historicalMode))))
       .sort(comparePlatformLabels)
   }, [visibleBoardRows, historicalMode])
-  const selectedPlatforms = platformSelection && platformSelection.length > 0
-    ? platformSelection.filter((label) => platformOptions.includes(label))
-    : platformOptions
+  const selectedPlatforms = narrowSelection(platformSelection, platformOptions)
 
   const statusOptions = useMemo(() => {
     const present = new Set(visibleBoardRows.map((row) => rowStatus(row)))
     return ALL_STATUSES.filter((status) => present.has(status))
   }, [visibleBoardRows])
-  const selectedStatuses = statusSelection && statusSelection.length > 0
-    ? statusSelection.filter((status) => statusOptions.includes(status))
-    : statusOptions
+  const selectedStatuses = narrowSelection(statusSelection, statusOptions)
 
   const placeOptions = useMemo(() => {
     return Array.from(new Set(visibleBoardRows.map((row) => placeFilterLabel(row, boardMode))))
       .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
   }, [visibleBoardRows, boardMode])
-  const selectedPlaces = placeSelection && placeSelection.length > 0
-    ? placeSelection.filter((label) => placeOptions.includes(label))
-    : placeOptions
+  const selectedPlaces = narrowSelection(placeSelection, placeOptions)
+  const selectedStopModes = narrowSelection(stopModeSelection, STOP_MODE_OPTIONS)
 
   useEffect(() => {
+    const identity = `${code}\n${hours}\n${historyDate}\n${historyTime}\n${boardMode}`
+    if (filterIdentityRef.current === null) {
+      const stored = code ? readDeparturesBoardFilters(code) : null
+      const restoredBoard = stored?.boardMode ?? boardMode
+      filterIdentityRef.current = `${code}\n${hours}\n${historyDate}\n${historyTime}\n${restoredBoard}`
+      if (stored) {
+        setBoardMode(stored.boardMode)
+        setTocSelection(stored.toc)
+        setTypeSelection(stored.serviceTypes)
+        setPlatformSelection(stored.platforms)
+        setStatusSelection(stored.statuses)
+        setPlaceSelection(stored.places)
+        setStopModeSelection(stored.stopModes)
+      }
+      setFiltersHydrated(true)
+      return
+    }
+    if (filterIdentityRef.current === identity) return
+    const previousCode = filterIdentityRef.current.split('\n')[0]
+    const codeChanged = previousCode !== code
+    const nextBoard = codeChanged ? 'departures' : boardMode
+    filterIdentityRef.current = `${code}\n${hours}\n${historyDate}\n${historyTime}\n${nextBoard}`
+    if (codeChanged) setBoardMode('departures')
     setTocSelection(null)
     setTypeSelection(null)
     setPlatformSelection(null)
     setStatusSelection(null)
     setPlaceSelection(null)
+    if (codeChanged) setStopModeSelection(null)
   }, [code, hours, historyDate, historyTime, boardMode])
 
   useEffect(() => {
-    setSelectedStopModes(STOP_MODE_OPTIONS)
-  }, [code])
+    if (!filtersHydrated || !code) return
+    writeDeparturesBoardFilters({
+      code,
+      boardMode,
+      toc: tocSelection,
+      serviceTypes: typeSelection,
+      platforms: platformSelection,
+      statuses: statusSelection,
+      places: placeSelection,
+      stopModes: stopModeSelection,
+    })
+  }, [
+    filtersHydrated,
+    code,
+    boardMode,
+    tocSelection,
+    typeSelection,
+    platformSelection,
+    statusSelection,
+    placeSelection,
+    stopModeSelection,
+  ])
 
   const filteredDepartures = useMemo(() => {
     if (!data) return []
@@ -841,6 +886,13 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
   const openDeparturesForStation = (station: DarwinSearchHit) => {
     const targetCode = (station.tiploc || station.crsCode || '').toUpperCase()
     if (!targetCode) return
+    clearDeparturesBoardFilters()
+    setTocSelection(null)
+    setTypeSelection(null)
+    setPlatformSelection(null)
+    setStatusSelection(null)
+    setPlaceSelection(null)
+    setStopModeSelection(null)
     setSearchError(null)
     setSearchInput('')
     router.push(`/departures/${targetCode}${location.search}`)
@@ -932,6 +984,11 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
     media.addEventListener('change', sync)
     return () => media.removeEventListener('change', sync)
   }, [])
+
+  useEffect(() => {
+    if (hasStationSelected) return
+    setOpenPane((current) => (current === 'view' || current === 'filters' ? null : current))
+  }, [hasStationSelected])
 
   const requestPane = (next: 'filters' | 'view' | 'date' | 'time' | 'lookup' | null) => {
     const activePicker = stackedPickerRef.current ?? (openPane === 'date' || openPane === 'time' ? openPane : null)
@@ -1254,7 +1311,6 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
         subtitle={subtitle}
         className={`darwin-departures-header darwin-departures-header--${status}`}
         actionContent={(
-          <>
             <div className="dep-header-actions">
               {from ? (
                 <BUTWideButton
@@ -1265,6 +1321,8 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   Back
                 </BUTWideButton>
               ) : null}
+              {hasStationSelected ? (
+              <>
               <BUTWideButton
                 type="button"
                 width="hug"
@@ -1302,8 +1360,11 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                 </BUTWideButton>
               </div>
               ) : null}
+              </>
+              ) : (
+              <div className="dep-header-actions__reserve" aria-hidden="true" />
+              )}
             </div>
-          </>
         )}
       />
 
@@ -1489,7 +1550,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                 .map((toc) => tocOptions.indexOf(toc))
                 .filter((index) => index >= 0)}
               onSelectionChanged={(_, selectedItems) => {
-                setTocSelection(selectedItems.length > 0 ? selectedItems : null)
+                setTocSelection(selectionFromDropdown(selectedItems, tocOptions))
               }}
               colorVariant="primary"
             />
@@ -1508,7 +1569,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                 const selected = selectedItems
                   .map((label) => serviceTypeOptions.find((type) => SERVICE_TYPE_LABELS[type] === label))
                   .filter((value): value is DepartureServiceType => Boolean(value))
-                setTypeSelection(selected.length > 0 ? selected : null)
+                setTypeSelection(selectionFromDropdown(selected, serviceTypeOptions))
               }}
               colorVariant="primary"
             />
@@ -1525,7 +1586,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   .map((label) => platformOptions.indexOf(label))
                   .filter((index) => index >= 0)}
                 onSelectionChanged={(_, selectedItems) => {
-                  setPlatformSelection(selectedItems.length > 0 ? selectedItems : null)
+                  setPlatformSelection(selectionFromDropdown(selectedItems, platformOptions))
                 }}
                 colorVariant="primary"
               />
@@ -1546,7 +1607,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   const selected = selectedItems
                     .map((label) => statusOptions.find((status) => STATUS_LABELS[status] === label))
                     .filter((value): value is BoardStatusFilter => Boolean(value))
-                  setStatusSelection(selected.length > 0 ? selected : null)
+                  setStatusSelection(selectionFromDropdown(selected, statusOptions))
                 }}
                 colorVariant="primary"
               />
@@ -1564,7 +1625,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   .map((label) => placeOptions.indexOf(label))
                   .filter((index) => index >= 0)}
                 onSelectionChanged={(_, selectedItems) => {
-                  setPlaceSelection(selectedItems.length > 0 ? selectedItems : null)
+                  setPlaceSelection(selectionFromDropdown(selectedItems, placeOptions))
                 }}
                 colorVariant="primary"
               />
@@ -1585,7 +1646,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   const selected = selectedItems
                     .map((label) => STOP_MODE_OPTIONS.find((mode) => STOP_MODE_LABELS[mode] === label))
                     .filter((value): value is StopModeFilter => Boolean(value))
-                  setSelectedStopModes(selected)
+                  setStopModeSelection(selectionFromDropdown(selected, STOP_MODE_OPTIONS))
                 }}
                 colorVariant="primary"
               />

@@ -175,6 +175,74 @@ function listDayYmds() {
 
 const dayPool = new Map();
 const boardSnap = new Map();
+const boardInflight = new Map();
+const serviceSnap = new Map();
+const serviceInflight = new Map();
+/** Long enough that the 10s departure poll is served from memory. */
+const LIVE_SNAP_FRESH_MS = 12_000;
+const LIVE_SNAP_STALE_MS = 20_000;
+const HIST_SNAP_MS = 3_600_000;
+
+function snapWindow(past) {
+  return past
+    ? { freshMs: HIST_SNAP_MS, staleMs: HIST_SNAP_MS }
+    : { freshMs: LIVE_SNAP_FRESH_MS, staleMs: LIVE_SNAP_STALE_MS };
+}
+
+function readSnap(map, key, past) {
+  const hit = map.get(key);
+  if (!hit) return { mode: "miss" };
+  const age = Date.now() - hit.at;
+  const { freshMs, staleMs } = snapWindow(past);
+  if (age < freshMs) return { mode: "fresh", hit };
+  if (age < staleMs) return { mode: "stale", hit };
+  return { mode: "miss" };
+}
+
+function rememberSnap(map, key, field, payload, limit = 200) {
+  map.set(key, { at: Date.now(), refreshing: false, [field]: payload });
+  if (map.size <= limit) return;
+  const oldest = [...map.entries()].sort((a, b) => a[1].at - b[1].at);
+  for (let i = 0; i < map.size - limit; i++) map.delete(oldest[i][0]);
+}
+
+function refreshSnap(inflight, map, key, compute, field) {
+  const hit = map.get(key);
+  if (!hit || hit.refreshing || inflight.has(key)) return;
+  hit.refreshing = true;
+  const pending = Promise.resolve()
+    .then(compute)
+    .then((payload) => {
+      if (payload) rememberSnap(map, key, field, payload);
+      else hit.refreshing = false;
+      return payload;
+    })
+    .catch((err) => {
+      hit.refreshing = false;
+      throw err;
+    })
+    .finally(() => inflight.delete(key));
+  inflight.set(key, pending);
+}
+
+function coalesceSnap(inflight, map, key, compute, field) {
+  const existing = inflight.get(key);
+  if (existing) return existing;
+  const pending = Promise.resolve()
+    .then(compute)
+    .then((payload) => {
+      if (payload) rememberSnap(map, key, field, payload);
+      return payload;
+    })
+    .finally(() => inflight.delete(key));
+  inflight.set(key, pending);
+  return pending;
+}
+
+function queryCacheControl(past) {
+  if (past) return "public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400";
+  return "public, max-age=5, stale-while-revalidate=15";
+}
 
 function openDay(ymd) {
   const p = dayPath(DATA_DIR, ymd);
@@ -337,10 +405,23 @@ async function liveDepartures(crs, opts) {
   const at = parseAtParam(opts.at);
   const cisMode = opts.passengersOnly === true;
   const hours = Math.max(1, Number(opts.hours) || 24);
-  const loc = resolveBoardLocation(crs);
   const snapKey = `${String(crs).toUpperCase()}|${ymd}|${cisMode ? "cis" : "wtt"}|${hours}|${at || ""}`;
-  const hit = boardSnap.get(snapKey);
-  if (hit && Date.now() - hit.at < (ymd < today ? 3_600_000 : 4_000)) return hit.board;
+  const cached = readSnap(boardSnap, snapKey, ymd < today);
+  if (cached.mode === "fresh") return cached.hit.board;
+  if (cached.mode === "stale") {
+    refreshSnap(boardInflight, boardSnap, snapKey, () => computeLiveDepartures(crs, opts), "board");
+    return cached.hit.board;
+  }
+  return coalesceSnap(boardInflight, boardSnap, snapKey, () => computeLiveDepartures(crs, opts), "board");
+}
+
+async function computeLiveDepartures(crs, opts) {
+  const today = operatingDayYmd();
+  const ymd = opts.ymd || today;
+  const at = parseAtParam(opts.at);
+  const cisMode = opts.passengersOnly === true;
+  const hours = Math.max(1, Number(opts.hours) || 24);
+  const loc = resolveBoardLocation(crs);
 
   const days = locationBoardDays(ymd);
   for (const d of days) {
@@ -400,11 +481,6 @@ async function liveDepartures(crs, opts) {
   if (loc.matchedAs === "tiploc") board.tiploc = String(crs).toUpperCase();
   board.generatedAt = new Date().toISOString();
   board.updatedAt = board.generatedAt;
-  boardSnap.set(snapKey, { at: Date.now(), board });
-  if (boardSnap.size > 200) {
-    const oldest = [...boardSnap.entries()].sort((a, b) => a[1].at - b[1].at);
-    for (let i = 0; i < boardSnap.size - 200; i++) boardSnap.delete(oldest[i][0]);
-  }
   return board;
 }
 
@@ -732,6 +808,20 @@ function adjacentServiceDatabases(ymd) {
 }
 
 async function serviceDetail(ymd, rid, atRaw, hop = 0) {
+  if (hop > 0) return computeServiceDetail(ymd, rid, atRaw, hop);
+  const at = parseAtParam(atRaw);
+  const key = `${ymd}|${String(rid)}|${at || ""}`;
+  const past = ymd < operatingDayYmd();
+  const cached = readSnap(serviceSnap, key, past);
+  if (cached.mode === "fresh") return cached.hit.detail;
+  if (cached.mode === "stale") {
+    refreshSnap(serviceInflight, serviceSnap, key, () => computeServiceDetail(ymd, rid, atRaw, 0), "detail");
+    return cached.hit.detail;
+  }
+  return coalesceSnap(serviceInflight, serviceSnap, key, () => computeServiceDetail(ymd, rid, atRaw, 0), "detail");
+}
+
+async function computeServiceDetail(ymd, rid, atRaw, hop = 0) {
   const at = parseAtParam(atRaw);
   for (const day of [ymd, addCalendarDays(ymd, -1), addCalendarDays(ymd, 1)]) {
     if (day && day !== londonCalendarYmd()) await maybeEnsureDayImported(day);
@@ -1254,7 +1344,7 @@ const server = createServer(async (req, res) => {
       });
       const past = ymd < operatingDayYmd();
       json(res, 200, board, {
-        "cache-control": past ? "public, max-age=3600, s-maxage=3600" : "private, no-store",
+        "cache-control": queryCacheControl(past),
       });
       return;
     }
@@ -1266,7 +1356,7 @@ const server = createServer(async (req, res) => {
         return;
       }
       json(res, 200, detail, {
-        "cache-control": svcDated[2] < operatingDayYmd() ? "public, max-age=60" : "private, no-store",
+        "cache-control": queryCacheControl(svcDated[2] < operatingDayYmd()),
       });
       return;
     }
@@ -1280,7 +1370,7 @@ const server = createServer(async (req, res) => {
         return;
       }
       json(res, 200, detail, {
-        "cache-control": ymd < operatingDayYmd() ? "public, max-age=5" : "private, no-store",
+        "cache-control": queryCacheControl(ymd < operatingDayYmd()),
       });
       return;
     }

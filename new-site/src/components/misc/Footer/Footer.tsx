@@ -108,7 +108,7 @@ const Footer: React.FC = () => {
             {showDarwinPublic ? (
               <>
                 <BUTFooterLink to="/departures">
-                  Departures
+                  Train Times
                 </BUTFooterLink>
                 <BUTFooterLink to="/units">
                   Units
