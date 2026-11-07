@@ -131,10 +131,9 @@ export function collapseCallsByTiploc(rows) {
   return sortCallsByJourneyTime([...by.values()]);
 }
 
-function bookedInstant(c) {
-  const raw = c?.wtp || c?.wtd || c?.wta || c?.std || c?.sta;
-  if (raw == null || raw === "") return null;
-  const text = String(raw).trim();
+function clockSeconds(value) {
+  if (value == null || value === "") return null;
+  const text = String(value).trim();
   const m = /^(\d{1,2}):(\d{2})/.exec(text);
   if (!m) return null;
   let secs = Number(m[1]) * 3600 + Number(m[2]) * 60;
@@ -142,14 +141,49 @@ function bookedInstant(c) {
   return secs;
 }
 
-/** A rounded copy (13:07 against 13:07½) is the same visit. A later return is not. */
-function sameBookedVisit(a, b) {
-  const ta = bookedInstant(a);
-  const tb = bookedInstant(b);
-  if (ta == null || tb == null) return ta == null && tb == null;
-  let delta = Math.abs(ta - tb);
+function bookedInstant(c) {
+  return clockSeconds(c?.wtp || c?.wtd || c?.wta || c?.std || c?.sta);
+}
+
+function clockGapSeconds(a, b) {
+  let delta = Math.abs(a - b);
   if (delta > 12 * 3600) delta = 86400 - delta;
-  return delta <= 60;
+  return delta;
+}
+
+const VISIT_FIELDS = ["wta", "wtd", "wtp", "sta", "std"];
+
+function visitClock(row, key) {
+  const raw = key === "sta" || key === "std" ? publicCallTime(row?.[key], row) : row?.[key];
+  return clockSeconds(raw);
+}
+
+/**
+ * A rounded copy (13:07 against 13:07½) is the same visit. A later return is not.
+ * Compare each booked field with itself. A pass time and the departure of the
+ * same stop are different clocks, so a single earliest-clock check treats
+ * 12:42 and 12:43½ as two calls.
+ */
+function sameBookedVisit(a, b) {
+  let paired = false;
+  const left = [];
+  const right = [];
+  for (const key of VISIT_FIELDS) {
+    const ta = visitClock(a, key);
+    const tb = visitClock(b, key);
+    if (ta != null) left.push(ta);
+    if (tb != null) right.push(tb);
+    if (ta == null || tb == null) continue;
+    paired = true;
+    if (clockGapSeconds(ta, tb) <= 60) return true;
+  }
+  if (!left.length || !right.length) return left.length === 0 && right.length === 0;
+  if (paired) return false;
+  let best = Infinity;
+  for (const ta of left) {
+    for (const tb of right) best = Math.min(best, clockGapSeconds(ta, tb));
+  }
+  return best <= 90;
 }
 
 function hasHalfMinute(value) {
@@ -165,9 +199,12 @@ function mergeVisit(a, b) {
     Number.isFinite(seqB) ? seqB : Infinity,
   );
   const pick = (key) => {
-    if (hasHalfMinute(a?.[key]) && !hasHalfMinute(b?.[key])) return a[key];
-    if (hasHalfMinute(b?.[key]) && !hasHalfMinute(a?.[key])) return b[key];
-    return merged[key];
+    const av = a?.[key];
+    const bv = b?.[key];
+    if (hasHalfMinute(av) && !hasHalfMinute(bv)) return av;
+    if (hasHalfMinute(bv) && !hasHalfMinute(av)) return bv;
+    if (av && bv) return merged[key];
+    return av || bv || merged[key];
   };
   return {
     ...merged,
@@ -224,12 +261,13 @@ export function sortCallsByBookedTime(rows) {
 function wttClockSeconds(value) {
   if (value == null || value === "") return null;
   const text = String(value).trim();
-  const match = /^(\d{1,2}):(\d{2})/.exec(text);
+  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(text);
   if (!match) return null;
   const hh = Number(match[1]);
   const mm = Number(match[2]);
-  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh > 47 || mm > 59) return null;
-  return (hh % 24) * 3600 + mm * 60 + (/½/.test(text) ? 30 : 0);
+  const ss = match[3] != null ? Number(match[3]) : (/½/.test(text) ? 30 : 0);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss) || hh > 47 || mm > 59 || ss > 59) return null;
+  return (hh % 24) * 3600 + mm * 60 + ss;
 }
 
 /**

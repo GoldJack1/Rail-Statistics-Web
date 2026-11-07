@@ -148,6 +148,42 @@ test("dummy 00:00 public times do not become the destination or reorder the run"
   assert.equal(dest.crs, "LDS");
 });
 
+test("a rounded stop and its half-minute copy are one call", () => {
+  const rows = [
+    {
+      tiploc: "FITZWLM",
+      crs: "FZW",
+      seq: 8,
+      sta: "12:43",
+      std: "12:43",
+      wta: "12:42",
+      wtd: "12:43",
+      wtp: "12:42",
+      is_passing: 0,
+    },
+    {
+      tiploc: "FITZWLM",
+      crs: "FZW",
+      seq: 9,
+      sta: "12:43",
+      std: "12:43",
+      wta: "12:42½",
+      wtd: "12:43½",
+      eta: "12:57",
+      etd: "13:00",
+      platform: "1",
+      is_passing: 0,
+    },
+  ];
+  const out = collapseRevisits(rows);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].wta, "12:42½");
+  assert.equal(out[0].wtd, "12:43½");
+  assert.equal(out[0].wtp, "12:42");
+  assert.equal(out[0].etd, "13:00");
+  assert.equal(out[0].platform, "1");
+});
+
 test("a half-minute copy is the same visit and keeps the precise booked time", () => {
   const rows = [
     { tiploc: "BOWSFLD", seq: 7, wtp: "11:21½", atp: "11:21", is_passing: 1 },
@@ -288,6 +324,19 @@ test("a live report is placed against live times, not an earlier booked time", (
   assert.deepEqual(
     sortCallsByWttTime(rows).map((row) => row.tiploc),
     ["DIGGLEJ", "UPRMLJN", "GFLD", "MOSSLEY"],
+  );
+});
+
+test("a report a few seconds earlier sits before the call that shares its minute", () => {
+  const rows = [
+    { tiploc: "DEW", wtd: "12:06", atd: "12:10:00" },
+    { tiploc: "THHLNWJ", wtp: "12:08½", atp: "12:12:48" },
+    { tiploc: "RTHP", atp: "12:12:31" },
+    { tiploc: "MIRFEJN", wtp: "12:10", atp: "12:13:19" },
+  ];
+  assert.deepEqual(
+    sortCallsByWttTime(rows).map((row) => row.tiploc),
+    ["DEW", "RTHP", "THHLNWJ", "MIRFEJN"],
   );
 });
 
