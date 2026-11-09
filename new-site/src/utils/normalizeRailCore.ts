@@ -1,5 +1,6 @@
 import type { DepartureRow, DeparturesSnapshot, ServiceDetail, ServiceStop } from '@/types/darwin'
 import { publicStationName, publicStationNameOrNull } from '@/utils/publicStationName'
+import { sortStopsByWttTime } from '@/utils/wttOrder'
 
 type RailCoreCall = {
   crs?: string | null
@@ -280,6 +281,41 @@ export function isRailCoreService(body: unknown): body is { callingPoints: RailC
   )
 }
 
+function isPassSlot(slot: string | null | undefined): boolean {
+  return slot === 'PP' || slot === 'OPPP'
+}
+
+/** Put calls on the working timetable and label the public origin and destination from that order. */
+function orderDetailStops(detail: ServiceDetail): ServiceDetail {
+  if (!detail?.stops?.length) return detail
+  const stops = sortStopsByWttTime(detail.stops)
+  let first = -1
+  let last = -1
+  stops.forEach((stop, index) => {
+    if (isPassSlot(stop.slot)) return
+    if (first < 0) first = index
+    last = index
+  })
+  const ordered = first < 0 || first === last
+    ? stops
+    : stops.map((stop, index) => {
+      if (isPassSlot(stop.slot)) return stop
+      const slot = index === first ? 'OR' : index === last ? 'DT' : 'IP'
+      return stop.slot === slot ? stop : { ...stop, slot }
+    })
+  if (first < 0 || first === last) return { ...detail, stops: ordered }
+  const origin = ordered[first]
+  const dest = ordered[last]
+  return {
+    ...detail,
+    stops: ordered,
+    origin: origin?.crs || detail.origin,
+    originName: origin?.name || detail.originName,
+    destination: dest?.crs || detail.destination,
+    destinationName: dest?.name || detail.destinationName,
+  }
+}
+
 export function normalizeServiceDetail(body: unknown): ServiceDetail {
   if (isRailCoreService(body)) {
     const b = body as Record<string, unknown> & { callingPoints: RailCoreCall[] }
@@ -323,7 +359,7 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
         line: c.line ?? null,
       }
     })
-    return applyWholeServiceCancellation({
+    return orderDetailStops(applyWholeServiceCancellation({
       rid: String(b.rid),
       uid: String(b.uid || ''),
       trainId: String(b.headcode || ''),
@@ -355,11 +391,11 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
       location: (b.location as ServiceDetail['location']) || null,
       hspPending: Boolean(b.hspPending),
       updatedAt: new Date().toISOString(),
-    })
+    }))
   }
   const detail = body as ServiceDetail
   if (!detail?.stops?.length) return applyWholeServiceCancellation(detail)
-  return applyWholeServiceCancellation({
+  return orderDetailStops(applyWholeServiceCancellation({
     ...detail,
     originName: publicStationNameOrNull(detail.originName),
     destinationName: publicStationNameOrNull(detail.destinationName),
@@ -368,5 +404,5 @@ export function normalizeServiceDetail(body: unknown): ServiceDetail {
       ...hydrateStopLive(stop),
       cancelReasonAtStop: presentCancellation(stop.cancelReasonAtStop),
     })),
-  })
+  }))
 }

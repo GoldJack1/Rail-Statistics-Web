@@ -114,7 +114,7 @@ describe('calling pattern path and carried delay', () => {
       time: '14:12',
       delay: '(4m E)',
       departedTime: '14:23',
-      departedDelay: '(0 L)',
+      departedDelay: '',
     })
     const waiting = passStop({
       slot: 'IP',

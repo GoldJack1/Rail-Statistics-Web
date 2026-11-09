@@ -16,6 +16,16 @@ const LATERAL_MIN = 8_720
 /** A loose end may join the rail ahead of it, not every node in a 200 m circle. */
 const WELD_AHEAD = 8_720
 const SNAP_MAX_M = 1500
+/** Nodes closer than this are the same snap. The next one is another line. */
+const SNAP_SPREAD_M = 120
+/** One snap for each direction away from the pin, so one line cannot fill the list. */
+const SNAP_BUCKETS = 12
+const SNAP_CHOICES = 8
+/**
+ * A pin on one line at a crossing can sit nearer the other line. Leave the
+ * nearest line only when the other one saves a real detour, not a station loop.
+ */
+const LINE_SWITCH_M = 8_000
 const REVERSAL_PENALTY_M = 10_000
 /** 150 degrees, in the heading units below. */
 const TURN_SHARP = 26_180
@@ -323,25 +333,44 @@ export function buildRailGraph(lines: LngLat[][]): RailGraph {
   }
 }
 
-function snapToGraph(graph: RailGraph, lon: number, lat: number): number | null {
+type SnapChoice = { id: number; d: number }
+
+/** Nearest node, then other lines inside the snap radius, closest first. */
+function snapChoices(graph: RailGraph, lon: number, lat: number): SnapChoice[] {
   const cx = Math.round(lon / 0.01)
   const cy = Math.round(lat / 0.01)
-  let best: number | null = null
-  let bestD = SNAP_MAX_M
+  const found: SnapChoice[] = []
   for (let dx = -2; dx <= 2; dx++) {
     for (let dy = -2; dy <= 2; dy++) {
       const ids = graph.snap.get(snapKey(cx + dx, cy + dy))
       if (!ids) continue
       for (const id of ids) {
         const d = metres({ lon, lat }, { lon: graph.lons[id], lat: graph.lats[id] })
-        if (d < bestD) {
-          bestD = d
-          best = id
-        }
+        if (d < SNAP_MAX_M) found.push({ id, d })
       }
     }
   }
-  return best
+  found.sort((a, b) => a.d - b.d)
+  const kept: SnapChoice[] = []
+  const used = new Array<boolean>(SNAP_BUCKETS).fill(false)
+  const cosLat = Math.cos((lat * Math.PI) / 180)
+  for (const cand of found) {
+    const here = { lon: graph.lons[cand.id], lat: graph.lats[cand.id] }
+    const sameSpot = kept.some(
+      (have) => metres(here, { lon: graph.lons[have.id], lat: graph.lats[have.id] }) < SNAP_SPREAD_M,
+    )
+    if (sameSpot) continue
+    if (kept.length > 0) {
+      const dx = (here.lon - lon) * cosLat
+      const dy = here.lat - lat
+      const bucket = Math.floor(((Math.atan2(dy, dx) + Math.PI) / (2 * Math.PI)) * SNAP_BUCKETS) % SNAP_BUCKETS
+      if (used[bucket]) continue
+      used[bucket] = true
+    }
+    kept.push(cand)
+    if (kept.length >= SNAP_CHOICES) break
+  }
+  return kept
 }
 
 function heapPush(key: number[], val: number[], d: number, k: number) {
@@ -384,49 +413,85 @@ function heapPop(key: number[], val: number[]): { id: number; score: number } | 
   return { id: top, score }
 }
 
+type Routed = { path: LatLngTuple[]; cost: number; rail: number }
+
 /**
- * Shortest rail path. A turn sharper than about 150 degrees costs 10 km, so a
- * parallel-track out-and-back stops being free. A terminus with no other way
- * still reverses.
+ * Shortest path from any source line to any target line. The snap distance is
+ * part of the cost, so a nearer line wins when the rail lengths match.
  */
-export function routeOnGraph(
+function routeSearch(
   graph: RailGraph,
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
-): LatLngTuple[] | null {
-  const src = snapToGraph(graph, from.lng, from.lat)
-  const dst = snapToGraph(graph, to.lng, to.lat)
-  if (src == null || dst == null) return null
-  if (src === dst) return [
-    [graph.lats[src], graph.lons[src]],
-    [graph.lats[dst], graph.lons[dst]],
-  ]
-
+  sources: SnapChoice[],
+  targets: SnapChoice[],
+): Routed | null {
+  if (sources.length === 0 || targets.length === 0) return null
   const { lons, lats, adjStart, adjTo, adjD, adjH, adjWeld } = graph
+  const targetSnap = new Map<number, number>()
+  for (const target of targets) {
+    const prev = targetSnap.get(target.id)
+    if (prev === undefined || target.d < prev) targetSnap.set(target.id, target.d)
+  }
+  if (sources.length === 1 && targetSnap.size === 1 && targetSnap.has(sources[0].id)) {
+    const id = sources[0].id
+    return {
+      path: [
+        [lats[id], lons[id]],
+        [lats[id], lons[id]],
+      ],
+      cost: sources[0].d + (targetSnap.get(id) ?? 0),
+      rail: sources[0].d + (targetSnap.get(id) ?? 0),
+    }
+  }
+
+  let best = Infinity
+  let bestRail = Infinity
+  let bestNode = -1
+
   const linkCount = adjTo.length
   const cost = new Float64Array(linkCount)
+  const rail = new Float64Array(linkCount)
   cost.fill(Infinity)
+  rail.fill(Infinity)
   const prev = new Int32Array(linkCount)
   prev.fill(-1)
   const head = new Int16Array(linkCount)
-  const goal = { lon: lons[dst], lat: lats[dst] }
-  const est = (id: number) => metres({ lon: lons[id], lat: lats[id] }, goal)
+  const startAt = new Int32Array(linkCount)
+  startAt.fill(-1)
+  const goal = targets.map((target) => ({ lon: lons[target.id], lat: lats[target.id] }))
+  const est = (id: number) => {
+    const here = { lon: lons[id], lat: lats[id] }
+    let nearest = Infinity
+    for (const point of goal) {
+      const d = metres(here, point)
+      if (d < nearest) nearest = d
+    }
+    return nearest
+  }
   const chord = metres({ lon: from.lng, lat: from.lat }, { lon: to.lng, lat: to.lat })
   const limit = chord * 3 + REVERSAL_PENALTY_M + 20_000
 
   const heapKey: number[] = []
   const heapVal: number[] = []
-  const relax = (k: number, d: number, fromLink: number, h: number) => {
+  const relax = (k: number, d: number, along: number, fromLink: number, h: number, start: number) => {
     const weld = adjWeld[k] === 1
     let nd = d + adjD[k]
+    const nr = along + adjD[k]
     if (!weld && h !== NO_HEADING && sharpTurn(h, adjH[k])) nd += REVERSAL_PENALTY_M
     if (nd >= cost[k]) return
     cost[k] = nd
+    rail[k] = nr
     prev[k] = fromLink
     head[k] = weld ? h : adjH[k]
+    startAt[k] = start
     heapPush(heapKey, heapVal, nd + est(adjTo[k]), k)
   }
-  for (let k = adjStart[src]; k < adjStart[src + 1]; k++) relax(k, 0, -1, NO_HEADING)
+  for (const source of sources) {
+    for (let k = adjStart[source.id]; k < adjStart[source.id + 1]; k++) {
+      relax(k, source.d, source.d, -1, NO_HEADING, source.id)
+    }
+  }
 
   let last = -1
   while (heapKey.length) {
@@ -436,20 +501,66 @@ export function routeOnGraph(
     const d = cost[popped.id]
     if (popped.score > d + est(u)) continue
     if (popped.score > limit) break
-    if (u === dst) {
-      last = popped.id
-      break
+    const snap = targetSnap.get(u)
+    if (snap !== undefined) {
+      const total = d + snap
+      if (total < best) {
+        best = total
+        bestRail = rail[popped.id] + snap
+        bestNode = u
+        last = popped.id
+      }
     }
-    for (let k = adjStart[u]; k < adjStart[u + 1]; k++) relax(k, d, popped.id, head[popped.id])
+    if (popped.score >= best) break
+    for (let k = adjStart[u]; k < adjStart[u + 1]; k++) {
+      relax(k, d, rail[popped.id], popped.id, head[popped.id], startAt[popped.id])
+    }
   }
-  if (last < 0) return null
+  if (bestNode < 0 || !Number.isFinite(best)) return null
+  if (last < 0) {
+    return {
+      path: [
+        [lats[bestNode], lons[bestNode]],
+        [lats[bestNode], lons[bestNode]],
+      ],
+      cost: best,
+      rail: bestRail,
+    }
+  }
 
   const ids: number[] = []
-  for (let s = last; s >= 0; s = prev[s]) ids.push(adjTo[s])
-  ids.push(src)
+  let first = last
+  for (let s = last; s >= 0; s = prev[s]) {
+    ids.push(adjTo[s])
+    first = s
+  }
+  ids.push(startAt[first])
   ids.reverse()
   const path: LatLngTuple[] = ids.map((id) => [lats[id], lons[id]])
-  return path.length >= 2 ? path : null
+  return path.length >= 2 ? { path, cost: best, rail: bestRail } : null
+}
+
+/**
+ * Shortest rail path. A turn sharper than about 150 degrees costs 10 km, so a
+ * parallel-track out-and-back stops being free. A terminus with no other way
+ * still reverses. A pin that lands on the wrong line at a crossing can use
+ * another line within the snap radius when that saves the detour.
+ */
+export function routeOnGraph(
+  graph: RailGraph,
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+): LatLngTuple[] | null {
+  const sources = snapChoices(graph, from.lng, from.lat)
+  const targets = snapChoices(graph, to.lng, to.lat)
+  if (sources.length === 0 || targets.length === 0) return null
+  const nearest = routeSearch(graph, from, to, [sources[0]], [targets[0]])
+  if (sources.length === 1 && targets.length === 1) return nearest?.path ?? null
+  const alt = routeSearch(graph, from, to, sources, targets)
+  if (!nearest) return alt?.path ?? null
+  if (!alt) return nearest.path
+  if (nearest.rail - alt.rail > LINE_SWITCH_M) return alt.path
+  return nearest.path
 }
 
 export function linesFromNetwork(payload: unknown): LngLat[][] {

@@ -190,4 +190,26 @@ describe('normalizeRailCore', () => {
     expect(detail.stops[1].cancelReasonAtStop?.reason).toBe('Cancelled')
     expect(detail.stops[1].cancelReasonAtStop?.code).toBe('I8')
   })
+
+  it('puts a morning portion filed after the evening terminus into working time order', () => {
+    const detail = normalizeServiceDetail({
+      rid: 'G01073',
+      origin: 'BRI',
+      originName: 'Bristol Temple Meads',
+      destination: 'TAU',
+      destinationName: 'Taunton',
+      stops: [
+        { tpl: 'BRSTLTM', name: 'Bristol Temple Meads', crs: 'BRI', slot: 'OR', ptd: '12:32', wtd: '12:32' },
+        { tpl: 'EDINBUR', name: 'Edinburgh', crs: 'EDB', slot: 'IP', pta: '19:11', wta: '19:11' },
+        { tpl: 'PLYMTH', name: 'Plymouth', crs: 'PLY', slot: 'IP', ptd: '10:27', wtd: '10:27' },
+        { tpl: 'TAUNTON', name: 'Taunton', crs: 'TAU', slot: 'DT', ptd: '11:53', wta: '11:51', wtd: '11:53' },
+      ],
+    })
+    expect(detail.stops.map((stop) => stop.tpl)).toEqual(['PLYMTH', 'TAUNTON', 'BRSTLTM', 'EDINBUR'])
+    expect(detail.stops.map((stop) => stop.slot)).toEqual(['OR', 'IP', 'IP', 'DT'])
+    expect(detail.origin).toBe('PLY')
+    expect(detail.originName).toBe('Plymouth')
+    expect(detail.destination).toBe('EDB')
+    expect(detail.destinationName).toBe('Edinburgh')
+  })
 })

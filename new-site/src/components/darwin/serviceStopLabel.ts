@@ -1,5 +1,6 @@
 import type { ServiceDetail } from '@/types/darwin'
 import { publicStationName } from '@/utils/publicStationName'
+import { sortStopsByWttTime } from '@/utils/wttOrder'
 
 export type StopNameLookup = {
   byTiploc: Map<string, string>
@@ -116,43 +117,7 @@ export function displayStopName(
   return stop.tpl
 }
 
-const RAILWAY_DAY_START_MINUTES = 2 * 60
-
-function parseHmMinutes(value: string | null | undefined): number | null {
-  if (!value) return null
-  const m = /^(\d{1,2}):(\d{2})/.exec(value.trim())
-  if (!m) return null
-  const hh = Number(m[1])
-  const mm = Number(m[2])
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-  return (hh % 24) * 60 + mm
-}
-
-function stopScheduledMinutes(stop: NonNullable<ServiceDetail['stops']>[number]): number | null {
-  return parseHmMinutes(stop.ptd || stop.pta || stop.wtd || stop.wta || stop.wtp)
-}
-
-function railwayDayMinutes(clockMins: number, overnightLong = false): number {
-  if (overnightLong) return clockMins < 12 * 60 ? clockMins + 1440 : clockMins;
-  return clockMins < RAILWAY_DAY_START_MINUTES ? clockMins + 1440 : clockMins
-}
-
-/** Start of the run → end of the run on the 02:00–01:59 railway day. */
+/** Working-timetable order, including a morning call filed after the evening terminus. */
 export function sortStopsByJourneyTime<T extends NonNullable<ServiceDetail['stops']>[number]>(stops: T[]): T[] {
-  let seenEvening = false
-  const overnightLong = stops.some((stop, i, list) => {
-    const m = stopScheduledMinutes(stop)
-    if (m == null) return false
-    if (m >= 18 * 60) seenEvening = true
-    return seenEvening && m < 12 * 60 && i > 0
-  })
-  return stops.map((stop, index) => ({ stop, index })).sort((a, b) => {
-    const am = stopScheduledMinutes(a.stop)
-    const bm = stopScheduledMinutes(b.stop)
-    if (am == null && bm == null) return a.index - b.index
-    if (am == null) return 1
-    if (bm == null) return -1
-    const d = railwayDayMinutes(am, overnightLong) - railwayDayMinutes(bm, overnightLong)
-    return d || a.index - b.index
-  }).map((row) => row.stop)
+  return sortStopsByWttTime(stops)
 }

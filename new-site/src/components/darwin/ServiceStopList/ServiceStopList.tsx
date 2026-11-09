@@ -133,7 +133,7 @@ function formatDelayLabel(delta: number | null): string {
   if (delta == null) return ''
   if (delta >= 1) return `(+${delta}m L)`
   if (delta <= -1) return `(${Math.abs(delta)}m E)`
-  return '(0 L)'
+  return ''
 }
 
 type StopTone = CallingPatternTone

@@ -1,4 +1,5 @@
 import type { ConsistData, ServiceAssociation, ServiceDetail, ServiceStop } from '../types/darwin'
+import { sortStopsByWttTime } from './wttOrder'
 
 export function isPassengerHeadcode(trainId: string | null | undefined): boolean {
   const ch = String(trainId || '').trim().charAt(0)
@@ -56,40 +57,8 @@ export function advertisedTime(
   return null
 }
 
-function stopMinutes(stop: ServiceStop): number | null {
-  const raw =
-    advertisedTime(stop.ptd, [stop.wtd, stop.wta, stop.wtp]) ||
-    advertisedTime(stop.pta, [stop.wta, stop.wtd, stop.wtp]) ||
-    stop.wtd ||
-    stop.wta ||
-    stop.wtp
-  if (!raw) return null
-  const m = /^(\d{1,2}):(\d{2})/.exec(raw.trim())
-  if (!m) return null
-  return (Number(m[1]) % 24) * 60 + Number(m[2])
-}
-
 function orderStops(stops: ServiceStop[]): ServiceStop[] {
-  let seenEvening = false
-  let overnightLong = false
-  for (const stop of stops) {
-    const mins = stopMinutes(stop)
-    if (mins == null) continue
-    if (mins >= 18 * 60) seenEvening = true
-    if (seenEvening && mins < 12 * 60) overnightLong = true
-  }
-  const rail = (mins: number) => (overnightLong && mins < 12 * 60) || (!overnightLong && mins < 2 * 60) ? mins + 1440 : mins
-  return stops
-    .map((stop, index) => ({ stop, index }))
-    .sort((a, b) => {
-      const am = stopMinutes(a.stop)
-      const bm = stopMinutes(b.stop)
-      if (am == null && bm == null) return a.index - b.index
-      if (am == null) return 1
-      if (bm == null) return -1
-      return rail(am) - rail(bm) || a.index - b.index
-    })
-    .map((row) => row.stop)
+  return sortStopsByWttTime(stops)
 }
 
 function clockMinutes(value: string | null | undefined): number | null {

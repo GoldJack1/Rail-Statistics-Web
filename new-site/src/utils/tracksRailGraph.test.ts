@@ -119,6 +119,39 @@ describe('tracks rail graph', () => {
     expect(linesFromNetwork({})).toEqual([])
   })
 
+  it('uses the other line when the pin sits on a line that does not connect', () => {
+    const graph = buildRailGraph([
+      [
+        [0, 51],
+        [0.3, 51],
+      ],
+      [
+        [0, 51.008],
+        [0.3, 51.008],
+      ],
+    ])
+    const path = routeOnGraph(graph, { lat: 51.008, lng: 0.02 }, { lat: 51, lng: 0.25 })
+    expect(path).not.toBeNull()
+    expect(path!.every((point) => point[0] > 51.005)).toBe(true)
+  })
+
+  it('keeps a short branch when a bypass is only a little shorter', () => {
+    const graph = buildRailGraph([
+      [
+        [0, 51],
+        [0.12, 51],
+      ],
+      [
+        [0.076, 51],
+        [0.08, 51.004],
+        [0.084, 51],
+      ],
+    ])
+    const path = routeOnGraph(graph, { lat: 51, lng: 0.01 }, { lat: 51.004, lng: 0.08 })
+    expect(path).not.toBeNull()
+    expect(Math.max(...path!.map((point) => point[0]))).toBeGreaterThan(51.003)
+  })
+
   it('takes the Dryclough chord from Halifax to Brighouse', () => {
     const file = `${process.cwd()}/public/data/gb-passenger-rail.json`
     const lines = linesFromNetwork(JSON.parse(fs.readFileSync(file, 'utf8'))).filter((line) =>
@@ -140,6 +173,25 @@ describe('tracks rail graph', () => {
       expect(leg).not.toBeNull()
       expect(Math.min(...leg!.map((point) => point[1]))).toBeGreaterThan(-1.87)
     }
+  })
+
+  it('keeps a CrossCountry call at Tamworth on the high level line', () => {
+    const file = `${process.cwd()}/public/data/gb-passenger-rail.json`
+    const lines = linesFromNetwork(JSON.parse(fs.readFileSync(file, 'utf8'))).filter((line) =>
+      line.some((point) => point[1] > 52.45 && point[1] < 52.85 && point[0] > -1.95 && point[0] < -1.55),
+    )
+    const graph = buildRailGraph(lines)
+    const birmingham = { lat: 52.47782, lng: -1.90021 }
+    const tamworth = { lat: 52.63747, lng: -1.68645 }
+    const burton = { lat: 52.80582, lng: -1.64246 }
+    const toTamworth = routeOnGraph(graph, birmingham, tamworth)
+    const toBurton = routeOnGraph(graph, tamworth, burton)
+    for (const path of [toTamworth, toBurton]) {
+      expect(path).not.toBeNull()
+      expect(path!.some((point) => point[0] > 52.58 && point[1] < -1.78)).toBe(false)
+    }
+    expect(toTamworth!.some((point) => point[0] > 52.55 && point[0] < 52.62 && point[1] > -1.75 && point[1] < -1.66)).toBe(true)
+    expect(toBurton!.some((point) => point[0] > 52.7 && point[0] < 52.76 && point[1] < -1.69)).toBe(true)
   })
 })
 
