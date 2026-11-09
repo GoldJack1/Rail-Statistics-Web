@@ -363,3 +363,36 @@ test("working timetable order keeps a sleeper after midnight", () => {
     ["PAD", "RDG", "OXF"],
   );
 });
+
+test("a morning portion filed after the evening terminus stays in working time order", () => {
+  const rows = [
+    { tiploc: "BRSTLTM", seq: 10, std: "12:32", wtd: "12:32" },
+    { tiploc: "EDINBUR", seq: 40, sta: "19:11", wta: "19:11" },
+    { tiploc: "PLYMTH", seq: 80, std: "10:27", wtd: "10:27" },
+    { tiploc: "TAUNTON", seq: 90, sta: "11:53", std: "11:53", wta: "11:51", wtd: "11:53" },
+    { tiploc: "BRDGWTR", seq: 5, wtp: "12:01" },
+  ];
+  assert.deepEqual(
+    sortCallsByWttTime(rows).map((row) => row.tiploc),
+    ["PLYMTH", "TAUNTON", "BRDGWTR", "BRSTLTM", "EDINBUR"],
+  );
+  assert.deepEqual(
+    sortCallsByJourneyTime(rows).map((row) => row.tiploc),
+    ["PLYMTH", "TAUNTON", "BRDGWTR", "BRSTLTM", "EDINBUR"],
+  );
+  const { origin, dest } = publicJourneyEnds(rows);
+  assert.equal(origin.tiploc, "PLYMTH");
+  assert.equal(dest.tiploc, "EDINBUR");
+});
+
+test("a long daytime gap is not treated as an overnight", () => {
+  const rows = [
+    { tiploc: "LATE", seq: 2, wtd: "21:00" },
+    { tiploc: "MID", seq: 1, wtd: "09:00" },
+    { tiploc: "EARLY", seq: 0, wtd: "08:00" },
+  ];
+  assert.deepEqual(
+    sortCallsByWttTime(rows).map((row) => row.tiploc),
+    ["EARLY", "MID", "LATE"],
+  );
+});

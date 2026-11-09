@@ -40,6 +40,10 @@ const QUERY_ENV = String(process.env.QUERY_ENV || (QUERY_READ_ONLY ? "dev" : "li
   ? "dev"
   : "live";
 const QUERY_ENV_LABEL = QUERY_ENV === "dev" ? "THIS IS THE DEV API" : "THIS IS THE LIVE API";
+// The calling pattern can match the dev API while the process still answers as live.
+const DEV_PIPELINE =
+  QUERY_ENV === "dev" ||
+  /^(1|true|yes|dev)$/i.test(String(process.env.QUERY_PIPELINE || "").trim());
 
 async function maybeEnsureDayImported(day) {
   if (QUERY_READ_ONLY) return;
@@ -837,7 +841,7 @@ async function computeServiceDetail(ymd, rid, atRaw, hop = 0) {
     svc = hit.svc;
   }
   const resolvedRid = svc.rid;
-  let rawCalls = gatherServiceCalls(ymd, svc, { keepRevisits: QUERY_ENV === "dev" });
+  let rawCalls = gatherServiceCalls(ymd, svc, { keepRevisits: DEV_PIPELINE });
   if (!rawCalls.length && hop < 1) {
     const np = db
       .prepare(
@@ -903,7 +907,7 @@ async function computeServiceDetail(ymd, rid, atRaw, hop = 0) {
     svc.toc,
     journeyTpls,
     consist,
-    { includeNonPassenger: QUERY_ENV === "dev" },
+    { includeNonPassenger: DEV_PIPELINE },
   );
   maybePersistInferred(db, resolvedRid, []);
   let calls = dropForeignTdActuals(
@@ -915,7 +919,7 @@ async function computeServiceDetail(ymd, rid, atRaw, hop = 0) {
     ),
     { rid: resolvedRid },
   );
-  if (QUERY_ENV === "dev") {
+  if (DEV_PIPELINE) {
     const headcode = svc.headcode || svc.train_id;
     calls = dropOrmNearDuplicates(
       maskCallsAsOf(
@@ -1439,7 +1443,7 @@ const server = createServer(async (req, res) => {
 });
 
 function warmDevQuery() {
-  if (QUERY_ENV !== "dev") return;
+  if (!DEV_PIPELINE) return;
   const ymd = operatingDayYmd();
   const db = openDay(ymd);
   if (db) scheduleSequences(db, ymd);

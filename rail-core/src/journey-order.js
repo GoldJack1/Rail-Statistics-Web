@@ -98,16 +98,71 @@ export function journeyKey(minutes, overnightLong = false, seq = 0) {
   return railwayDayMinutes(minutes, overnightLong) * 1000 + (seq ?? 0);
 }
 
-function isOvernightLongRun(rows, minutesOf = callScheduledMinutes) {
-  let seenEvening = false;
-  const ordered = [...(rows || [])].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
-  for (const row of ordered) {
-    const mins = minutesOf(row);
-    if (mins == null) continue;
-    if (mins >= 18 * 60) seenEvening = true;
-    if (seenEvening && mins < 12 * 60) return true;
+const DAY_SECONDS = 24 * 3600;
+const RAIL_START_SECONDS = RAILWAY_DAY_START_MINUTES * 60;
+// A rotation has to remove a real hole. An hour either way is a long daytime
+// leg, not a sleeper.
+const ROTATION_MARGIN_SECONDS = 90 * 60;
+
+function normaliseSeconds(seconds) {
+  return ((seconds % DAY_SECONDS) + DAY_SECONDS) % DAY_SECONDS;
+}
+
+function offsetFromStart(seconds, start) {
+  return (normaliseSeconds(seconds) - start + DAY_SECONDS) % DAY_SECONDS;
+}
+
+function railwayStartSeconds(times) {
+  let best = times[0];
+  let bestKey = Infinity;
+  for (const time of times) {
+    const key = time < RAIL_START_SECONDS ? time + DAY_SECONDS : time;
+    if (key < bestKey) {
+      bestKey = key;
+      best = time;
+    }
   }
-  return false;
+  return best;
+}
+
+function maxInteriorGap(times, start) {
+  const ordered = [...times].sort((a, b) => offsetFromStart(a, start) - offsetFromStart(b, start));
+  let max = 0;
+  for (let i = 1; i < ordered.length; i++) {
+    const gap = offsetFromStart(ordered[i], start) - offsetFromStart(ordered[i - 1], start);
+    if (gap > max) max = gap;
+  }
+  return max;
+}
+
+/**
+ * Clock where the working timetable starts.
+ * A sleeper that is still going after 02:00 starts in the evening: the long
+ * gap is between the morning arrival and that departure. A daytime train
+ * starts at its earliest clock, even when a morning portion was filed after
+ * the evening terminus in schedule order.
+ */
+export function journeyStartSeconds(clocks) {
+  const times = [...new Set((clocks || []).map(normaliseSeconds))];
+  if (!times.length) return RAIL_START_SECONDS;
+  if (times.length === 1) return railwayStartSeconds(times);
+  const sorted = [...times].sort((a, b) => a - b);
+  let maxGap = -1;
+  let after = sorted[0];
+  for (let i = 0; i < sorted.length; i++) {
+    const a = sorted[i];
+    const b = sorted[(i + 1) % sorted.length];
+    let gap = b - a;
+    if (gap <= 0) gap += DAY_SECONDS;
+    if (gap > maxGap) {
+      maxGap = gap;
+      after = b;
+    }
+  }
+  const rail = railwayStartSeconds(sorted);
+  if (after === rail) return rail;
+  if (maxInteriorGap(sorted, rail) - maxInteriorGap(sorted, after) > ROTATION_MARGIN_SECONDS) return after;
+  return rail;
 }
 
 function richerCall(a, b) {
@@ -241,11 +296,25 @@ export function collapseRevisits(rows) {
 
 function sortByMinutes(rows, minutesOf) {
   const list = rows || [];
-  const overnightLong = isOvernightLongRun(list, minutesOf);
+  const clocks = [];
+  for (const row of list) {
+    const mins = minutesOf(row);
+    if (mins == null) continue;
+    clocks.push(mins * 60);
+  }
+  const start = journeyStartSeconds(clocks);
+  const key = (row) => {
+    const mins = minutesOf(row);
+    if (mins == null) return null;
+    return offsetFromStart(mins * 60, start);
+  };
   return [...list].sort((a, b) => {
-    const d =
-      journeyKey(minutesOf(a), overnightLong, a.seq) - journeyKey(minutesOf(b), overnightLong, b.seq);
-    if (d) return d;
+    const ak = key(a);
+    const bk = key(b);
+    if (ak == null && bk == null) return (Number(a.seq) || 0) - (Number(b.seq) || 0);
+    if (ak == null) return 1;
+    if (bk == null) return -1;
+    if (ak !== bk) return ak - bk;
     return (Number(a.seq) || 0) - (Number(b.seq) || 0) || String(a.tiploc || "").localeCompare(String(b.tiploc || ""));
   });
 }
@@ -289,12 +358,6 @@ export function wttCallSeconds(call) {
   return null;
 }
 
-function wttSortSeconds(seconds, overnightLong) {
-  if (seconds == null) return null;
-  const dayMinutes = railwayDayMinutes(Math.floor(seconds / 60), overnightLong);
-  return dayMinutes * 60 + (seconds % 60);
-}
-
 /** Booked clock only. A live time must not decide where a timed call sits. */
 function timetableSeconds(call) {
   const working = ["wta", "wtd", "wtp"].map((key) => wttClockSeconds(call?.[key])).filter((n) => n != null);
@@ -328,11 +391,13 @@ export function sortCallsByWttTime(rows) {
     if (timetableSeconds(row) != null) booked.push({ row, index });
     else floating.push({ row, index });
   });
-  const overnightLong = isOvernightLongRun(list, (row) => {
-    const seconds = wttCallSeconds(row);
-    return seconds == null ? null : Math.floor(seconds / 60);
-  });
-  const rank = (seconds) => wttSortSeconds(seconds, overnightLong);
+  const clocks = [];
+  for (const row of list) {
+    const seconds = timetableSeconds(row);
+    if (seconds != null) clocks.push(seconds);
+  }
+  const start = journeyStartSeconds(clocks);
+  const rank = (seconds) => (seconds == null ? null : offsetFromStart(seconds, start));
   const ordered = booked
     .sort((a, b) => {
       const left = rank(timetableSeconds(a.row));

@@ -1393,15 +1393,17 @@ export function insertReportedPasses(calls, reports) {
     present.add(tiploc);
     pending.push({ ...report, tiploc });
   }
-  pending.sort((a, b) => a.minute - b.minute);
+  pending.sort((a, b) => (clockSeconds(a.clock) ?? a.minute * 60) - (clockSeconds(b.clock) ?? b.minute * 60));
   for (const report of pending) {
+    const reportAt = clockSeconds(report.clock);
     let at = out.length;
     for (let i = 0; i < out.length; i++) {
-      const minute = callMinute(out[i]);
-      if (minute == null) continue;
-      let delta = minute - report.minute;
-      if (delta < -12 * 60) delta += 1440;
-      else if (delta > 12 * 60) delta -= 1440;
+      const call = out[i];
+      const here = clockSeconds(call?.atp || call?.atd || call?.ata || call?.etp || call?.etd || call?.eta || call?.wtp || call?.wtd || call?.wta);
+      if (here == null || reportAt == null) continue;
+      let delta = here - reportAt;
+      if (delta < -12 * 3600) delta += 86400;
+      else if (delta > 12 * 3600) delta -= 86400;
       if (delta > 0) {
         at = i;
         break;

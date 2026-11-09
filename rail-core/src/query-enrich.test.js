@@ -20,6 +20,18 @@ test("an inferred pass behind a real report does not keep an expected time", () 
   assert.equal(out[2].etp, "19:40");
 });
 
+test("insertReportedPasses keeps a few seconds of order inside one minute", () => {
+  const out = insertReportedPasses(
+    [
+      { tiploc: "DEW", wtd: "12:06", atd: "12:10:00" },
+      { tiploc: "THHLNWJ", wtp: "12:08½", atp: "12:12:48" },
+      { tiploc: "MIRFEJN", wtp: "12:10", atp: "12:13:19" },
+    ],
+    [{ tiploc: "RTHP", name: "Ravensthorpe", crs: "RVN", clock: "12:12:31", minute: 12 * 60 + 12, source: "td" }],
+  );
+  assert.deepEqual(out.map((c) => c.tiploc), ["DEW", "RTHP", "THHLNWJ", "MIRFEJN"]);
+});
+
 test("insertReportedPasses places a feed location by time and leaves scheduled rows", () => {
   const calls = [
     { tiploc: "MARSDEN", is_passing: 1, wtp: "18:19", atp: "18:31", actual_source: "trust" },
