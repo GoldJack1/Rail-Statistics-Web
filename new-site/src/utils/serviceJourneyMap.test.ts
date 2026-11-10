@@ -733,6 +733,21 @@ describe('serviceJourneyMap', () => {
     expect(Math.max(...kept.map((point) => point[0]))).toBeGreaterThan(53.42)
   })
 
+  it('keeps the run into a terminus when the buffer is only just beyond the turn', () => {
+    const path: [number, number][] = [
+      [53.4, -1.5],
+      [53.41, -1.5],
+      [53.4193, -1.5],
+      [53.42012, -1.5],
+      [53.4193, -1.5002],
+      [53.41, -1.5002],
+      [53.4, -1.5002],
+    ]
+    const terminus: [number, number] = [53.42, -1.5]
+    const kept = removeRouteReversals(path, 40, 70, 8000, [path[0], terminus])
+    expect(Math.max(...kept.map((point) => point[0]))).toBeGreaterThan(53.42)
+  })
+
   it('drops a reversal spur and snaps a nearby marker onto the through line', () => {
     const path: [number, number][] = [
       [53.49633, -2.2126],

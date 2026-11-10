@@ -131,7 +131,7 @@ export function ServiceJourneyMap({
   branches = [],
   onNominatimUsed,
   viewMode = 'detailed',
-  routeMode = 'ours',
+  routeMode = 'rail',
 }: {
   service: ServiceDetail
   stations: Station[]

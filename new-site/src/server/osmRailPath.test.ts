@@ -42,7 +42,7 @@ describe('osm rail path', () => {
     for (let i = 1; i < shaped.length; i++) expect(shaped[i][0]).toBeGreaterThan(shaped[i - 1][0])
   })
 
-  it('moves onto the left-hand track when the parallel road never joins', () => {
+  it('stays on its road when the left-hand road never joins', () => {
     const on = [
       { lat: 53.4, lng: -2.2 },
       { lat: 53.42, lng: -2.2 },
@@ -58,9 +58,40 @@ describe('osm rail path', () => {
     ]
     const shaped = keepLeftHandTrack(path, [on, beside], [path[0]])
     expect(shaped[0][1]).toBeCloseTo(-2.2, 5)
-    const later = shaped.filter((point) => point[0] > 53.405)
+    for (const point of shaped) expect(point[1]).toBeGreaterThan(-2.20003)
+  })
+
+  it('crosses to the left-hand road at the Halifax points', () => {
+    const right = [
+      [53.72081, -1.85352],
+      [53.72154, -1.85289],
+      [53.72185, -1.85252],
+      [53.72213, -1.85206],
+      [53.72225, -1.85185],
+      [53.7224, -1.85158],
+      [53.72263, -1.8511],
+      [53.7229, -1.85036],
+      [53.72372, -1.848],
+    ].map(([lat, lng]) => ({ lat, lng }))
+    const left = [
+      [53.71933, -1.85438],
+      [53.72187, -1.85254],
+      [53.7223, -1.85185],
+      [53.72264, -1.85113],
+      [53.72293, -1.8504],
+      [53.72374, -1.84802],
+    ].map(([lat, lng]) => ({ lat, lng }))
+    const points = [
+      { lat: 53.72213, lng: -1.85206 },
+      { lat: 53.7223, lng: -1.85185 },
+    ]
+    const path: [number, number][] = right.map((point) => [point.lat, point.lng])
+    const shaped = keepLeftHandTrack(path, [right, left, points], [path[0]])
+    const crossed = shaped.some((point) => Math.abs(point[0] - 53.7223) < 0.00008 && Math.abs(point[1] + 1.85185) < 0.00008)
+    expect(crossed).toBe(true)
+    const later = shaped.filter((point) => point[0] > 53.723)
     expect(later.length).toBeGreaterThan(0)
-    for (const point of later) expect(point[1]).toBeLessThan(-2.20004)
+    for (const point of later) expect(point[1]).toBeLessThan(-1.84801)
   })
 
   it('crosses to the left-hand track where the roads join', () => {

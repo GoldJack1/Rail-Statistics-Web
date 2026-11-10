@@ -167,20 +167,19 @@ function removeRouteReversals(path, keepNear) {
   const loopStillServesStops = (pts, from, to) => {
     if (!keepNear?.length) return true;
     for (const stop of keepNear) {
-      let onLoop = false;
+      let loopNear = Infinity;
       for (let k = from + 1; k < to; k++) {
-        if (haversineM(stop, pts[k]) <= closeM) {
-          onLoop = true;
-          break;
-        }
+        const away = haversineM(stop, pts[k]);
+        if (away < loopNear) loopNear = away;
       }
-      if (!onLoop) continue;
-      let onKept = haversineM(stop, pts[from]) <= 80 || haversineM(stop, pts[to]) <= 80;
-      for (let k = 0; k < pts.length && !onKept; k++) {
+      let keptNear = Math.min(haversineM(stop, pts[from]), haversineM(stop, pts[to]));
+      for (let k = 0; k < pts.length; k++) {
         if (k > from && k < to) continue;
-        if (haversineM(stop, pts[k]) <= 80) onKept = true;
+        const away = haversineM(stop, pts[k]);
+        if (away < keptNear) keptNear = away;
       }
-      if (!onKept) return false;
+      // The loop is the visit to this stop. A wobble far from every stop can still go.
+      if (loopNear <= 120 && keptNear > loopNear + 30) return false;
     }
     return true;
   };

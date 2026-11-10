@@ -1,7 +1,7 @@
 import { routeLimited, routedCoordinates, type LatLngTuple } from './brouterRailRoute'
 import { resolveDarwinBrowserUrl } from './darwinReadyFetch'
 import { removeRouteReversals, type RailVia } from './serviceJourneyMap'
-import { followGbRoute, loadGbRailGraph, routeGbLeg } from './tracksGraphLoad'
+import { loadGbRailGraph, routeGbLeg } from './tracksGraphLoad'
 
 export function splitRouteGaps(path: LatLngTuple[]): LatLngTuple[][] {
   const segments: LatLngTuple[][] = []
@@ -208,6 +208,22 @@ export function filletRailRoute(path: LatLngTuple[]): LatLngTuple[] {
   ])
 }
 
+/** A calling point this far from the line was cut out of the route. */
+const MISSED_STOP_M = 200
+
+function routeMissesStop(path: LatLngTuple[], points: LatLngTuple[]): boolean {
+  return points.some((point) => {
+    let best = Infinity
+    for (const step of path) {
+      if (!Number.isFinite(step[0]) || !Number.isFinite(step[1])) continue
+      const away = metresBetween(step, point)
+      if (away < best) best = away
+      if (best <= MISSED_STOP_M) return false
+    }
+    return best > MISSED_STOP_M
+  })
+}
+
 function appendPath(joined: LatLngTuple[], part: LatLngTuple[]) {
   if (!part.length) return
   const last = joined[joined.length - 1]
@@ -395,10 +411,7 @@ export async function fetchPlatformRailRoute(
     })
     return kept
   }
-  const draw = async (raw: LatLngTuple[]): Promise<LatLngTuple[]> => {
-    const followed = await followGbRoute(raw, signal)
-    return filletRailRoute(followed && followed.length >= 2 ? followed : raw)
-  }
+  const draw = async (raw: LatLngTuple[]): Promise<LatLngTuple[]> => filletRailRoute(raw)
   let kept = pointsNow()
   let path = await requestRailRoute(kept.map((row) => row.point), signal)
   if (path) onProgress?.(await draw(path))
@@ -432,6 +445,9 @@ export async function fetchPlatformRailRoute(
   return loose ? draw(loose) : null
 }
 
+/** Bumps the browser cache when the rail line is laid differently. */
+const RAIL_ROUTE_REV = '23'
+
 /** One OpenRailRouting request through every point. A miss is empty. */
 async function requestRailRoute(
   points: LatLngTuple[],
@@ -444,6 +460,7 @@ async function requestRailRoute(
     toLat: String(points[points.length - 1][0]),
     toLng: String(points[points.length - 1][1]),
     strict: '1',
+    rev: RAIL_ROUTE_REV,
   })
   if (points.length > 2) {
     params.set('via', points.slice(1, -1).map(([lat, lng]) => `${lat},${lng}`).join('|'))
@@ -464,6 +481,7 @@ async function fetchRailLeg(
     fromLat: String(from[0]),
     fromLng: String(from[1]),
     toLat: String(to[0]),
+    rev: RAIL_ROUTE_REV,
     toLng: String(to[1]),
   })
   const response = await fetch(`/api/rail-route?${params.toString()}`, { signal })
@@ -487,7 +505,10 @@ export async function routeTracksJourney(
   if (points.length < 2) return points
   try {
     const remote = await fetchJourneyRoute(points, signal)
-    if (remote && remote.length >= 2) {
+    // The query service drops a real reversal when the buffer sits just beyond
+    // the point where the train turns. A call left that far off the line is
+    // drawn here instead, where the visit is kept.
+    if (remote && remote.length >= 2 && !routeMissesStop(remote, points)) {
       onProgress?.(remote)
       return remote
     }

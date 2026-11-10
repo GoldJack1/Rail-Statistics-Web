@@ -234,6 +234,45 @@ export function routeOnRailWays(ways: Point[][], points: LatLngTuple[]): LatLngT
   return shapeLeftHandRuns(drawn, ways, points)
 }
 
+const OPENING_M = 2500
+
+function openingOf(run: LatLngTuple[]): { head: LatLngTuple[]; rest: LatLngTuple[] } {
+  const head: LatLngTuple[] = [run[0]]
+  let walked = 0
+  for (let i = 1; i < run.length; i++) {
+    walked += haversineM(
+      { lat: run[i - 1][0], lng: run[i - 1][1] },
+      { lat: run[i][0], lng: run[i][1] },
+    )
+    head.push(run[i])
+    if (walked >= OPENING_M) return { head, rest: run.slice(i) }
+  }
+  return { head, rest: [] }
+}
+
+/**
+ * On the way out of a station, cross to the left-hand road at the points.
+ * Only the opening of each direction is fetched, so a long journey does not
+ * wait on a map of the whole line. The rest of the road stays as routed.
+ */
+export async function layOnRailway(path: LatLngTuple[], anchors: LatLngTuple[] = []): Promise<LatLngTuple[]> {
+  if (path.length < 2) return path
+  const finite = path.filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
+  const runs = splitAtReversals(finite)
+  const shaped: LatLngTuple[] = []
+  for (const run of runs) {
+    const { head, rest } = openingOf(run)
+    const ways = await fetchRailWays(head, 120).catch(() => null)
+    const crossed = ways && ways.length > 0 ? shapeLeftHandRuns(head, ways, anchors) : head
+    const part = crossed.length >= 2 ? crossed : head
+    const last = shaped[shaped.length - 1]
+    const start = last && Math.abs(last[0] - part[0][0]) < 1e-7 && Math.abs(last[1] - part[0][1]) < 1e-7 ? 1 : 0
+    for (let i = start; i < part.length; i++) shaped.push(part[i])
+    for (let i = 1; i < rest.length; i++) shaped.push(rest[i])
+  }
+  return shaped.length >= 2 ? shaped : path
+}
+
 /** Railway geometry for a timetable, with no straight cuts. */
 export async function railwayRoute(points: LatLngTuple[]): Promise<LatLngTuple[] | null> {
   if (points.length < 2) return null
@@ -461,14 +500,11 @@ export async function osmRailPath(points: LatLngTuple[]): Promise<LatLngTuple[] 
   return railPathFromWays(ways, points)
 }
 
-const LEFT_TRACK_M = 5.5
 const LEFT_SHIFT_M = 2.2
 const STAY_ON_TRACK_M = 16
 const JUNCTION_M = 80
 /** A crossover is shorter than this. It is not a running line. */
 const RUNNING_LINE_M = 40
-/** An unjoined parallel road has to keep going. A short loop does not. */
-const PARALLEL_RUN_M = 400
 
 function localMetres(origin: Point, point: Point): { x: number; y: number } {
   const lat = (origin.lat * Math.PI) / 180
@@ -667,10 +703,9 @@ function projectOnWay(way: Point[], here: Point, dir: { x: number; y: number } |
 
 /**
  * Move a running line onto the left-hand track in the direction of travel.
- * A parallel running line to the left is taken even when the two ways never
- * share a node, which is how double track is mapped. A crossover is still
- * used where the ways do join. A timing point that names its own road is
- * left where it is.
+ * The train changes road only where the rails join, which is a set of
+ * points. A parallel road that never meets this one is left alone. A timing
+ * point that names its own road stays where it is.
  */
 export function keepLeftHandTrack(
   path: LatLngTuple[],
@@ -861,53 +896,65 @@ export function keepLeftHandTrack(
       const offset = localMetres(here, point)
       return offset.x * left.x + offset.y * left.y
     }
-    const lefter = (way: number, runM = RUNNING_LINE_M): { score: number } | null => {
-      if (!dir || !left || !stay || way === current || way === leftFrom) return null
-      const hit = projectOnWay(usable[way], here, dir)
-      if (!hit || hit.distance > LEFT_TRACK_M || hit.forward < 0.82) return null
-      if (!wayRunsForward(usable[way], hit.point, dir, runM)) return null
-      const gain = scoreOf(hit.point) - scoreOf(stay.point)
-      if (gain < LEFT_SHIFT_M) return null
-      return { score: gain }
+    const wayMetres = (way: number) => chainLengthM(usable[way].map((point) => [point.lat, point.lng]))
+    const runsForward = (way: number, from: Point, need: number, seen: Set<number>): boolean => {
+      if (!dir || seen.has(way)) return false
+      seen.add(way)
+      if (wayRunsForward(usable[way], from, dir, need)) return true
+      if (!wayRunsForward(usable[way], from, dir, 8)) return false
+      for (const other of links[way]) {
+        const joint = joinNear(way, other, from, 100)
+        if (!joint) continue
+        const step = localMetres(from, joint)
+        if (step.x * dir.x + step.y * dir.y < -8) continue
+        if (runsForward(other, joint, need, seen)) return true
+      }
+      return false
     }
-    if (alongside && current != null && dir) {
+    if (alongside && current != null && dir && left && stay) {
       let hopWay = -1
       let hopThrough: Point[] = []
-      let hopScore = -Infinity
-      const takeHop = (way: number, through: Point[]) => {
-        const candidate = lefter(way)
-        if (!candidate || candidate.score <= hopScore) return
-        hopWay = way
-        hopThrough = through
-        hopScore = candidate.score
-      }
-      for (const other of links[current]) {
-        const joint = joinAhead(current, other, here, dir)
-        if (!joint) continue
-        takeHop(other, [joint])
-        if (chainLengthM(usable[other].map((point) => [point.lat, point.lng])) > 90) continue
-        for (const id of wayNodes[other]) {
-          const end = at.get(id)
-          if (!end || haversineM(end, joint) < 3) continue
-          for (const beyond of nodeWays.get(id) || []) {
-            if (beyond === other || beyond === current) continue
-            const landing = joinNear(other, beyond, joint, 40)
-            if (landing) takeHop(beyond, [joint, landing])
+      let hopAlong = Infinity
+      const queue: { way: number; from: Point }[] = [{ way: current, from: here }]
+      const seen = new Set<number>([current])
+      let guard = 0
+      while (queue.length && guard < 8) {
+        const scan = queue.shift()
+        if (!scan) break
+        guard += 1
+        for (const other of links[scan.way]) {
+          const joint = joinAhead(scan.way, other, scan.from, dir)
+          if (!joint) continue
+          const offset = localMetres(here, joint)
+          const ahead = offset.x * dir.x + offset.y * dir.y
+          if (ahead < -80 || ahead > 300 || ahead >= hopAlong) continue
+          const lands: { way: number; through: Point[] }[] = []
+          if (wayMetres(other) <= 90) {
+            for (const id of wayNodes[other]) {
+              const end = at.get(id)
+              if (!end || haversineM(end, joint) < 3) continue
+              for (const beyond of nodeWays.get(id) || []) {
+                if (beyond === other || beyond === current || beyond === leftFrom) continue
+                const landing = joinNear(other, beyond, joint, 40)
+                if (landing) lands.push({ way: beyond, through: [joint, landing] })
+              }
+            }
+          } else {
+            if (other !== current && other !== leftFrom) lands.push({ way: other, through: [joint] })
+            if (!seen.has(other)) {
+              seen.add(other)
+              queue.push({ way: other, from: joint })
+            }
           }
-        }
-      }
-      if (hopWay < 0) {
-        let beside = -1
-        let besideScore = -Infinity
-        for (const way of nearWays(here)) {
-          const candidate = lefter(way, PARALLEL_RUN_M)
-          if (!candidate || candidate.score <= besideScore) continue
-          beside = way
-          besideScore = candidate.score
-        }
-        if (beside >= 0) {
-          leftFrom = current
-          current = beside
+          for (const land of lands) {
+            const nose = pointAheadOnWay(usable[land.way], joint, dir, 20)
+            if (!nose || !runsForward(land.way, nose, RUNNING_LINE_M, new Set())) continue
+            const stayNose = pointAheadOnWay(usable[current], joint, dir, 20) || joint
+            if (scoreOf(nose) - scoreOf(stayNose) < LEFT_SHIFT_M) continue
+            hopWay = land.way
+            hopThrough = land.through
+            hopAlong = ahead
+          }
         }
       }
       if (hopWay >= 0) {
@@ -933,8 +980,18 @@ export function keepLeftHandTrack(
       }
     }
     const placed = current == null ? null : projectOnWay(usable[current], here, dir)
-    if (placed && placed.distance <= (alongside ? STAY_ON_TRACK_M : 40)) emit(placed.point)
-    else emit(here)
+    if (placed && current != null && placed.distance <= (alongside ? STAY_ON_TRACK_M : 40)) {
+      const previous = out[out.length - 1]
+      const from = previous ? { lat: previous[0], lng: previous[1] } : placed.point
+      const start = projectHit(usable[current], from)
+      const end = projectHit(usable[current], placed.point)
+      const sameWay = start && end && start.distance <= 25 && end.distance <= 25
+      const forward = Boolean(sameWay && (start.index < end.index || (start.index === end.index && start.t <= end.t)))
+      if (forward && start && end) {
+        for (let v = start.index; v < end.index; v++) emit(usable[current][v], dir)
+      }
+      emit(placed.point, dir)
+    } else emit(here)
   }
   return out.length >= 2 ? out : path
 }

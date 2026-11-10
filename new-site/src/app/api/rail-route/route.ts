@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { railwayRouteJoined, routeLeavesTheRailway } from '@/server/osmRailPath'
+import { layOnRailway, railwayRouteJoined, routeLeavesTheRailway } from '@/server/osmRailPath'
 import { isValidStationCoordinate } from '@/utils/stationCoordinates'
 import {
   buildOpenRailRouteUrl,
@@ -15,7 +15,7 @@ const routeCache = new Map<string, { at: number; coordinates: LatLngTuple[] }>()
 const ROUTE_CACHE_MS = 30 * 60 * 1000
 
 function routeCacheKey(points: LatLngTuple[], strict: boolean): string {
-  return `geom17|${strict ? 'left|' : ''}${points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')}`
+  return `geom23|${strict ? 'left|' : ''}${points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')}`
 }
 
 function readCoord(value: string | null): number | null {
@@ -92,11 +92,24 @@ export async function GET(request: NextRequest) {
     if (upstream.ok) {
       const routed = parseOpenRailRoute(await upstream.json())
       if (routed.length >= 2 && !routeLeavesTheRailway(points, routed)) {
-        // Draw this line at once. Sliding it onto the left-hand rail asks
-        // OpenStreetMap for every stretch of a long journey, and that lookup
-        // was holding the response for the whole time budget. The map then
-        // asks again when a point is loosened, so the line stayed blank.
-        return publish(routed)
+        // A simplified edge cuts across the curve. Lay those edges on the
+        // mapped rails, and give up if that lookup does not answer quickly.
+        let usedRouter = false
+        const laid = await Promise.race([
+          layOnRailway(routed, points).catch(() => routed),
+          new Promise<LatLngTuple[]>((resolve) => setTimeout(() => {
+            usedRouter = true
+            resolve(routed)
+          }, 8000)),
+        ])
+        const coordinates = !usedRouter && laid.length >= 2 && !routeLeavesTheRailway(points, laid) ? laid : routed
+        if (usedRouter) {
+          return NextResponse.json(
+            { coordinates, fallback: false },
+            { headers: { 'Cache-Control': 'private, max-age=0' } },
+          )
+        }
+        return publish(coordinates)
       }
     } else if (!strict && (upstream.status === 403 || upstream.status === 429 || upstream.status >= 500)) {
       return NextResponse.json({ coordinates: fallback, fallback: true, limited: true })

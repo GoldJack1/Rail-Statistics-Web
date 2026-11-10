@@ -18,7 +18,6 @@ import { buildStopNameLookup, displayStopName } from '@/components/darwin/servic
 import { ServiceDetailKey } from '@/components/darwin/ServiceDetailKey/ServiceDetailKey'
 import { SidePane } from '@/components/darwin/SidePane/SidePane'
 import { ServiceViewModeToggle } from '@/components/darwin/ServiceViewModeToggle'
-import { rememberServiceRouteMode, ServiceRouteModeToggle, storedServiceRouteMode, type ServiceRouteMode } from '@/components/darwin/ServiceRouteModeToggle'
 import { useServiceViewMode } from '@/components/darwin/serviceViewMode'
 import StationSectionTitle from '@/components/models/StationDetails/StationSectionTitle'
 import type { AccountSection } from '@/components/misc/AccountSectionNav/AccountSectionNav'
@@ -283,14 +282,6 @@ const ServiceDetailPage: React.FC = () => {
     setMapNominatim(false)
   }
   const [viewMode, selectViewMode] = useServiceViewMode()
-  const [routeMode, setRouteMode] = useState<ServiceRouteMode>('ours')
-  useEffect(() => {
-    setRouteMode(storedServiceRouteMode())
-  }, [])
-  const selectRouteMode = (mode: ServiceRouteMode) => {
-    setRouteMode(mode)
-    rememberServiceRouteMode(mode)
-  }
 
   const query = useMemo(() => new URLSearchParams(searchParams.toString()), [searchParams])
   const todayIsoDate = useMemo(() => getCurrentRailwayDayIsoUk(), [])
@@ -581,12 +572,6 @@ const ServiceDetailPage: React.FC = () => {
               </button>
             ) : null}
           </div>
-          <ServiceRouteModeToggle
-            className="svc-viewmode-switch--sidebar"
-            mode={routeMode}
-            disabled={!data}
-            onChange={selectRouteMode}
-          />
           <ServiceViewModeToggle
             className="svc-viewmode-switch--sidebar"
             viewMode={viewMode}
@@ -633,12 +618,6 @@ const ServiceDetailPage: React.FC = () => {
               </SidePane>
             </span>
           </div>
-          <ServiceRouteModeToggle
-            className="svc-viewmode-switch--header"
-            mode={routeMode}
-            disabled={!data}
-            onChange={selectRouteMode}
-          />
           <ServiceViewModeToggle
             className="svc-viewmode-switch--header"
             viewMode={viewMode}
@@ -772,7 +751,7 @@ const ServiceDetailPage: React.FC = () => {
               extraStops={mapBranches}
               branches={liveBranches}
               viewMode={viewMode}
-              routeMode={routeMode}
+              routeMode="rail"
               onNominatimUsed={() => setMapNominatim(true)}
             />
           </section>

@@ -691,23 +691,22 @@ export function removeRouteReversals(
 ): LatLngTuple[] {
   const loopStillServesStops = (pts: LatLngTuple[], from: number, to: number): boolean => {
     if (!keepNear?.length) return true
+    const away = (point: LatLngTuple, index: number) =>
+      haversineM({ lat: point[0], lng: point[1] }, { lat: pts[index][0], lng: pts[index][1] })
     for (const stop of keepNear) {
-      const here = { lat: stop[0], lng: stop[1] }
-      let onLoop = false
+      let loopNear = Infinity
       for (let k = from + 1; k < to; k++) {
-        if (haversineM(here, { lat: pts[k][0], lng: pts[k][1] }) <= closeM) {
-          onLoop = true
-          break
-        }
+        const distance = away(stop, k)
+        if (distance < loopNear) loopNear = distance
       }
-      if (!onLoop) continue
-      let onKept = haversineM(here, { lat: pts[from][0], lng: pts[from][1] }) <= 80
-        || haversineM(here, { lat: pts[to][0], lng: pts[to][1] }) <= 80
-      for (let k = 0; k < pts.length && !onKept; k++) {
+      let keptNear = Math.min(away(stop, from), away(stop, to))
+      for (let k = 0; k < pts.length; k++) {
         if (k > from && k < to) continue
-        if (haversineM(here, { lat: pts[k][0], lng: pts[k][1] }) <= 80) onKept = true
+        const distance = away(stop, k)
+        if (distance < keptNear) keptNear = distance
       }
-      if (!onKept) return false
+      // The loop is the visit to this stop. A wobble far from every stop can still go.
+      if (loopNear <= 120 && keptNear > loopNear + 30) return false
     }
     return true
   }
