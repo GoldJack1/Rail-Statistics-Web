@@ -92,6 +92,7 @@ function listCacheControl(request: NextRequest, pathSegments: string[]): string 
 function darwinUpstreamTimeoutMs(request: NextRequest, pathSegments: string[]): number {
   const kind = pathSegments[0]
   if (kind === 'plan') return 20_000
+  if (kind === 'journey-route') return 25_000
   if (kind === 'departures') return 25_000
   if (kind === 'service' && request.nextUrl.searchParams.get('date')) return 20_000
   if (kind === 'health' || kind === 'units' || kind === 'unit' || kind === 'history') return 8_000

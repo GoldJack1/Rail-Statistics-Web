@@ -23,6 +23,7 @@ Run this on your Mac, from the website repo:
   health      Local /api/ping and /api/departures/PAD on :4001
   fetch-tt     Run 04:00 timetable pull now (rail-core-tt)
   publish-rdm  Upload NLC, TOPS, CIF from ~/Downloads to GCS
+  rail-graph   Copy the passenger rail file to dev and live, then restart query
 EOF
 }
 
@@ -111,6 +112,41 @@ echo"
   publish-rdm)
     root="$(cd "$(dirname "$0")/.." && pwd)"
     exec bash "$root/rail-core/scripts/publish-rdm-files.sh" "${1:-$HOME/Downloads}"
+    ;;
+  rail-graph)
+    need_host
+    root="$(cd "$(dirname "$0")/.." && pwd)"
+    src="$root/new-site/public/data/gb-passenger-rail.json"
+    if [ ! -f "$src" ]; then
+      echo "Missing $src" >&2
+      exit 1
+    fi
+    scp "$src" "$HOST:/tmp/gb-passenger-rail.json"
+    remote "python3 - << 'PY'
+import os, shutil
+pairs = [
+    ('/home/darwin/rail-core-dev/.env', 'rail-core-query-dev'),
+    ('/home/darwin/rail-core/.env', 'rail-core-query'),
+]
+src = '/tmp/gb-passenger-rail.json'
+for envf, unit in pairs:
+    if not os.path.isfile(envf):
+        print('skip', envf)
+        continue
+    data = None
+    with open(envf) as fh:
+        for line in fh:
+            line = line.strip()
+            if line.startswith('DATA_DIR='):
+                data = line.split('=', 1)[1].strip().strip(chr(34)).strip(chr(39))
+    if not data:
+        data = os.path.join(os.path.dirname(envf), 'data')
+    os.makedirs(data, exist_ok=True)
+    dest = os.path.join(data, 'gb-passenger-rail.json')
+    shutil.copyfile(src, dest)
+    print('installed', dest, 'restart', unit)
+    os.system('sudo systemctl restart ' + unit)
+PY"
     ;;
   *)
     echo "Unknown command: $cmd" >&2

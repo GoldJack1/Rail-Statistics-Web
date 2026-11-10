@@ -1,4 +1,5 @@
 import { routeLimited, routedCoordinates, type LatLngTuple } from './brouterRailRoute'
+import { resolveDarwinBrowserUrl } from './darwinReadyFetch'
 import { removeRouteReversals } from './serviceJourneyMap'
 import { loadGbRailGraph, routeGbLeg } from './tracksGraphLoad'
 
@@ -138,6 +139,54 @@ function appendPath(joined: LatLngTuple[], part: LatLngTuple[]) {
   for (let i = start; i < part.length; i++) joined.push(part[i])
 }
 
+/** The query service draws the line. A miss keeps the graph bundled with the site. */
+export async function fetchJourneyRoute(
+  points: LatLngTuple[],
+  signal: AbortSignal,
+): Promise<LatLngTuple[] | null> {
+  if (points.length < 2) return null
+  const timeout = new AbortController()
+  const timer = setTimeout(() => timeout.abort(), 12_000)
+  const onAbort = () => timeout.abort()
+  signal.addEventListener('abort', onAbort)
+  let response: Response
+  try {
+    response = await fetch(resolveDarwinBrowserUrl('/api/darwin/journey-route'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ points }),
+      signal: timeout.signal,
+      cache: 'no-store',
+    })
+  } catch (error) {
+    if (signal.aborted) throw error
+    return null
+  } finally {
+    clearTimeout(timer)
+    signal.removeEventListener('abort', onAbort)
+  }
+  if (!response.ok) return null
+  const payload: unknown = await response.json()
+  if (!payload || typeof payload !== 'object') return null
+  const doc = payload as { ready?: unknown; segments?: unknown }
+  if (doc.ready === false) return null
+  const segments = doc.segments
+  if (!Array.isArray(segments)) return null
+  const joined: LatLngTuple[] = []
+  for (const segment of segments) {
+    if (!Array.isArray(segment) || segment.length < 2) continue
+    if (joined.length) joined.push([Number.NaN, Number.NaN])
+    for (const pair of segment) {
+      if (!Array.isArray(pair) || pair.length < 2) continue
+      const lat = Number(pair[0])
+      const lng = Number(pair[1])
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
+      joined.push([lat, lng])
+    }
+  }
+  return joined.length >= 2 ? joined : null
+}
+
 async function fetchRailLeg(
   from: LatLngTuple,
   to: LatLngTuple,
@@ -157,9 +206,10 @@ async function fetchRailLeg(
 }
 
 /**
- * Each leg is searched on the passenger-rail graph. A leg that cannot snap,
- * that the graph does not connect, or that sets off backwards around a gap,
- * falls back to one rail-route request. A miss stays a gap.
+ * The query service draws the line. When it is unreachable, each leg is
+ * searched on the passenger-rail graph shipped with the site. A leg that
+ * cannot snap, that the graph does not connect, or that sets off backwards
+ * around a gap, falls back to one rail-route request. A miss stays a gap.
  */
 export async function routeTracksJourney(
   points: LatLngTuple[],
@@ -167,6 +217,15 @@ export async function routeTracksJourney(
   onProgress?: (path: LatLngTuple[]) => void,
 ): Promise<LatLngTuple[]> {
   if (points.length < 2) return points
+  try {
+    const remote = await fetchJourneyRoute(points, signal)
+    if (remote && remote.length >= 2) {
+      onProgress?.(remote)
+      return remote
+    }
+  } catch (error) {
+    if (signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error
+  }
   void loadGbRailGraph()
   const joined: LatLngTuple[] = []
   for (let i = 1; i < points.length; i++) {

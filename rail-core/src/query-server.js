@@ -20,6 +20,7 @@ import { computeServiceLocation, locationIsFresh } from "./location.js";
 import { osgbToWgs84 } from "./osgb.js";
 import { ensureDayImported, ridNeedsHsp, ridsNeedHsp, startBoardHspFill } from "./ensure-history-day.js";
 import { consistDocument, consistFromOrigin, endOfDayMilesForUnit, lookupConsist, normalizePtacVehicles, unitIdsFromConsistRow } from "./ptac-apply.js";
+import { ensurePassengerRail, passengerRailRevision, routePassengerJourney } from "./passenger-rail.js";
 import {
   associationsForRid,
   combinedDestinationName,
@@ -160,6 +161,46 @@ function json(res, status, body, extra = {}) {
   for (const [k, v] of Object.entries(extra)) res.setHeader(k, v);
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(body));
+}
+
+function readJson(req, limit = 64_000) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new Error("body too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      try {
+        const text = Buffer.concat(chunks).toString("utf8").trim();
+        resolve(text ? JSON.parse(text) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function journeyPoints(body) {
+  const raw = body?.points;
+  if (!Array.isArray(raw) || raw.length < 2 || raw.length > 80) return null;
+  const points = [];
+  for (const pair of raw) {
+    if (!Array.isArray(pair) || pair.length < 2) return null;
+    const lat = Number(pair[0]);
+    const lng = Number(pair[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    points.push([lat, lng]);
+  }
+  return points;
 }
 
 function timetableHorizonYmd() {
@@ -1403,6 +1444,23 @@ const server = createServer(async (req, res) => {
       json(res, 200, { trainId, date: ymd, events });
       return;
     }
+    if (url.pathname === "/api/journey-route" && req.method === "POST") {
+      const points = journeyPoints(await readJson(req));
+      if (!points) {
+        json(res, 400, { error: "points must be 2 to 80 [lat, lng] pairs" });
+        return;
+      }
+      const ready = await ensurePassengerRail();
+      if (!ready) {
+        json(res, 200, { ready: false, segments: [], revision: passengerRailRevision() });
+        return;
+      }
+      const segments = await routePassengerJourney(points);
+      json(res, 200, { ready: true, segments, revision: passengerRailRevision() }, {
+        "cache-control": "public, max-age=300",
+      });
+      return;
+    }
     if (url.pathname === "/api/window" || url.pathname === "/api/dates" || url.pathname === "/api/history/dates") {
       const days = listDayYmds();
       const today = londonCalendarYmd();
@@ -1451,6 +1509,7 @@ function warmDevQuery() {
 }
 
 warmDevQuery();
+void ensurePassengerRail();
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`rail-core query on 127.0.0.1:${PORT} (${QUERY_ENV_LABEL})`);
