@@ -1,7 +1,7 @@
 import { routeLimited, routedCoordinates, type LatLngTuple } from './brouterRailRoute'
 import { resolveDarwinBrowserUrl } from './darwinReadyFetch'
 import { removeRouteReversals, type RailVia } from './serviceJourneyMap'
-import { loadGbRailGraph, routeGbLeg } from './tracksGraphLoad'
+import { followGbRoute, loadGbRailGraph, routeGbLeg } from './tracksGraphLoad'
 
 export function splitRouteGaps(path: LatLngTuple[]): LatLngTuple[][] {
   const segments: LatLngTuple[][] = []
@@ -378,6 +378,7 @@ const RECHECKS = 3
 export async function fetchPlatformRailRoute(
   vias: RailVia[],
   signal: AbortSignal,
+  onProgress?: (path: LatLngTuple[]) => void,
 ): Promise<LatLngTuple[] | null> {
   if (vias.length < 2) return null
   const loosened = new Set<number>()
@@ -394,8 +395,13 @@ export async function fetchPlatformRailRoute(
     })
     return kept
   }
+  const draw = async (raw: LatLngTuple[]): Promise<LatLngTuple[]> => {
+    const followed = await followGbRoute(raw, signal)
+    return filletRailRoute(followed && followed.length >= 2 ? followed : raw)
+  }
   let kept = pointsNow()
   let path = await requestRailRoute(kept.map((row) => row.point), signal)
+  if (path) onProgress?.(await draw(path))
   for (let round = 0; path && round < RECHECKS; round++) {
     const wrong = turnedBackAt(path, kept.map((row) => row.point))
     let changed = false
@@ -419,10 +425,11 @@ export async function fetchPlatformRailRoute(
     const next = await requestRailRoute(kept.map((row) => row.point), signal)
     if (!next) break
     path = next
+    onProgress?.(await draw(path))
   }
-  if (path) return filletRailRoute(path)
+  if (path) return draw(path)
   const loose = await requestRailRoute(vias.map((via): LatLngTuple => [via.loose.lat, via.loose.lng]), signal)
-  return loose ? filletRailRoute(loose) : null
+  return loose ? draw(loose) : null
 }
 
 /** One OpenRailRouting request through every point. A miss is empty. */

@@ -1,3 +1,4 @@
+import { followRailway } from './followRailway'
 import { buildRailGraph, linesFromNetwork, RAIL_GRAPH_REVISION, routeOnGraph } from './tracksRailGraph'
 import type { LatLngTuple } from './brouterRailRoute'
 
@@ -10,6 +11,7 @@ type Router = {
     to: { lat: number; lng: number },
     signal: AbortSignal,
   ) => Promise<LatLngTuple[] | null>
+  follow: (path: LatLngTuple[], signal: AbortSignal) => Promise<LatLngTuple[] | null>
 }
 
 let routerPromise: Promise<Router | null> | null = null
@@ -42,26 +44,28 @@ function workerRouter(): Promise<Router | null> {
           resolve(null)
           return
         }
+        const ask = (body: Record<string, unknown>, signal: AbortSignal) =>
+          new Promise<LatLngTuple[] | null>((done) => {
+            if (signal.aborted) {
+              done(null)
+              return
+            }
+            const id = nextId++
+            const finish = (path: LatLngTuple[] | null) => {
+              signal.removeEventListener('abort', onAbort)
+              done(signal.aborted ? null : path)
+            }
+            const onAbort = () => {
+              pending.delete(id)
+              finish(null)
+            }
+            pending.set(id, finish)
+            signal.addEventListener('abort', onAbort, { once: true })
+            worker.postMessage({ ...body, id })
+          })
         resolve({
-          route: (from, to, signal) =>
-            new Promise((done) => {
-              if (signal.aborted) {
-                done(null)
-                return
-              }
-              const id = nextId++
-              const finish = (path: LatLngTuple[] | null) => {
-                signal.removeEventListener('abort', onAbort)
-                done(signal.aborted ? null : path)
-              }
-              const onAbort = () => {
-                pending.delete(id)
-                finish(null)
-              }
-              pending.set(id, finish)
-              signal.addEventListener('abort', onAbort, { once: true })
-              worker.postMessage({ type: 'route', id, from, to })
-            }),
+          route: (from, to, signal) => ask({ type: 'route', from, to }, signal),
+          follow: (path, signal) => ask({ type: 'follow', path }, signal),
         })
         return
       }
@@ -85,6 +89,21 @@ function ensureRouter(): Promise<Router | null> {
 /** Starts the network early. The map can draw while it is still being built. */
 export function loadGbRailGraph(): Promise<void> {
   return ensureRouter().then(() => undefined)
+}
+
+/** Long straights in a routed line are redrawn along the railway. */
+export async function followGbRoute(
+  path: LatLngTuple[],
+  signal: AbortSignal,
+): Promise<LatLngTuple[] | null> {
+  const router = await ensureRouter()
+  if (signal.aborted) return null
+  if (router) return router.follow(path, signal)
+  const graph = await graphOnThisThread()
+  if (signal.aborted || !graph) return null
+  return followRailway(path, (from, to) =>
+    routeOnGraph(graph, { lat: from[0], lng: from[1] }, { lat: to[0], lng: to[1] }),
+  )
 }
 
 /** One leg, searched off the page thread. A failed worker searches here instead. */

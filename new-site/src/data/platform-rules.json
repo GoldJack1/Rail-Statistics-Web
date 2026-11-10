@@ -31,6 +31,20 @@
       "before": ["LDS", "LEEDS", "KGX", "KNGX"],
       "after": ["BDQ", "BRADFS"],
       "platform": "4"
+    },
+    {
+      "id": "llantwit-to-bridgend",
+      "at": ["LWM", "LLNWTMR"],
+      "direction": "west",
+      "platform": "2",
+      "replace": ["", "1"]
+    },
+    {
+      "id": "llantwit-to-cardiff",
+      "at": ["LWM", "LLNWTMR"],
+      "direction": "east",
+      "platform": "1",
+      "replace": ["", "2"]
     }
   ]
 }

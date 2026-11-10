@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { railwayRouteJoined, routeLeavesTheRailway, shapeOntoLeftHandTrack } from '@/server/osmRailPath'
+import { railwayRouteJoined, routeLeavesTheRailway } from '@/server/osmRailPath'
 import { isValidStationCoordinate } from '@/utils/stationCoordinates'
 import {
   buildOpenRailRouteUrl,
@@ -37,10 +37,7 @@ function parseViaPoints(value: string | null): LatLngTuple[] {
   return points
 }
 
-const SHAPE_BUDGET_MS = 12_000
-
 export async function GET(request: NextRequest) {
-  const started = Date.now()
   const fromLat = readCoord(request.nextUrl.searchParams.get('fromLat'))
   const fromLng = readCoord(request.nextUrl.searchParams.get('fromLng'))
   const toLat = readCoord(request.nextUrl.searchParams.get('toLat'))
@@ -95,16 +92,11 @@ export async function GET(request: NextRequest) {
     if (upstream.ok) {
       const routed = parseOpenRailRoute(await upstream.json())
       if (routed.length >= 2 && !routeLeavesTheRailway(points, routed)) {
-        if (!strict) return publish(routed)
-        const budget = Math.min(SHAPE_BUDGET_MS, Math.max(0, 25_000 - (Date.now() - started)))
-        const shaped = budget < 2_000
-          ? routed
-          : await Promise.race([
-              shapeOntoLeftHandTrack(points, routed).catch(() => routed),
-              new Promise<LatLngTuple[]>((resolve) => setTimeout(() => resolve(routed), budget)),
-            ])
-        const coordinates = shaped.length >= 2 && !routeLeavesTheRailway(points, shaped) ? shaped : routed
-        return publish(coordinates)
+        // Draw this line at once. Sliding it onto the left-hand rail asks
+        // OpenStreetMap for every stretch of a long journey, and that lookup
+        // was holding the response for the whole time budget. The map then
+        // asks again when a point is loosened, so the line stayed blank.
+        return publish(routed)
       }
     } else if (!strict && (upstream.status === 403 || upstream.status === 429 || upstream.status >= 500)) {
       return NextResponse.json({ coordinates: fallback, fallback: true, limited: true })

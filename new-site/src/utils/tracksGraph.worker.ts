@@ -1,3 +1,4 @@
+import { followRailway } from './followRailway'
 import {
   buildRailGraph,
   linesFromNetwork,
@@ -5,6 +6,7 @@ import {
   routeOnGraph,
   type RailGraph,
 } from './tracksRailGraph'
+import type { LatLngTuple } from './brouterRailRoute'
 
 type StoredGraph = {
   lons: Float64Array
@@ -24,8 +26,16 @@ type RouteRequest = {
   to: { lat: number; lng: number }
 }
 
+type FollowRequest = {
+  type: 'follow'
+  id: number
+  path: LatLngTuple[]
+}
+
+type GraphRequest = RouteRequest | FollowRequest
+
 let graph: RailGraph | null = null
-const pending: RouteRequest[] = []
+const pending: GraphRequest[] = []
 
 function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => Promise<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -68,7 +78,16 @@ function writeCache(built: RailGraph): Promise<void> {
   }))
 }
 
-function answer(message: RouteRequest) {
+function answer(message: GraphRequest) {
+  if (message.type === 'follow') {
+    const path = graph
+      ? followRailway(message.path, (from, to) =>
+          routeOnGraph(graph as RailGraph, { lat: from[0], lng: from[1] }, { lat: to[0], lng: to[1] }),
+        )
+      : message.path
+    self.postMessage({ type: 'route', id: message.id, path })
+    return
+  }
   const path = graph ? routeOnGraph(graph, message.from, message.to) : null
   self.postMessage({ type: 'route', id: message.id, path })
 }
@@ -78,7 +97,7 @@ function flushPending() {
   for (const message of queued) answer(message)
 }
 
-self.onmessage = (event: MessageEvent<RouteRequest>) => {
+self.onmessage = (event: MessageEvent<GraphRequest>) => {
   if (graph) answer(event.data)
   else pending.push(event.data)
 }

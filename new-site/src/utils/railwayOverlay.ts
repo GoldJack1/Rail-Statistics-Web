@@ -21,10 +21,8 @@ const SUPERTRAM_ORANGE = '#ff5700'
 const LIGHT_RAIL_COLOR = '#5ec269'
 const SUBWAY_COLOR = '#5ec269'
 
-const HEAVY_RAIL_COLORS: Record<RailwayOverlayTheme, string> = {
-  dark: '#cccccc',
-  light: '#000000'
-}
+/** Same ink in either app theme. Dark mode does not recolour the railway. */
+const HEAVY_RAIL_COLOR = '#000000'
 
 /** South Yorkshire SuperTram + tram-train (ORM tiles lack network tags). */
 const SUPERTRAM_MAP_BOUNDS = L.latLngBounds(
@@ -171,8 +169,8 @@ export type RailwayOverlayLayers = {
 }
 
 /** Railway line overlays (active infrastructure only). */
-export function createRailwayOverlayLayers(themeKey: RailwayOverlayTheme): RailwayOverlayLayers {
-  const styleNationalRailwayLine = createStyleNationalRailwayLine(HEAVY_RAIL_COLORS[themeKey])
+export function createRailwayOverlayLayers(_themeKey: RailwayOverlayTheme): RailwayOverlayLayers {
+  const styleNationalRailwayLine = createStyleNationalRailwayLine(HEAVY_RAIL_COLOR)
 
   const lowZoomLines = createVectorRailwayLayer({
     url: 'https://openrailwaymap.app/standard_railway_line_low/{z}/{x}/{y}',

@@ -161,6 +161,11 @@ export function applyShipleyPlatformOverride(
   return applyPlatformRules(stops, toc, ruleById('shipley-to-leeds').concat(ruleById('shipley-to-bradford')))
 }
 
+/** Platform 2 towards Bridgend, platform 1 towards Cardiff. */
+export function applyLlantwitPlatformOverride(stops: JourneyMapStop[]): JourneyMapStop[] {
+  return applyPlatformRules(stops, null, ruleById('llantwit-to-bridgend').concat(ruleById('llantwit-to-cardiff')))
+}
+
 /** Where a booked platform sits, including the two ends of that road and a buffer. */
 export type RoutePlatform = {
   lat: number
@@ -367,6 +372,65 @@ function metresEastNorth(origin: MapPoint, point: MapPoint): { x: number; y: num
   }
 }
 
+/** A leg this far from the running direction is off to the side, not a new heading. */
+const ASIDE_ALONG = Math.cos((70 * Math.PI) / 180)
+/** A leg this far back has turned the train round. */
+const REVERSAL_ALONG = -0.5
+
+function bearingOf(from: MapPoint, to: MapPoint): number | null {
+  const step = metresEastNorth(from, to)
+  if (Math.hypot(step.x, step.y) < 40) return null
+  return Math.atan2(step.x, step.y)
+}
+
+/** Forward continues the journey. Reverse turns it round. Aside is a point off the line. */
+function legAgainst(travel: number, from: MapPoint, to: MapPoint): 'forward' | 'reverse' | 'aside' {
+  const step = metresEastNorth(from, to)
+  const length = Math.hypot(step.x, step.y)
+  if (length < 40) return 'aside'
+  const along = (step.x * Math.sin(travel) + step.y * Math.cos(travel)) / length
+  if (along <= REVERSAL_ALONG) return 'reverse'
+  if (along < ASIDE_ALONG) return 'aside'
+  return 'forward'
+}
+
+function stepAlong(origin: MapPoint, travel: number): { from: MapPoint; to: MapPoint } {
+  const east = Math.sin(travel) * 250
+  const north = Math.cos(travel) * 250
+  const cos = Math.cos((origin.lat * Math.PI) / 180)
+  return {
+    from: origin,
+    to: {
+      lat: origin.lat + north / 110540,
+      lng: origin.lng + east / (111320 * Math.max(0.2, cos)),
+    },
+  }
+}
+
+/**
+ * The direction of travel at one stop, walking from the origin toward the
+ * destination. A timing point off to the side does not move it. A reversal
+ * does: the way back runs on the left of that new direction.
+ */
+function travelAt(stops: JourneyMapStop[], index: number): { from: MapPoint; to: MapPoint } | null {
+  const points = stops.map((stop) => ({ lat: stop.lat, lng: stop.lng }))
+  let travel: number | null = null
+  const adopt = (from: MapPoint, to: MapPoint) => {
+    const leg = bearingOf(from, to)
+    if (leg == null) return
+    if (travel == null || legAgainst(travel, from, to) !== 'aside') travel = leg
+  }
+  for (let i = 1; i <= index; i++) adopt(points[i - 1], points[i])
+  if (index + 1 < points.length) {
+    const next = points[index + 1]
+    const leaving = bearingOf(points[index], next)
+    if (leaving != null && (travel == null || legAgainst(travel, points[index], next) === 'forward')) {
+      travel = leaving
+    }
+  }
+  return travel == null ? null : stepAlong(points[index], travel)
+}
+
 /** Metres to the left of the direction from `from` to `to`, measured at `origin`. */
 function leftOfDirection(from: MapPoint, to: MapPoint, origin: MapPoint, point: MapPoint): number {
   const axis = metresEastNorth(from, to)
@@ -416,14 +480,17 @@ const ON_LINE_M = 40
  * A pass with no booked platform. The path, then the line, names the road when
  * either is a platform number. A compass code names the direction of that road.
  * A fast line with no platform named passes no platform. Otherwise the train
- * takes the left-hand face of the through pair on its own line, which is how a
- * westbound train at Mirfield runs via platform 2 rather than platform 1.
+ * takes the left-hand face of the through pair, on the left of the journey
+ * from the origin toward the destination. A point off to the side does not
+ * change that side. After a reversal the left-hand face is the left of the
+ * way back.
  */
 function passingRoad(
   stop: JourneyMapStop,
   prev: JourneyMapStop | null,
   next: JourneyMapStop | null,
   roads: Readonly<Record<string, RoutePlatform>> | undefined,
+  travel: { from: MapPoint; to: MapPoint } | null,
 ): RoutePlatform | null {
   if (!roads) return null
   const faces = Object.entries(roads)
@@ -434,8 +501,8 @@ function passingRoad(
 
   const compass = compassCode(stop.path) || compassCode(stop.line) || compassCode(prev?.line ?? null)
   const origin = { lat: stop.lat, lng: stop.lng }
-  let from: MapPoint | null = prev ? { lat: prev.lat, lng: prev.lng } : null
-  let to: MapPoint | null = next ? { lat: next.lat, lng: next.lng } : null
+  let from: MapPoint | null = travel?.from ?? (prev ? { lat: prev.lat, lng: prev.lng } : null)
+  let to: MapPoint | null = travel?.to ?? (next ? { lat: next.lat, lng: next.lng } : null)
   if (compass) {
     const step = COMPASS_STEP[compass]
     from = origin
@@ -504,7 +571,13 @@ function railStops(
     const pin = { lat: stop.lat, lng: stop.lng }
     const place = platformAt?.[String(stop.index)]
       ?? (stop.kind === 'pass'
-        ? passingRoad(stop, chosen[index - 1] ?? null, chosen[index + 1] ?? null, roadsAt?.[String(stop.index)])
+        ? passingRoad(
+          stop,
+          chosen[index - 1] ?? null,
+          chosen[index + 1] ?? null,
+          roadsAt?.[String(stop.index)],
+          travelAt(chosen, index),
+        )
         : null)
     const call = stop.calling
     if (place?.stand) return { stop, via: { ...place.stand, exact: true, loose: pin, call } }

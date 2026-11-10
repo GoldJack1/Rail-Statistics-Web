@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useTheme } from '../../../hooks/useTheme'
 import { railwayDaySecondsFromClock } from '../../../utils/railwayOperatingDayUk'
 import { platformSitsAtStation } from '../../../utils/platformPosition'
 import { resolveDarwinBrowserUrl } from '../../../utils/darwinReadyFetch'
@@ -34,6 +33,16 @@ const tiplocCoordCache = new Map<string, { lat: number; lng: number } | null>()
 
 const NO_PLATFORMS: Record<string, RoutePlatform> = {}
 const NO_ROADS: Record<string, Record<string, RoutePlatform>> = {}
+
+/** The query server's list wins where it has the same rule. A rule only in the site copy still applies. */
+function mergePlatformRules(remote: PlatformRule[] | null): PlatformRule[] {
+  if (!remote) return BUILTIN_PLATFORM_RULES
+  const known = new Set(remote.map((rule) => rule.id).filter((id): id is string => Boolean(id)))
+  return [
+    ...remote,
+    ...BUILTIN_PLATFORM_RULES.filter((rule) => Boolean(rule.id) && !known.has(rule.id)),
+  ]
+}
 
 function readCoordPair(value: unknown): { lat: number; lng: number } | null {
   if (!Array.isArray(value) || value.length < 2) return null
@@ -158,9 +167,7 @@ export function ServiceJourneyMap({
   const shellRef = useRef<HTMLDivElement>(null)
   const [fullscreen, setFullscreen] = useState(false)
   const [immersive, setImmersive] = useState(false)
-  const { theme } = useTheme()
   const { operators } = useTocOperators()
-  const themeKey = theme === 'dark' ? 'dark' : 'light'
   const routeColor = useMemo(
     () => resolveTocRouteColor(operators, service.toc, service.tocName),
     [operators, service.toc, service.tocName],
@@ -191,7 +198,7 @@ export function ServiceJourneyMap({
         (point) => !point.calling && !String(point.crs || '').trim(),
       ),
       service.toc,
-      platformRules ?? BUILTIN_PLATFORM_RULES,
+      mergePlatformRules(platformRules),
     ),
     [service.stops, service.toc, stations, extraCoords, platformRules],
   )
@@ -515,7 +522,6 @@ export function ServiceJourneyMap({
           platforms={activePlatforms}
           platformRoads={platformRoads}
           routeColor={routeColor}
-          theme={themeKey}
           fullscreen={expanded}
           onToggleFullscreen={toggleFullscreen}
           callsOnly={viewMode === 'simple'}

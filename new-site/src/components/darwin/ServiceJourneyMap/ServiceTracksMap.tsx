@@ -30,13 +30,10 @@ import {
   tracksBasemapCredit,
   tracksMapStyle,
   tracksRouteCasing,
-  tracksRouteOnDark,
   type TracksBasemap,
-  type TracksMapTheme,
 } from '../../../utils/tracksDarkStyle'
 import { ensureOrmSmoothProtocol } from '../../../utils/ormSmoothTiles'
 import { fetchPlatformRailRoute, routeTracksJourney, splitRouteGaps } from '../../../utils/tracksRailRoute'
-import { liftRouteColorForDarkBasemap } from '../../../utils/tocOperatorMap'
 import type { ServiceDetail, ServiceStop } from '../../../types/darwin'
 
 export type BranchTrack = {
@@ -239,7 +236,6 @@ export function ServiceTracksMap({
   platforms,
   platformRoads = NO_ROADS,
   routeColor,
-  theme,
   fullscreen,
   onToggleFullscreen,
   callsOnly = false,
@@ -257,7 +253,6 @@ export function ServiceTracksMap({
   /** Every platform face at a pass that has no booked platform. */
   platformRoads?: Record<string, Record<string, RoutePlatform>>
   routeColor: string
-  theme: TracksMapTheme
   fullscreen: boolean
   onToggleFullscreen: () => void
   /** Simple view: passenger calls only, matching the calling list. */
@@ -281,12 +276,12 @@ export function ServiceTracksMap({
   const shownBranchesRef = useRef<Map<string, { lat: number; lng: number }>>(new Map())
   const userMovedRef = useRef(false)
   const framedCountRef = useRef(0)
-  const [basemap, setBasemap] = useState<TracksBasemap>(theme === 'dark' ? 'dark' : 'detailed')
+  const [basemap, setBasemap] = useState<TracksBasemap>('detailed')
   const [layersOpen, setLayersOpen] = useState(false)
   const basemapChosen = useRef(false)
   const basemapRef = useRef(basemap)
   const routeModeRef = useRef(routeMode)
-  const lineColor = tracksRouteOnDark(basemap) ? liftRouteColorForDarkBasemap(routeColor) : routeColor
+  const lineColor = routeColor
   const routeColorRef = useRef(lineColor)
   const appliedStyle = useRef<string | null>(null)
   const savedRouteRef = useRef<{ key: string; path: LatLngTuple[] } | null>(null)
@@ -322,11 +317,6 @@ export function ServiceTracksMap({
       setBasemap(stored)
     }
   }, [])
-
-  useEffect(() => {
-    if (basemapChosen.current) return
-    setBasemap(theme === 'dark' ? 'dark' : 'detailed')
-  }, [theme])
 
   useEffect(() => {
     const container = containerRef.current
@@ -555,7 +545,7 @@ export function ServiceTracksMap({
       paint(savedRouteRef.current.path)
     }
     const request = routeMode === 'rail'
-      ? fetchPlatformRailRoute(railWaypoints, controller.signal)
+      ? fetchPlatformRailRoute(railWaypoints, controller.signal, paint)
       : routeTracksJourney(waypoints, controller.signal, (path) => {
           savedRouteRef.current = { key: waypointKey, path }
           paint(path)

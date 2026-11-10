@@ -18,6 +18,7 @@ import {
   applyMirfieldPlatformOverride,
   applyMorleyPlatformOverride,
   applyShipleyPlatformOverride,
+  applyLlantwitPlatformOverride,
   journeyMapStops,
   journeyPointKind,
   liveJourneyPosition,
@@ -363,6 +364,46 @@ describe('serviceJourneyMap', () => {
     expect(applyMorleyPlatformOverride(booked).find((point) => point.crs === 'MLY')?.platform).toBe('3')
   })
 
+  it('uses platform 2 at Llantwit Major towards Bridgend and platform 1 towards Cardiff', () => {
+    const west = journeyMapStops(
+      [
+        stop('ABTH', 'Aberthaw', 'PP', { lat: 51.38888, lng: -3.38671 }),
+        stop('LLNWTMR', 'Llantwit Major', 'IP', { lat: 51.40926, lng: -3.48033, crs: 'LWM' }),
+        stop('ABTH433', 'Aberthaw Sig', 'PP', { lat: 51.41402, lng: -3.4928 }),
+      ],
+      [],
+    )
+    expect(applyLlantwitPlatformOverride(west).find((point) => point.crs === 'LWM')?.platform).toBe('2')
+    const bookedWest = journeyMapStops(
+      [
+        stop('ABTH', 'Aberthaw', 'PP', { lat: 51.38888, lng: -3.38671 }),
+        stop('LLNWTMR', 'Llantwit Major', 'IP', { lat: 51.40926, lng: -3.48033, crs: 'LWM', platform: '2' }),
+        stop('ABTH433', 'Aberthaw Sig', 'PP', { lat: 51.41402, lng: -3.4928 }),
+      ],
+      [],
+    )
+    expect(applyLlantwitPlatformOverride(bookedWest).find((point) => point.crs === 'LWM')?.platform).toBe('2')
+
+    const east = journeyMapStops(
+      [
+        stop('ABTH440', 'Aberthaw Sig', 'PP', { lat: 51.44604, lng: -3.52418 }),
+        stop('LLNWTMR', 'Llantwit Major', 'IP', { lat: 51.40926, lng: -3.48033, crs: 'LWM', platform: '2' }),
+        stop('ABTH', 'Aberthaw', 'PP', { lat: 51.38888, lng: -3.38671 }),
+      ],
+      [],
+    )
+    expect(applyLlantwitPlatformOverride(east).find((point) => point.crs === 'LWM')?.platform).toBe('1')
+    const bookedEast = journeyMapStops(
+      [
+        stop('ABTH440', 'Aberthaw Sig', 'PP', { lat: 51.44604, lng: -3.52418 }),
+        stop('LLNWTMR', 'Llantwit Major', 'IP', { lat: 51.40926, lng: -3.48033, crs: 'LWM', platform: '1' }),
+        stop('ABTH', 'Aberthaw', 'PP', { lat: 51.38888, lng: -3.38671 }),
+      ],
+      [],
+    )
+    expect(applyLlantwitPlatformOverride(bookedEast).find((point) => point.crs === 'LWM')?.platform).toBe('1')
+  })
+
   it('puts LNER and Northern Shipley trains on platform 3 towards Leeds and 4 towards Bradford', () => {
     const towardsLeeds = journeyMapStops(
       [
@@ -462,6 +503,52 @@ describe('serviceJourneyMap', () => {
       lng: -1.6926,
       exact: true,
     })
+  })
+
+  it('keeps the left-hand road when a timing point sits off the journey, and swaps it after a reverse', () => {
+    const road = (lat: number) => ({
+      lat,
+      lng: -1.69,
+      stand: { lat, lng: -1.69 },
+    })
+    const faces = { N: road(53.50008), S: road(53.49992) }
+    const aside = journeyMapStops(
+      [
+        stop('ORG', 'Origin', 'OR', { lat: 53.5, lng: -1.7 }),
+        stop('PASS', 'Pass', 'PP', { lat: 53.5, lng: -1.69 }),
+        stop('SIDE', 'Side', 'IP', { lat: 53.52, lng: -1.688 }),
+        stop('DST', 'Destination', 'DT', { lat: 53.5, lng: -1.67 }),
+      ],
+      [],
+    )
+    const pass = aside.find((point) => point.tpl === 'PASS')
+    expect(platformRouteWaypoints(aside, {}, { [String(pass?.index)]: faces })).toContainEqual({
+      lat: 53.50008,
+      lng: -1.69,
+      exact: true,
+      loose: { lat: 53.5, lng: -1.69 },
+      call: false,
+    })
+
+    const reversed = journeyMapStops(
+      [
+        stop('ORG', 'Origin', 'OR', { lat: 53.5, lng: -1.7 }),
+        stop('OUT', 'Out', 'PP', { lat: 53.5, lng: -1.69 }),
+        stop('REV', 'Reverse', 'IP', { lat: 53.5, lng: -1.68 }),
+        stop('RET', 'Return', 'PP', { lat: 53.5, lng: -1.69 }),
+        stop('DST', 'Destination', 'DT', { lat: 53.5, lng: -1.705 }),
+      ],
+      [],
+    )
+    const out = reversed.find((point) => point.tpl === 'OUT')
+    const back = reversed.find((point) => point.tpl === 'RET')
+    const roads = {
+      [String(out?.index)]: faces,
+      [String(back?.index)]: faces,
+    }
+    const vias = platformRouteWaypoints(reversed, {}, roads)
+    expect(vias).toContainEqual(expect.objectContaining({ lat: 53.50008, lng: -1.69, call: false }))
+    expect(vias).toContainEqual(expect.objectContaining({ lat: 53.49992, lng: -1.69, call: false }))
   })
 
   it('starts a bay at the buffer and leaves along the platform', () => {

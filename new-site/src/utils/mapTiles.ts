@@ -1,6 +1,6 @@
 /**
  * Map tile layer config per theme.
- * Light and dark both use standard OSM; dark mode tiles are tuned via leafletDarkTiles.css.
+ * Light and dark both use standard OSM. Dark mode does not recolour the tiles.
  * Both themes use the OpenRailwayMap vector overlay from mapTileLayers.ts.
  */
 

@@ -1,23 +1,7 @@
 /**
- * Dark-mode OSM map: inverted tiles plus themed attribution.
+ * Attribution on a dark page. The tiles and railway lines keep their own colours.
  * Zoom uses MapZoomControls (BUTCircleButton), not Leaflet's native bar.
- *
- * Filter is on the tile pane (one compositing layer). Animated zoom can
- * briefly misalign canvas pins vs filtered tiles; we keep zoom animation
- * anyway — disabling it felt laggier than the jiggle.
  */
-[data-theme='dark'] .stations-osm-map__canvas.leaflet-container,
-[data-theme='dark'] .location-map-picker-map.leaflet-container,
-[data-theme='dark'] .location-map-preview-osm.leaflet-container {
-  background-color: var(--bg-primary);
-}
-
-[data-theme='dark'] .stations-osm-map__canvas .leaflet-tile-pane,
-[data-theme='dark'] .location-map-picker-map .leaflet-tile-pane,
-[data-theme='dark'] .location-map-preview-osm .leaflet-tile-pane {
-  filter: invert(100%) hue-rotate(180deg) brightness(1.22) contrast(0.84) saturate(0.85);
-}
-
 [data-theme='dark'] .stations-osm-map__attribution,
 [data-theme='dark'] .location-map-picker-map .leaflet-control-attribution,
 [data-theme='dark'] .location-map-preview-osm .leaflet-control-attribution {
@@ -35,12 +19,4 @@
 [data-theme='dark'] .location-map-picker-map .leaflet-control-attribution a:hover,
 [data-theme='dark'] .location-map-preview-osm .leaflet-control-attribution a:hover {
   color: var(--accent-hover);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  [data-theme='dark'] .stations-osm-map__canvas .leaflet-tile-pane,
-  [data-theme='dark'] .location-map-picker-map .leaflet-tile-pane,
-  [data-theme='dark'] .location-map-preview-osm .leaflet-tile-pane {
-    filter: invert(100%) hue-rotate(180deg) brightness(1.1) contrast(0.9) saturate(0.9);
-  }
 }

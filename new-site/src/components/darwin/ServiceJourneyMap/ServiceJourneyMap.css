@@ -55,10 +55,6 @@ html.svc-map-immersive body {
   background: var(--bg-secondary);
 }
 
-[data-theme='dark'] .svc-journey-map__canvas--tracks {
-  background: #111920;
-}
-
 .svc-journey-map__wheres {
   display: flex;
   flex-direction: column;
