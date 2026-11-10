@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { roundSharpCorners } from './tracksRailRoute'
+import { graphLegGoesBackwards, roundSharpCorners } from './tracksRailRoute'
 import { buildRailGraph, linesFromNetwork, routeOnGraph } from './tracksRailGraph'
 import { nominatimInBritain, nominatimSearchUrl } from '../app/api/nominatim-station/route'
 import { tracksDarkStyle, tracksFlavor, tracksMapStyle } from './tracksDarkStyle'
@@ -192,6 +192,45 @@ describe('tracks rail graph', () => {
     }
     expect(toTamworth!.some((point) => point[0] > 52.55 && point[0] < 52.62 && point[1] > -1.75 && point[1] < -1.66)).toBe(true)
     expect(toBurton!.some((point) => point[0] > 52.7 && point[0] < 52.76 && point[1] < -1.69)).toBe(true)
+  })
+
+  it('keeps the Castleford line through Milford to Church Fenton', () => {
+    const file = `${process.cwd()}/public/data/gb-passenger-rail.json`
+    const lines = linesFromNetwork(JSON.parse(fs.readFileSync(file, 'utf8'))).filter((line) =>
+      line.some((point) => point[1] > 53.65 && point[1] < 53.9 && point[0] > -1.6 && point[0] < -1.15),
+    )
+    const graph = buildRailGraph(lines)
+    const castleford = { lat: 53.72408, lng: -1.35465 }
+    const church = { lat: 53.8266, lng: -1.22759 }
+    const path = routeOnGraph(graph, castleford, church)
+    expect(path).not.toBeNull()
+    // Whitwood and Leeds sit west of -1.37. The booked line carries on east.
+    expect(Math.min(...path!.map((point) => point[1]))).toBeGreaterThan(-1.37)
+    expect(path!.some((point) => point[0] > 53.79 && point[0] < 53.82 && point[1] > -1.25)).toBe(true)
+  })
+})
+
+describe('a graph leg that leaves backwards', () => {
+  it('rejects a long return when the first kilometres move away', () => {
+    const from: [number, number] = [53.724, -1.355]
+    const to: [number, number] = [53.827, -1.228]
+    const path: [number, number][] = [
+      from,
+      [53.73, -1.4],
+      [53.76, -1.5],
+      [53.79, -1.55],
+      [53.8, -1.4],
+      [53.81, -1.3],
+      to,
+    ]
+    expect(graphLegGoesBackwards(path, from, to)).toBe(true)
+  })
+
+  it('keeps a line that is already heading for the next point', () => {
+    const from: [number, number] = [53.724, -1.355]
+    const to: [number, number] = [53.827, -1.228]
+    const path: [number, number][] = [from, [53.76, -1.3], [53.8, -1.25], to]
+    expect(graphLegGoesBackwards(path, from, to)).toBe(false)
   })
 })
 

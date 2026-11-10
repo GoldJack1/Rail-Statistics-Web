@@ -33,7 +33,7 @@ const HEADING_PI = 31_416
 const NO_HEADING = 32_767
 
 /** Bump when the graph's shape changes, so a saved copy is rebuilt. */
-export const RAIL_GRAPH_REVISION = 3
+export const RAIL_GRAPH_REVISION = 4
 
 export type LngLat = [number, number]
 

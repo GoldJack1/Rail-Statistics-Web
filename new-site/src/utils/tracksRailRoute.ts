@@ -106,6 +106,30 @@ function smoothGaps(path: LatLngTuple[]): LatLngTuple[] {
   return smoothed
 }
 
+/**
+ * A gap in the passenger graph makes the shortest path set off away from the
+ * next timing point and return by a much longer railway. That is a false
+ * reversal. A real way round still gets closer within the first few kilometres.
+ */
+export function graphLegGoesBackwards(path: LatLngTuple[], from: LatLngTuple, to: LatLngTuple): boolean {
+  if (path.length < 2) return false
+  const goal = metresBetween(from, to)
+  if (goal < 4_000) return false
+  let along = 0
+  let closest = goal
+  const limit = Math.min(3_000, goal)
+  for (let i = 1; i < path.length; i++) {
+    along += metresBetween(path[i - 1], path[i])
+    const remain = metresBetween(path[i], to)
+    if (remain < closest) closest = remain
+    if (along >= limit) break
+  }
+  if (closest < goal - 800) return false
+  let rail = 0
+  for (let i = 1; i < path.length; i++) rail += metresBetween(path[i - 1], path[i])
+  return rail > goal * 2.2 && rail - goal > 8_000
+}
+
 function appendPath(joined: LatLngTuple[], part: LatLngTuple[]) {
   if (!part.length) return
   const last = joined[joined.length - 1]
@@ -134,8 +158,8 @@ async function fetchRailLeg(
 
 /**
  * Each leg is searched on the passenger-rail graph. A leg that cannot snap,
- * or that the graph does not connect, falls back to one rail-route request.
- * A miss stays a gap.
+ * that the graph does not connect, or that sets off backwards around a gap,
+ * falls back to one rail-route request. A miss stays a gap.
  */
 export async function routeTracksJourney(
   points: LatLngTuple[],
@@ -157,6 +181,7 @@ export async function routeTracksJourney(
       leg = null
     }
     if (signal.aborted) return joined
+    if (leg && graphLegGoesBackwards(leg, from, to)) leg = null
     if (!leg) {
       try {
         leg = await fetchRailLeg(from, to, signal)
