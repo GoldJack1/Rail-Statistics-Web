@@ -43,7 +43,13 @@ function filletTile(buffer: ArrayBuffer, z: number, y: number): Uint8Array {
 function emptyTile(): Uint8Array {
   return fromVectorTileJs({
     layers: {
-      empty: { version: 2, name: 'empty', extent: 4096, length: 0, feature: () => null },
+      empty: {
+        version: 2,
+        name: 'empty',
+        extent: 4096,
+        length: 0,
+        feature: () => ({ type: 0, properties: {}, id: undefined, extent: 4096, loadGeometry: () => [] }),
+      },
     },
   })
 }
