@@ -40,7 +40,9 @@ function mergePlatformRules(remote: PlatformRule[] | null): PlatformRule[] {
   const known = new Set(remote.map((rule) => rule.id).filter((id): id is string => Boolean(id)))
   return [
     ...remote,
-    ...BUILTIN_PLATFORM_RULES.filter((rule) => Boolean(rule.id) && !known.has(rule.id)),
+    ...BUILTIN_PLATFORM_RULES.filter((rule): rule is PlatformRule & { id: string } =>
+      typeof rule.id === 'string' && !known.has(rule.id),
+    ),
   ]
 }
 
