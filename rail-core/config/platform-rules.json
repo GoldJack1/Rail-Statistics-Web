@@ -45,6 +45,12 @@
       "direction": "east",
       "platform": "1",
       "replace": ["", "2"]
+    },
+    {
+      "id": "lime-street-low-level",
+      "at": ["LVL", "LVRPLSL"],
+      "platform": "A",
+      "replace": ["", "1"]
     }
   ]
 }

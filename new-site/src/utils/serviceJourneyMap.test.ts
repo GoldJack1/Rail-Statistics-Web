@@ -15,6 +15,7 @@ import {
   interpolateAlongPath,
   interpolateLatLng,
   applyPlatformRules,
+  BUILTIN_PLATFORM_RULES,
   applyMirfieldPlatformOverride,
   applyMorleyPlatformOverride,
   applyShipleyPlatformOverride,
@@ -442,6 +443,27 @@ describe('serviceJourneyMap', () => {
       { at: ['SHY', 'SHPY'], toc: ['NT'], before: ['BDQ'], after: ['LDS'], platform: '1' },
     ])
     expect(filedElsewhere.find((point) => point.crs === 'SHY')?.platform).toBe('1')
+  })
+
+  it('routes Liverpool Lime Street Low Level as platform A, not the high-level platform 1', () => {
+    const lowLevel = journeyMapStops(
+      [
+        stop('CHST', 'Chester', 'OR', { lat: 53.1967, lng: -2.8796, crs: 'CTR' }),
+        stop('LVRPLSL', 'Liverpool Lime Street Ll', 'IP', { lat: 53.40821, lng: -2.97775, crs: 'LVL', platform: '1' }),
+        stop('LVRPLCL', 'Liverpool Central', 'DT', { lat: 53.4046, lng: -2.97915, crs: 'LVC' }),
+      ],
+      [],
+    )
+    expect(applyPlatformRules(lowLevel, 'ME', BUILTIN_PLATFORM_RULES).find((point) => point.tpl === 'LVRPLSL')?.platform).toBe('A')
+
+    const highLevel = journeyMapStops(
+      [
+        stop('CREWE', 'Crewe', 'OR', { lat: 53.089, lng: -2.433, crs: 'CRE' }),
+        stop('LVRPLSH', 'Liverpool Lime Street', 'DT', { lat: 53.40731, lng: -2.97773, crs: 'LIV', platform: '1' }),
+      ],
+      [],
+    )
+    expect(applyPlatformRules(highLevel, 'VT', BUILTIN_PLATFORM_RULES).find((point) => point.tpl === 'LVRPLSH')?.platform).toBe('1')
   })
 
   it('keeps the site fallback rules identical to the VPS file', () => {
