@@ -82,6 +82,7 @@ function listCacheControl(request: NextRequest, pathSegments: string[]): string 
   const kind = pathSegments[0]
   const sub = pathSegments[1]
   if (kind === 'window' || kind === 'health') return 'public, s-maxage=30, stale-while-revalidate=60'
+  if (kind === 'platform-rules') return 'public, s-maxage=60, stale-while-revalidate=60'
   if (kind === 'history' && sub === 'dates') return 'public, s-maxage=60, stale-while-revalidate=300'
   if (kind === 'units' && (sub === 'catalog' || sub === 'fleets' || sub === 'days')) {
     return 'public, s-maxage=45, stale-while-revalidate=180'

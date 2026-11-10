@@ -37,6 +37,8 @@ function point(index: number, name: string, tpl: string, kind: 'stop' | 'pass'):
     kind,
     cancelled: false,
     platform: null,
+    path: null,
+    line: null,
   }
 }
 

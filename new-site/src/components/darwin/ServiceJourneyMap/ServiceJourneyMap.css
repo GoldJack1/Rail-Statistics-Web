@@ -200,6 +200,7 @@ html.svc-map-immersive body {
   z-index: 1100;
   margin: 0;
   max-width: 16rem;
+  white-space: pre-line;
   color: #fff;
   font-size: 0.65rem;
   line-height: 1.3;

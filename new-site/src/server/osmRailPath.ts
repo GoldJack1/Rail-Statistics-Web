@@ -467,6 +467,8 @@ const STAY_ON_TRACK_M = 16
 const JUNCTION_M = 80
 /** A crossover is shorter than this. It is not a running line. */
 const RUNNING_LINE_M = 40
+/** An unjoined parallel road has to keep going. A short loop does not. */
+const PARALLEL_RUN_M = 400
 
 function localMetres(origin: Point, point: Point): { x: number; y: number } {
   const lat = (origin.lat * Math.PI) / 180
@@ -665,8 +667,10 @@ function projectOnWay(way: Point[], here: Point, dir: { x: number; y: number } |
 
 /**
  * Move a running line onto the left-hand track in the direction of travel.
- * It stays on that road. A move onto another road is kept only where the two
- * ways join, and a timing point that names its own road is left where it is.
+ * A parallel running line to the left is taken even when the two ways never
+ * share a node, which is how double track is mapped. A crossover is still
+ * used where the ways do join. A timing point that names its own road is
+ * left where it is.
  */
 export function keepLeftHandTrack(
   path: LatLngTuple[],
@@ -689,6 +693,55 @@ export function keepLeftHandTrack(
       } else nodeWays.set(id, [w])
     }
   }
+  const CELL = 200
+  const cellKey = (lat: number, lng: number) => {
+    const latM = lat * 110540
+    const lngM = lng * 111320 * Math.cos((lat * Math.PI) / 180)
+    return `${Math.round(latM / CELL)},${Math.round(lngM / CELL)}`
+  }
+  const wayCells = new Map<string, number[]>()
+  const addCell = (key: string, way: number) => {
+    const list = wayCells.get(key)
+    if (!list) wayCells.set(key, [way])
+    else if (!list.includes(way)) list.push(way)
+  }
+  for (let w = 0; w < usable.length; w++) {
+    const way = usable[w]
+    for (let i = 0; i < way.length; i++) {
+      addCell(cellKey(way[i].lat, way[i].lng), w)
+      if (i === 0) continue
+      const dist = haversineM(way[i - 1], way[i])
+      const steps = Math.floor(dist / (CELL / 2))
+      for (let s = 1; s <= steps; s++) {
+        const t = s / (steps + 1)
+        addCell(
+          cellKey(
+            way[i - 1].lat + (way[i].lat - way[i - 1].lat) * t,
+            way[i - 1].lng + (way[i].lng - way[i - 1].lng) * t,
+          ),
+          w,
+        )
+      }
+    }
+  }
+  const nearWays = (here: Point): number[] => {
+    const latM = here.lat * 110540
+    const lngM = here.lng * 111320 * Math.cos((here.lat * Math.PI) / 180)
+    const row = Math.round(latM / CELL)
+    const col = Math.round(lngM / CELL)
+    const found: number[] = []
+    const seen = new Set<number>()
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (const way of wayCells.get(`${row + dy},${col + dx}`) ?? []) {
+          if (seen.has(way)) continue
+          seen.add(way)
+          found.push(way)
+        }
+      }
+    }
+    return found
+  }
   const links: number[][] = usable.map(() => [])
   for (const list of nodeWays.values()) {
     if (list.length < 2) continue
@@ -701,7 +754,7 @@ export function keepLeftHandTrack(
   const nearestWay = (here: Point): number | null => {
     let best: number | null = null
     let bestM = 20
-    for (let w = 0; w < usable.length; w++) {
+    for (const w of nearWays(here)) {
       const hit = projectOnWay(usable[w], here, null)
       if (hit && hit.distance < bestM) {
         bestM = hit.distance
@@ -808,11 +861,11 @@ export function keepLeftHandTrack(
       const offset = localMetres(here, point)
       return offset.x * left.x + offset.y * left.y
     }
-    const lefter = (way: number): { score: number } | null => {
-      if (!dir || !left || !stay || way === leftFrom) return null
+    const lefter = (way: number, runM = RUNNING_LINE_M): { score: number } | null => {
+      if (!dir || !left || !stay || way === current || way === leftFrom) return null
       const hit = projectOnWay(usable[way], here, dir)
       if (!hit || hit.distance > LEFT_TRACK_M || hit.forward < 0.82) return null
-      if (!wayRunsForward(usable[way], hit.point, dir, RUNNING_LINE_M)) return null
+      if (!wayRunsForward(usable[way], hit.point, dir, runM)) return null
       const gain = scoreOf(hit.point) - scoreOf(stay.point)
       if (gain < LEFT_SHIFT_M) return null
       return { score: gain }
@@ -841,6 +894,20 @@ export function keepLeftHandTrack(
             const landing = joinNear(other, beyond, joint, 40)
             if (landing) takeHop(beyond, [joint, landing])
           }
+        }
+      }
+      if (hopWay < 0) {
+        let beside = -1
+        let besideScore = -Infinity
+        for (const way of nearWays(here)) {
+          const candidate = lefter(way, PARALLEL_RUN_M)
+          if (!candidate || candidate.score <= besideScore) continue
+          beside = way
+          besideScore = candidate.score
+        }
+        if (beside >= 0) {
+          leftFrom = current
+          current = beside
         }
       }
       if (hopWay >= 0) {
@@ -915,15 +982,125 @@ export function shapeLeftHandRuns(
   return removeRouteReversals(joined, 40, 30, 8000, anchors)
 }
 
-/** Put the routed line on the rails. A straight that leaves the track is replaced by the ways that join its ends. */
+const LEFT_RAIL_M = 6.5
+
+/**
+ * Move each point sideways onto the parallel rail to its left. The point
+ * stays on the road it is already on when that is the left-hand one, and a
+ * step that would turn the line around is refused. Nothing is added ahead
+ * or back along a track.
+ */
+export function slideOntoLeftHandTrack(
+  path: LatLngTuple[],
+  ways: Point[][],
+  anchors: LatLngTuple[] = [],
+): LatLngTuple[] {
+  const usable = ways.filter((way) => way.length >= 2)
+  if (path.length < 2 || usable.length === 0) return path
+  const held = anchors.map(([lat, lng]) => ({ lat, lng }))
+  const CELL = 250
+  const cellKey = (lat: number, lng: number) => {
+    const latM = lat * 110540
+    const lngM = lng * 111320 * Math.cos((lat * Math.PI) / 180)
+    return `${Math.round(latM / CELL)},${Math.round(lngM / CELL)}`
+  }
+  const cells = new Map<string, number[]>()
+  const addCell = (key: string, way: number) => {
+    const list = cells.get(key)
+    if (!list) cells.set(key, [way])
+    else if (!list.includes(way)) list.push(way)
+  }
+  for (let w = 0; w < usable.length; w++) {
+    const way = usable[w]
+    for (let i = 0; i < way.length; i++) {
+      addCell(cellKey(way[i].lat, way[i].lng), w)
+      if (i === 0) continue
+      const dist = haversineM(way[i - 1], way[i])
+      const steps = Math.floor(dist / (CELL / 2))
+      for (let s = 1; s <= steps; s++) {
+        const t = s / (steps + 1)
+        addCell(
+          cellKey(
+            way[i - 1].lat + (way[i].lat - way[i - 1].lat) * t,
+            way[i - 1].lng + (way[i].lng - way[i - 1].lng) * t,
+          ),
+          w,
+        )
+      }
+    }
+  }
+  const nearWays = (here: Point): Point[][] => {
+    const latM = here.lat * 110540
+    const lngM = here.lng * 111320 * Math.cos((here.lat * Math.PI) / 180)
+    const row = Math.round(latM / CELL)
+    const col = Math.round(lngM / CELL)
+    const found: Point[][] = []
+    const seen = new Set<number>()
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (const way of cells.get(`${row + dy},${col + dx}`) ?? []) {
+          if (seen.has(way)) continue
+          seen.add(way)
+          found.push(usable[way])
+        }
+      }
+    }
+    return found
+  }
+  const out: LatLngTuple[] = []
+  for (let i = 0; i < path.length; i++) {
+    const here = { lat: path[i][0], lng: path[i][1] }
+    if (held.some((anchor) => haversineM(anchor, here) <= 20)) {
+      out.push([here.lat, here.lng])
+      continue
+    }
+    const back = path[Math.max(0, i - 1)]
+    const fore = path[Math.min(path.length - 1, i + 1)]
+    const travel = localMetres({ lat: back[0], lng: back[1] }, { lat: fore[0], lng: fore[1] })
+    const span = Math.hypot(travel.x, travel.y)
+    let chosen = here
+    if (span >= 8) {
+      const dir = { x: travel.x / span, y: travel.y / span }
+      const left = { x: -dir.y, y: dir.x }
+      let nearest = 8
+      let nearestPoint: Point | null = null
+      let bestSide = 0
+      let bestPoint: Point | null = null
+      for (const way of nearWays(here)) {
+        const hit = projectOnWay(way, here, dir)
+        if (!hit || hit.distance > LEFT_RAIL_M || hit.forward < 0.85) continue
+        if (hit.distance < nearest) {
+          nearest = hit.distance
+          nearestPoint = hit.point
+        }
+        const offset = localMetres(here, hit.point)
+        const side = offset.x * left.x + offset.y * left.y
+        if (side < LEFT_SHIFT_M || side > LEFT_RAIL_M || side <= bestSide) continue
+        bestSide = side
+        bestPoint = hit.point
+      }
+      chosen = bestPoint ?? nearestPoint ?? here
+    }
+    const last = out[out.length - 1]
+    if (last && span >= 8) {
+      const step = localMetres({ lat: last[0], lng: last[1] }, chosen)
+      const dir = { x: travel.x / span, y: travel.y / span }
+      if (step.x * dir.x + step.y * dir.y < -2) chosen = here
+    }
+    out.push([chosen.lat, chosen.lng])
+  }
+  return out.length >= 2 ? out : path
+}
+
+/** Put the routed line on the left-hand rail. The route itself is not redrawn. */
 export async function shapeOntoLeftHandTrack(
   anchors: LatLngTuple[],
   path: LatLngTuple[],
 ): Promise<LatLngTuple[]> {
   if (path.length < 2) return path
-  const ways = await fetchRailWays(path, 160)
+  const ways = await fetchRailWays(path, 80)
   if (!ways || ways.length === 0) return path
-  return shapeLeftHandRuns(densifyAlongWays(path, ways), ways, anchors)
+  return slideOntoLeftHandTrack(path, ways, anchors)
 }
 
 /**

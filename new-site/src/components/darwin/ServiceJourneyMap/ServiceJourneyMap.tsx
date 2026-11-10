@@ -4,8 +4,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from '../../../hooks/useTheme'
 import { railwayDaySecondsFromClock } from '../../../utils/railwayOperatingDayUk'
 import { platformSitsAtStation } from '../../../utils/platformPosition'
+import { resolveDarwinBrowserUrl } from '../../../utils/darwinReadyFetch'
 import { isValidStationCoordinate } from '../../../utils/stationCoordinates'
 import {
+  applyPlatformRules,
+  BUILTIN_PLATFORM_RULES,
+  type PlatformRule,
   journeyMapStops,
   liveJourneyPosition,
   mappedRouteWaypoints,
@@ -29,6 +33,7 @@ if (typeof window !== 'undefined') void loadGbRailGraph()
 const tiplocCoordCache = new Map<string, { lat: number; lng: number } | null>()
 
 const NO_PLATFORMS: Record<string, RoutePlatform> = {}
+const NO_ROADS: Record<string, Record<string, RoutePlatform>> = {}
 
 function readCoordPair(value: unknown): { lat: number; lng: number } | null {
   if (!Array.isArray(value) || value.length < 2) return null
@@ -61,6 +66,7 @@ function readPlatformPlacement(value: unknown): RoutePlatform | null {
   return place
 }
 
+/** Matches the 40 stops `/api/platforms` reads per request. */
 function chunkPlatformQuery(query: string, size = 40): string[] {
   const parts = query.split('|').filter(Boolean)
   const chunks: string[] = []
@@ -114,6 +120,7 @@ export function ServiceJourneyMap({
   branches = [],
   onNominatimUsed,
   viewMode = 'detailed',
+  routeMode = 'ours',
 }: {
   service: ServiceDetail
   stations: Station[]
@@ -123,6 +130,7 @@ export function ServiceJourneyMap({
   /** A station coordinate was filled in from Nominatim. */
   onNominatimUsed?: () => void
   viewMode?: ServiceViewMode
+  routeMode?: 'ours' | 'rail'
 }) {
   const [banners, setBanners] = useState<MapLocationBanner[]>([])
   const [extraCoords, setExtraCoords] = useState<Record<string, { lat: number; lng: number }>>({})
@@ -165,18 +173,37 @@ export function ServiceJourneyMap({
     [service.stops, stations, extraStops, branches],
   )
 
+  const [platformRules, setPlatformRules] = useState<PlatformRule[] | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetch(resolveDarwinBrowserUrl('/api/darwin/platform-rules'), { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { rules?: PlatformRule[] } | null) => {
+        if (Array.isArray(body?.rules)) setPlatformRules(body.rules)
+      })
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [])
   const mapped = useMemo(
-    () => pointsOnTheLeg(
-      journeyMapStops(service.stops || [], stations, extraCoords),
-      (point) => !point.calling && !String(point.crs || '').trim(),
+    () => applyPlatformRules(
+      pointsOnTheLeg(
+        journeyMapStops(service.stops || [], stations, extraCoords),
+        (point) => !point.calling && !String(point.crs || '').trim(),
+      ),
+      service.toc,
+      platformRules ?? BUILTIN_PLATFORM_RULES,
     ),
-    [service.stops, stations, extraCoords],
+    [service.stops, service.toc, stations, extraCoords, platformRules],
   )
   const platformQuery = useMemo(
     () =>
       mapped
-        .filter((point) => point.platform)
-        .map((point) => `${point.index}~${point.lat.toFixed(5)}~${point.lng.toFixed(5)}~${encodeURIComponent(point.platform || '')}`)
+        .filter((point) => point.kind !== 'junction' && (point.platform || point.kind === 'pass'))
+        .map((point) => {
+          const place = `${point.lat.toFixed(5)}~${point.lng.toFixed(5)}`
+          if (point.platform) return `${point.index}~${place}~${encodeURIComponent(point.platform)}`
+          return `roads${point.index}~${place}~*`
+        })
         .join('|'),
     [mapped],
   )
@@ -189,6 +216,20 @@ export function ServiceJourneyMap({
       next[id] = place
     }
     return next
+  }, [mapped, platformCoords, platformQuery, platformQueryReady])
+  const platformRoads = useMemo(() => {
+    if (platformQueryReady !== platformQuery) return NO_ROADS
+    const roads: Record<string, Record<string, RoutePlatform>> = {}
+    for (const [id, place] of Object.entries(platformCoords)) {
+      const match = /^roads(\d+)~(.+)$/.exec(id)
+      if (!match) continue
+      const stop = mapped.find((point) => String(point.index) === match[1])
+      if (!stop || !platformSitsAtStation(stop, place)) continue
+      const at = roads[match[1]] ?? {}
+      at[match[2]] = place
+      roads[match[1]] = at
+    }
+    return roads
   }, [mapped, platformCoords, platformQuery, platformQueryReady])
   const extraRoutes = useMemo(
     () => extraStops
@@ -289,33 +330,36 @@ export function ServiceJourneyMap({
     const controller = new AbortController()
     let cancelled = false
     const chunks = chunkPlatformQuery(platformQuery)
-    void Promise.all(
-      chunks.map(async (chunk) => {
-        const response = await fetch(`/api/platform-coords?at=${encodeURIComponent(chunk)}`, {
-          signal: controller.signal,
-        })
-        if (!response.ok) return {}
-        const payload = (await response.json()) as { coords?: Record<string, unknown> }
-        return payload.coords || {}
-      }),
-    )
-      .then((parts) => {
-        if (cancelled) return
-        const next: Record<string, RoutePlatform> = {}
-        for (const part of parts) {
-          for (const [id, value] of Object.entries(part)) {
+    const merged: Record<string, RoutePlatform> = {}
+    const queue = [...chunks]
+    const worker = async () => {
+      while (queue.length > 0 && !cancelled) {
+        const chunk = queue.shift()
+        if (!chunk) return
+        try {
+          const response = await fetch(resolveDarwinBrowserUrl(`/api/darwin/platforms?at=${encodeURIComponent(chunk)}`), {
+            signal: controller.signal,
+          })
+          if (!response.ok || cancelled) continue
+          const payload = (await response.json()) as { coords?: Record<string, unknown> }
+          for (const [id, value] of Object.entries(payload.coords || {})) {
             const place = readPlatformPlacement(value)
-            if (place) next[id] = place
+            if (place) merged[id] = place
           }
+          if (!cancelled) {
+            setPlatformCoords({ ...merged })
+            setPlatformQueryReady(platformQuery)
+          }
+        } catch (error: unknown) {
+          if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return
         }
-        setPlatformCoords(next)
-        setPlatformQueryReady(platformQuery)
-      })
-      .catch((error: unknown) => {
-        if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return
-        setPlatformCoords(NO_PLATFORMS)
-        setPlatformQueryReady(platformQuery)
-      })
+      }
+    }
+    void Promise.all(Array.from({ length: Math.min(3, chunks.length) }, () => worker())).then(() => {
+      if (cancelled) return
+      setPlatformCoords({ ...merged })
+      setPlatformQueryReady(platformQuery)
+    })
     return () => {
       cancelled = true
       controller.abort()
@@ -469,11 +513,13 @@ export function ServiceJourneyMap({
           stops={service.stops}
           location={service.location}
           platforms={activePlatforms}
+          platformRoads={platformRoads}
           routeColor={routeColor}
           theme={themeKey}
           fullscreen={expanded}
           onToggleFullscreen={toggleFullscreen}
           callsOnly={viewMode === 'simple'}
+          routeMode={routeMode}
         />
       </div>
     </div>

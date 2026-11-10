@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { densifyAlongWays, keepLeftHandTrack, railPathFromWays, routeLeavesTheRailway, routeOnRailWays, shapeLeftHandRuns, splitAtReversals } from './osmRailPath'
+import { densifyAlongWays, keepLeftHandTrack, railPathFromWays, routeLeavesTheRailway, routeOnRailWays, shapeLeftHandRuns, slideOntoLeftHandTrack, splitAtReversals } from './osmRailPath'
 
 describe('osm rail path', () => {
   it('follows the railway curve instead of the chord when the router has left the corridor', () => {
@@ -23,7 +23,26 @@ describe('osm rail path', () => {
     )).toBe(false)
   })
 
-  it('stays on its own track when the parallel road never joins', () => {
+  it('slides onto the left-hand rail without turning back', () => {
+    const right = [
+      { lat: 53.4, lng: -2.2 },
+      { lat: 53.42, lng: -2.2 },
+    ]
+    const left = [
+      { lat: 53.4, lng: -2.20005 },
+      { lat: 53.42, lng: -2.20005 },
+    ]
+    const path: [number, number][] = []
+    for (let i = 0; i <= 8; i++) path.push([53.402 + i * 0.002, -2.2])
+    const shaped = slideOntoLeftHandTrack(path, [right, left], [path[0]])
+    expect(shaped[0][1]).toBeCloseTo(-2.2, 5)
+    const later = shaped.filter((point) => point[0] > 53.405)
+    expect(later.length).toBeGreaterThan(0)
+    for (const point of later) expect(point[1]).toBeLessThan(-2.20003)
+    for (let i = 1; i < shaped.length; i++) expect(shaped[i][0]).toBeGreaterThan(shaped[i - 1][0])
+  })
+
+  it('moves onto the left-hand track when the parallel road never joins', () => {
     const on = [
       { lat: 53.4, lng: -2.2 },
       { lat: 53.42, lng: -2.2 },
@@ -38,7 +57,10 @@ describe('osm rail path', () => {
       [53.414, -2.2],
     ]
     const shaped = keepLeftHandTrack(path, [on, beside], [path[0]])
-    for (const point of shaped) expect(point[1]).toBeCloseTo(-2.2, 5)
+    expect(shaped[0][1]).toBeCloseTo(-2.2, 5)
+    const later = shaped.filter((point) => point[0] > 53.405)
+    expect(later.length).toBeGreaterThan(0)
+    for (const point of later) expect(point[1]).toBeLessThan(-2.20004)
   })
 
   it('crosses to the left-hand track where the roads join', () => {

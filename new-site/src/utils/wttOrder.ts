@@ -8,6 +8,7 @@
 const DAY_SECONDS = 24 * 3600
 const RAIL_START_SECONDS = 2 * 3600
 const ROTATION_MARGIN_SECONDS = 90 * 60
+const EARLY_SECONDS = 3 * 3600
 
 export type WttTimed = {
   wta?: string | null
@@ -137,16 +138,22 @@ export function sortStopsByWttTime<T extends WttTimed>(stops: T[]): T[] {
       return a.index - b.index
     })
     .map((item) => item.stop)
-  floating.sort((a, b) => (rank(liveStopSeconds(a.stop)) ?? 1e15) - (rank(liveStopSeconds(b.stop)) ?? 1e15) || a.index - b.index)
+  // A train that leaves a minute early is before the start, not a day later.
+  const liveRank = (seconds: number | null) => {
+    const value = rank(seconds)
+    if (value == null) return null
+    return value > DAY_SECONDS - EARLY_SECONDS ? value - DAY_SECONDS : value
+  }
+  floating.sort((a, b) => (liveRank(liveStopSeconds(a.stop)) ?? 1e15) - (liveRank(liveStopSeconds(b.stop)) ?? 1e15) || a.index - b.index)
   for (const item of floating) {
-    const at = rank(liveStopSeconds(item.stop))
+    const at = liveRank(liveStopSeconds(item.stop))
     if (at == null) {
       ordered.push(item.stop)
       continue
     }
     let index = ordered.length
     for (let i = 0; i < ordered.length; i++) {
-      const ref = rank(liveStopSeconds(ordered[i]) ?? wttStopSeconds(ordered[i]))
+      const ref = liveRank(liveStopSeconds(ordered[i]) ?? wttStopSeconds(ordered[i]))
       if (ref == null) continue
       if (ref > at) {
         index = i

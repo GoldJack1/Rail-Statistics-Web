@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { railwayRouteJoined, routeLeavesTheRailway } from '@/server/osmRailPath'
+import { railwayRouteJoined, routeLeavesTheRailway, shapeOntoLeftHandTrack } from '@/server/osmRailPath'
 import { isValidStationCoordinate } from '@/utils/stationCoordinates'
 import {
   buildOpenRailRouteUrl,
@@ -14,8 +14,8 @@ export const maxDuration = 30
 const routeCache = new Map<string, { at: number; coordinates: LatLngTuple[] }>()
 const ROUTE_CACHE_MS = 30 * 60 * 1000
 
-function routeCacheKey(points: LatLngTuple[]): string {
-  return `geom14|${points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')}`
+function routeCacheKey(points: LatLngTuple[], strict: boolean): string {
+  return `geom17|${strict ? 'left|' : ''}${points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')}`
 }
 
 function readCoord(value: string | null): number | null {
@@ -37,7 +37,10 @@ function parseViaPoints(value: string | null): LatLngTuple[] {
   return points
 }
 
+const SHAPE_BUDGET_MS = 12_000
+
 export async function GET(request: NextRequest) {
+  const started = Date.now()
   const fromLat = readCoord(request.nextUrl.searchParams.get('fromLat'))
   const fromLng = readCoord(request.nextUrl.searchParams.get('fromLng'))
   const toLat = readCoord(request.nextUrl.searchParams.get('toLat'))
@@ -57,8 +60,9 @@ export async function GET(request: NextRequest) {
   const to: LatLngTuple = [toLat, toLng]
   const vias = parseViaPoints(request.nextUrl.searchParams.get('via'))
   const points: LatLngTuple[] = [from, ...vias, to]
+  const strict = request.nextUrl.searchParams.get('strict') === '1'
   const fallback = straightLineBetween(from, to)
-  const cacheKey = routeCacheKey(points)
+  const cacheKey = routeCacheKey(points, strict)
   const cached = routeCache.get(cacheKey)
   if (cached && Date.now() - cached.at < ROUTE_CACHE_MS) {
     return NextResponse.json(
@@ -77,24 +81,39 @@ export async function GET(request: NextRequest) {
 
   // The rail router answers in one request. The OpenStreetMap graph is only
   // for a route that leaves the tracks, because that graph is several map queries.
+  // A strict request is the platform test: a miss stays empty, so the passenger
+  // line is not drawn in its place.
   try {
-    const upstream = await fetch(buildOpenRailRouteUrl(points), {
+    const upstream = await fetch(buildOpenRailRouteUrl(points, strict), {
       headers: {
         Accept: 'application/json',
         'User-Agent': 'RailStatisticsWebsite/1.0 (+https://railstatistics.co.uk); rail route proxy',
       },
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(strict ? 20000 : 6000),
       cache: 'no-store',
     })
     if (upstream.ok) {
       const routed = parseOpenRailRoute(await upstream.json())
-      if (routed.length >= 2 && !routeLeavesTheRailway(points, routed)) return publish(routed)
-    } else if (upstream.status === 403 || upstream.status === 429 || upstream.status >= 500) {
+      if (routed.length >= 2 && !routeLeavesTheRailway(points, routed)) {
+        if (!strict) return publish(routed)
+        const budget = Math.min(SHAPE_BUDGET_MS, Math.max(0, 25_000 - (Date.now() - started)))
+        const shaped = budget < 2_000
+          ? routed
+          : await Promise.race([
+              shapeOntoLeftHandTrack(points, routed).catch(() => routed),
+              new Promise<LatLngTuple[]>((resolve) => setTimeout(() => resolve(routed), budget)),
+            ])
+        const coordinates = shaped.length >= 2 && !routeLeavesTheRailway(points, shaped) ? shaped : routed
+        return publish(coordinates)
+      }
+    } else if (!strict && (upstream.status === 403 || upstream.status === 429 || upstream.status >= 500)) {
       return NextResponse.json({ coordinates: fallback, fallback: true, limited: true })
     }
   } catch {
     /* The router timed out. The map graph below still draws the line. */
   }
+
+  if (strict) return NextResponse.json({ coordinates: [], fallback: true })
 
   const alongRails = await railwayRouteJoined(points).catch(() => null)
   if (alongRails && alongRails.length >= 2 && !routeLeavesTheRailway(points, alongRails)) {

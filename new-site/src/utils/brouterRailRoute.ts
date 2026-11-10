@@ -87,13 +87,21 @@ const OPEN_RAIL_ROUTE = 'https://routing.openrailrouting.org/route'
  * in the graph. all_tracks_1435 includes them, and a Tyne and Wear Metro
  * out-and-back was being drawn as the East Coast line through Newcastle.
  */
-export function buildOpenRailRouteUrl(points: LatLngTuple[]): string {
+/**
+ * `passThrough` keeps the train from reversing at a via, so it has to run
+ * along that track. The router only honours it with its fast mode off.
+ */
+export function buildOpenRailRouteUrl(points: LatLngTuple[], passThrough = false): string {
   const url = new URL(OPEN_RAIL_ROUTE)
   for (const [lat, lng] of points) url.searchParams.append('point', `${lat},${lng}`)
   url.searchParams.set('profile', 'non_tgv')
   url.searchParams.set('points_encoded', 'false')
   url.searchParams.set('instructions', 'false')
   url.searchParams.set('elevation', 'false')
+  if (passThrough) {
+    url.searchParams.set('pass_through', 'true')
+    url.searchParams.set('ch.disable', 'true')
+  }
   return url.toString()
 }
 

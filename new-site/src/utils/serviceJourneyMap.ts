@@ -1,4 +1,6 @@
 import type { ServiceLocation, ServiceStop } from '../types/darwin'
+import platformRulesFile from '../data/platform-rules.json'
+import { normalizePlatformRef } from './platformPosition'
 import {
   continentalEurostarCoordinate,
   eurostarEndCoordinate,
@@ -30,6 +32,10 @@ export type JourneyMapStop = {
   cancelled: boolean
   /** Booked platform. Used to choose the road through the station. */
   platform: string | null
+  /** CIF path at this location. The arrival road. */
+  path: string | null
+  /** CIF line at this location. The departure road. */
+  line: string | null
 }
 
 export type LiveJourneyPosition = {
@@ -43,6 +49,117 @@ export type LiveJourneyPosition = {
 }
 
 export type LatLngTuple = [number, number]
+
+/**
+ * A manual routing tweak. The same list is served from the VPS at
+ * `/api/platform-rules`, and that copy wins once the query server has it.
+ * `replace` limits the change to a blank platform or the numbers listed.
+ * `origin` is the train's first call. `before` and `after` are any call on
+ * that side of the station. `direction` `west` is a falling longitude.
+ */
+export type PlatformRule = {
+  id?: string
+  toc?: string[]
+  at: string[]
+  origin?: string[]
+  before?: string[]
+  after?: string[]
+  direction?: 'west' | 'east'
+  platform: string
+  replace?: string[]
+}
+
+export const BUILTIN_PLATFORM_RULES = platformRulesFile.rules as PlatformRule[]
+
+function ruleCodes(codes: string[] | undefined): Set<string> | null {
+  if (!codes?.length) return null
+  return new Set(codes.map((code) => code.toUpperCase()))
+}
+
+function stopCode(stop: JourneyMapStop): string {
+  return String(stop.crs || stop.tpl || '').toUpperCase()
+}
+
+function matchesCode(stop: JourneyMapStop, codes: Set<string>): boolean {
+  return codes.has(stopCode(stop)) || codes.has(String(stop.tpl || '').toUpperCase())
+}
+
+function placedOnTheMap(stop: JourneyMapStop): boolean {
+  return Number.isFinite(stop.lat) && Number.isFinite(stop.lng) && Math.abs(stop.lat) > 1
+}
+
+/**
+ * Westbound is towards a smaller longitude: at Morley that is Huddersfield
+ * and Manchester, rather than Leeds.
+ */
+function travellingWest(stops: JourneyMapStop[], here: JourneyMapStop): boolean {
+  const placed = stops.filter((stop) => !stop.cancelled && placedOnTheMap(stop))
+  const previous = [...placed].reverse().find((stop) => stop.index < here.index)
+  const next = placed.find((stop) => stop.index > here.index)
+  if (previous && next) return next.lng < previous.lng
+  if (next && placedOnTheMap(here)) return next.lng < here.lng
+  if (previous && placedOnTheMap(here)) return here.lng < previous.lng
+  return false
+}
+
+function ruleById(id: string): PlatformRule[] {
+  return BUILTIN_PLATFORM_RULES.filter((rule) => rule.id === id)
+}
+
+/** Books the platform each matching rule names. Later rules win at the same stop. */
+export function applyPlatformRules(
+  stops: JourneyMapStop[],
+  toc: string | null | undefined,
+  rules: readonly PlatformRule[],
+): JourneyMapStop[] {
+  const serviceToc = String(toc || '').trim().toUpperCase()
+  let next = stops
+  for (const rule of rules) {
+    const at = ruleCodes(rule.at)
+    const platform = normalizePlatformRef(rule.platform)
+    if (!at || !platform) continue
+    const allowedToc = ruleCodes(rule.toc)
+    if (allowedToc && !allowedToc.has(serviceToc)) continue
+    const here = next.find((stop) => !stop.cancelled && matchesCode(stop, at))
+    if (!here) continue
+    const originCodes = ruleCodes(rule.origin)
+    if (originCodes) {
+      const origin = next.find((stop) => stop.calling && !stop.cancelled)
+      if (!origin || origin.index >= here.index || !matchesCode(origin, originCodes)) continue
+    }
+    const before = ruleCodes(rule.before)
+    if (before && !next.some((stop) => stop.index < here.index && !stop.cancelled && matchesCode(stop, before))) continue
+    const after = ruleCodes(rule.after)
+    if (after && !next.some((stop) => stop.index > here.index && !stop.cancelled && matchesCode(stop, after))) continue
+    if (rule.direction === 'west' && !travellingWest(next, here)) continue
+    if (rule.direction === 'east' && travellingWest(next, here)) continue
+    if (rule.replace) {
+      const booked = normalizePlatformRef(here.platform)
+      const accepted = rule.replace.map((value) => normalizePlatformRef(value))
+      if (!accepted.includes(booked)) continue
+    }
+    next = next.map((stop) => (stop.index === here.index ? { ...stop, platform } : stop))
+  }
+  return next
+}
+
+export function applyMirfieldPlatformOverride(
+  stops: JourneyMapStop[],
+  toc: string | null | undefined,
+): JourneyMapStop[] {
+  return applyPlatformRules(stops, toc, ruleById('mirfield-tpe'))
+}
+
+export function applyMorleyPlatformOverride(stops: JourneyMapStop[]): JourneyMapStop[] {
+  return applyPlatformRules(stops, null, ruleById('morley-west'))
+}
+
+export function applyShipleyPlatformOverride(
+  stops: JourneyMapStop[],
+  toc: string | null | undefined,
+): JourneyMapStop[] {
+  return applyPlatformRules(stops, toc, ruleById('shipley-to-leeds').concat(ruleById('shipley-to-bradford')))
+}
 
 /** Where a booked platform sits, including the two ends of that road and a buffer. */
 export type RoutePlatform = {
@@ -139,19 +256,14 @@ function junctionSteersTheRoute(
 }
 
 /**
- * Route between stations. Calling stops and passing stations are vias when
- * they still lie ahead. A junction on the way to the next call is a via too,
- * so the router follows the booked line instead of a shorter railway. A
- * junction behind the train, past the call, or listed ahead of a pass it has
- * already passed is left out: sending it draws a spur onto the other branch.
- * A booked platform moves that via onto the rail beside the platform. One
- * point per place: a bay starts at the buffer, and a call stands on the
- * stopping mark. A second point on the same platform makes the line reverse.
+ * Calling stops, passing stations that still lie ahead, and a junction only
+ * when it steers the booked line. A junction behind the train, past the call,
+ * or listed ahead of a pass already passed is left out.
  */
-export function mappedRouteWaypoints(
+function chosenRouteStops(
   mapped: JourneyMapStop[],
   platformAt?: Readonly<Record<string, RoutePlatform>>,
-): LatLngTuple[] {
+): JourneyMapStop[] {
   const placed = mapped.filter((stop) => !stop.cancelled)
   const calls = placed.filter((stop) => stop.calling)
   const placeAt = (stop: JourneyMapStop): MapPoint =>
@@ -160,40 +272,60 @@ export function mappedRouteWaypoints(
   const chosen: JourneyMapStop[] = []
   if (calls.length < 2) {
     chosen.push(...placed.filter((stop) => stop.kind !== 'junction'))
-  } else {
-    let nextCall = 0
-    for (const stop of placed) {
-      if (stop.calling) {
-        chosen.push(stop)
-        nextCall += 1
-        continue
-      }
-      const next = calls[nextCall]
-      const from = chosen[chosen.length - 1]
-      if (!next || !from) continue
-      if (stop.kind === 'junction') {
-        let later: JourneyMapStop | null = null
-        for (let j = placed.indexOf(stop) + 1; j < placed.length; j++) {
-          if (placed[j].kind !== 'junction') {
-            later = placed[j]
-            break
-          }
-        }
-        if (!junctionSteersTheRoute(placeAt(from), placeAt(stop), placeAt(next), later && placeAt(later))) continue
-        chosen.push(stop)
-        continue
-      }
-      if (!stillAhead(placeAt(from), placeAt(stop), placeAt(next))) continue
-      chosen.push(stop)
-    }
+    return chosen
   }
+  let nextCall = 0
+  for (const stop of placed) {
+    if (stop.calling) {
+      chosen.push(stop)
+      nextCall += 1
+      continue
+    }
+    const next = calls[nextCall]
+    const from = chosen[chosen.length - 1]
+    if (!next || !from) continue
+    if (stop.kind === 'junction') {
+      let later: JourneyMapStop | null = null
+      for (let j = placed.indexOf(stop) + 1; j < placed.length; j++) {
+        if (placed[j].kind !== 'junction') {
+          later = placed[j]
+          break
+        }
+      }
+      if (!junctionSteersTheRoute(placeAt(from), placeAt(stop), placeAt(next), later && placeAt(later))) continue
+      chosen.push(stop)
+      continue
+    }
+    if (!stillAhead(placeAt(from), placeAt(stop), placeAt(next))) continue
+    chosen.push(stop)
+  }
+  return chosen
+}
+
+function pushDistinct(points: LatLngTuple[], lat: number, lng: number) {
+  const prev = points[points.length - 1]
+  if (prev && Math.abs(prev[0] - lat) < 1e-6 && Math.abs(prev[1] - lng) < 1e-6) return
+  points.push([lat, lng])
+}
+
+/**
+ * Route between stations. Calling stops and passing stations are vias when
+ * they still lie ahead. Junction markers are not vias: sending one pulls the
+ * line off the through road onto the junction pin. A booked platform moves
+ * that via onto the rail beside the platform. One point per place: a bay
+ * starts at the buffer, and a call stands on the stopping mark. A second
+ * point on the same platform makes the line reverse.
+ */
+export function mappedRouteWaypoints(
+  mapped: JourneyMapStop[],
+  platformAt?: Readonly<Record<string, RoutePlatform>>,
+): LatLngTuple[] {
+  const chosen = chosenRouteStops(mapped, platformAt).filter((stop) => stop.kind !== 'junction')
+  const placeAt = (stop: JourneyMapStop): MapPoint =>
+    platformAt?.[String(stop.index)] ?? { lat: stop.lat, lng: stop.lng }
 
   const points: LatLngTuple[] = []
-  const push = (lat: number, lng: number) => {
-    const prev = points[points.length - 1]
-    if (prev && Math.abs(prev[0] - lat) < 1e-6 && Math.abs(prev[1] - lng) < 1e-6) return
-    points.push([lat, lng])
-  }
+  const push = (lat: number, lng: number) => pushDistinct(points, lat, lng)
   for (let i = 0; i < chosen.length; i++) {
     const stop = chosen[i]
     const place = platformAt?.[String(stop.index)]
@@ -225,6 +357,193 @@ export function mappedRouteWaypoints(
     push(here.lat, here.lng)
   }
   return points
+}
+
+function metresEastNorth(origin: MapPoint, point: MapPoint): { x: number; y: number } {
+  const lat = (origin.lat * Math.PI) / 180
+  return {
+    x: (point.lng - origin.lng) * 111320 * Math.cos(lat),
+    y: (point.lat - origin.lat) * 110540,
+  }
+}
+
+/** Metres to the left of the direction from `from` to `to`, measured at `origin`. */
+function leftOfDirection(from: MapPoint, to: MapPoint, origin: MapPoint, point: MapPoint): number {
+  const axis = metresEastNorth(from, to)
+  const offset = metresEastNorth(origin, point)
+  const length = Math.hypot(axis.x, axis.y)
+  if (length < 1) return 0
+  return (axis.x * offset.y - axis.y * offset.x) / length
+}
+
+function roadFace(place: RoutePlatform): MapPoint {
+  if (place.ends) {
+    return {
+      lat: (place.ends[0].lat + place.ends[1].lat) / 2,
+      lng: (place.ends[0].lng + place.ends[1].lng) / 2,
+    }
+  }
+  return { lat: place.lat, lng: place.lng }
+}
+
+const COMPASS_STEP: Record<'E' | 'W' | 'N' | 'S', MapPoint> = {
+  E: { lat: 0, lng: 0.002 },
+  W: { lat: 0, lng: -0.002 },
+  N: { lat: 0.002, lng: 0 },
+  S: { lat: -0.002, lng: 0 },
+}
+
+function compassCode(value: string | null | undefined): 'E' | 'W' | 'N' | 'S' | null {
+  const code = String(value || '').trim().toUpperCase()
+  if (code === 'E' || code === 'EB' || code === 'EAST') return 'E'
+  if (code === 'W' || code === 'WB' || code === 'WEST') return 'W'
+  if (code === 'N' || code === 'NB' || code === 'NORTH') return 'N'
+  if (code === 'S' || code === 'SB' || code === 'SOUTH') return 'S'
+  return null
+}
+
+function namedRoad(value: string | null | undefined, roads: Readonly<Record<string, RoutePlatform>>): string | null {
+  const ref = normalizePlatformRef(value)
+  return ref && roads[ref] ? ref : null
+}
+
+/** Fast lines often have no platform, as at Huntingdon. */
+const FAST_LINE = /^(FL|UF|DF|F)$/
+/** Platforms further off the line between the stops either side are another route, as Retford low level is. */
+const ON_LINE_M = 40
+
+/**
+ * A pass with no booked platform. The path, then the line, names the road when
+ * either is a platform number. A compass code names the direction of that road.
+ * A fast line with no platform named passes no platform. Otherwise the train
+ * takes the left-hand face of the through pair on its own line, which is how a
+ * westbound train at Mirfield runs via platform 2 rather than platform 1.
+ */
+function passingRoad(
+  stop: JourneyMapStop,
+  prev: JourneyMapStop | null,
+  next: JourneyMapStop | null,
+  roads: Readonly<Record<string, RoutePlatform>> | undefined,
+): RoutePlatform | null {
+  if (!roads) return null
+  const faces = Object.entries(roads)
+  if (!faces.length) return null
+  const named = namedRoad(stop.path, roads) || namedRoad(stop.line, roads) || namedRoad(prev?.line ?? null, roads)
+  if (named) return roads[named]
+  if (FAST_LINE.test(String(stop.path || stop.line || '').trim().toUpperCase())) return null
+
+  const compass = compassCode(stop.path) || compassCode(stop.line) || compassCode(prev?.line ?? null)
+  const origin = { lat: stop.lat, lng: stop.lng }
+  let from: MapPoint | null = prev ? { lat: prev.lat, lng: prev.lng } : null
+  let to: MapPoint | null = next ? { lat: next.lat, lng: next.lng } : null
+  if (compass) {
+    const step = COMPASS_STEP[compass]
+    from = origin
+    to = { lat: origin.lat + step.lat, lng: origin.lng + step.lng }
+  } else if (!from && to) {
+    from = origin
+  } else if (from && !to) {
+    to = origin
+  }
+  if (!from || !to) return faces[0][1]
+
+  const offLine = faces.map(([, place]) => Math.abs(leftOfDirection(from, to, from, roadFace(place))))
+  const closest = Math.min(...offLine)
+  const onLine = faces.filter((_, i) => compass || offLine[i] - closest <= ON_LINE_M)
+
+  const scored = onLine.map(([, place]) => {
+    const left = leftOfDirection(from, to, origin, roadFace(place))
+    return { place, left }
+  }).sort((a, b) => a.left - b.left)
+  let pairStart = 0
+  let pairGap = Infinity
+  for (let i = 1; i < scored.length; i++) {
+    const gap = scored[i].left - scored[i - 1].left
+    if (gap <= 12 && gap < pairGap) {
+      pairGap = gap
+      pairStart = i - 1
+    }
+  }
+  const side = pairGap <= 12 ? scored.slice(pairStart, pairStart + 2) : scored
+  const chosen = side.reduce((best, row) => (row.left > best.left ? row : best), side[0])
+  return chosen.place
+}
+
+/**
+ * One rail-map point per call and pass, as Trainlog places a timetable's stops.
+ * Exact: the stopping mark of the booked platform, on its track. Approximate:
+ * the platform, or the station. `loose` is where an exact point goes when the
+ * route shows it is on the wrong track.
+ */
+export type RailVia = {
+  lat: number
+  lng: number
+  exact: boolean
+  loose: MapPoint
+  /** The train calls here, so the route may reverse rather than pass through. */
+  call: boolean
+}
+
+type RoadsAt = Readonly<Record<string, Readonly<Record<string, RoutePlatform>>>>
+
+/**
+ * Each call and pass with the point it is routed through, in order.
+ * Junctions are only a reference and are left out. A platform's stopping mark
+ * is exact, whether the train calls or passes; the platform alone is
+ * approximate. A pass with no booked platform takes the road its path or line
+ * names, else the left-hand through road. A pass with no road found is left
+ * out of the rail-map points.
+ */
+function railStops(
+  mapped: JourneyMapStop[],
+  platformAt?: Readonly<Record<string, RoutePlatform>>,
+  roadsAt?: RoadsAt,
+): { stop: JourneyMapStop; via: RailVia }[] {
+  const chosen = chosenRouteStops(mapped, platformAt).filter((stop) => stop.kind !== 'junction')
+  return chosen.map((stop, index) => {
+    const pin = { lat: stop.lat, lng: stop.lng }
+    const place = platformAt?.[String(stop.index)]
+      ?? (stop.kind === 'pass'
+        ? passingRoad(stop, chosen[index - 1] ?? null, chosen[index + 1] ?? null, roadsAt?.[String(stop.index)])
+        : null)
+    const call = stop.calling
+    if (place?.stand) return { stop, via: { ...place.stand, exact: true, loose: pin, call } }
+    if (place) return { stop, via: { lat: place.lat, lng: place.lng, exact: false, loose: pin, call } }
+    return { stop, via: { ...pin, exact: false, loose: pin, call } }
+  })
+}
+
+export function platformRouteWaypoints(
+  mapped: JourneyMapStop[],
+  platformAt?: Readonly<Record<string, RoutePlatform>>,
+  roadsAt?: RoadsAt,
+): RailVia[] {
+  const vias: RailVia[] = []
+  for (const { stop, via } of railStops(mapped, platformAt, roadsAt)) {
+    // A bare pin snaps to whichever track is nearest, often the right-hand one.
+    if (stop.kind === 'pass' && via.lat === stop.lat && via.lng === stop.lng) continue
+    const prev = vias[vias.length - 1]
+    if (prev && Math.abs(prev.lat - via.lat) < 1e-6 && Math.abs(prev.lng - via.lng) < 1e-6) continue
+    vias.push(via)
+  }
+  return vias
+}
+
+/**
+ * Where each call and pass marker sits: on the platform it is routed through,
+ * by stop index. Stops with no platform found are absent.
+ */
+export function railStopMarks(
+  mapped: JourneyMapStop[],
+  platformAt?: Readonly<Record<string, RoutePlatform>>,
+  roadsAt?: RoadsAt,
+): Record<string, MapPoint> {
+  const marks: Record<string, MapPoint> = {}
+  for (const { stop, via } of railStops(mapped, platformAt, roadsAt)) {
+    if (via.lat === stop.lat && via.lng === stop.lng) continue
+    marks[String(stop.index)] = { lat: via.lat, lng: via.lng }
+  }
+  return marks
 }
 
 /** A platform via has moved far enough that the track should be routed again. */
@@ -661,6 +980,8 @@ export function journeyMapStops(
       kind,
       cancelled: Boolean(stop.cancelledAtStop),
       platform: platform || null,
+      path: String(stop.path || '').trim() || null,
+      line: String(stop.line || '').trim() || null,
     })
   }
   return out

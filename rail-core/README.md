@@ -45,3 +45,19 @@ Promote query code (does **not** restart ingest/kafka/stomp/tt):
 ```bash
 sudo /home/darwin/rail-core/scripts/promote-query-dev.sh
 ```
+
+## Platform positions (quai)
+
+`GET /api/platforms?at=id~lat~lng~platform|…` places booked platforms for the service map.
+It asks [quai](https://github.com/simfr24/trainlog_quai), Trainlog's station index built from
+OpenStreetMap, at `QUAI_URL` (default `http://127.0.0.1:5020`). Both query processes share it.
+
+- On the VPS: `/home/darwin/quai`, Docker, API `127.0.0.1:5020`, database `127.0.0.1:5433`.
+  `docker-compose.override.yml` keeps its build on cores 4-7.
+- Refresh GB from OSM: `cd /home/darwin/quai && QUAI_CORES=4 QUAI_SHARED_BUFFERS=2GB make all REGIONS=europe/great-britain`
+- `src/quai-platforms-core.js` is built from `new-site/src/utils/quaiPlatforms.ts` (command at its top).
+
+Manual tweaks live in `config/` and are read on each request, so editing them does not need a site deploy or a query restart:
+
+- `config/platform-rules.json` chooses the platform a service is routed through (Mirfield, Morley, Shipley). The site uses this list when `GET /api/platform-rules` is available, and keeps a built-in copy until then. Responses are cached for 60 seconds.
+- `config/platform-fixes.json` places a platform on a measured rail. Huddersfield 1, 2 and 3 are a station block there: quai's old 1–4B are dropped, and a booking of 4, 4A or 4B uses platform 3. A one-off stand is `{ "near": [lat, lng], "withinM": 500, "ref": "1", "lat": 53.64, "lng": -1.78 }`. `/api/platforms` itself is cached for an hour.

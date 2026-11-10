@@ -31,6 +31,7 @@ export type TracksBasemap =
   | 'satellite'
   | 'night'
   | 'live'
+  | 'railway'
 
 const BASEMAP_IDS = new Set<string>([
   'clean',
@@ -45,7 +46,11 @@ const BASEMAP_IDS = new Set<string>([
   'satellite',
   'night',
   'live',
+  'railway',
 ])
+
+/** The OpenRailwayMap standard overlay is drawn through zoom 19. */
+export const OPENRAILWAYMAP_MAX_ZOOM = 19
 
 const SATELLITE_TILES =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
@@ -61,6 +66,8 @@ export function canonicalTracksBasemap(value: string | null | undefined): Tracks
   if (value === 'light') return 'detailed'
   if (value === 'night' || value === 'live') return 'satellite'
   if (value === 'lms' || value === 'sj' || value === 'rheingold') return 'detailed'
+  // The rail overlay is a test mode, not a saved map style.
+  if (value === 'railway') return null
   return isTracksBasemap(value) ? value : null
 }
 
@@ -123,6 +130,15 @@ export function tracksBasemapCredit(basemap: TracksBasemap): string | null {
   if (basemap === 'live') return 'Imagery © NASA EOSDIS'
   if (ELEVATION.has(basemap)) return 'Terrain © Mapzen, USGS, NOAA'
   return null
+}
+
+/** Present railway lines, recoloured the way the stations map does. */
+export const TRACKS_RAIL_CREDIT = 'Rail lines © OpenRailwayMap © OpenStreetMap contributors'
+
+/** Black on a light map, light gray on a dark map or on imagery. */
+export function tracksRailInk(basemap: TracksBasemap): string {
+  if (basemap === 'dark' || basemap === 'night' || basemap === 'satellite' || basemap === 'live') return '#cccccc'
+  return '#000000'
 }
 
 export const TRACKS_NAME_HALO = '#1e1c19'
@@ -454,11 +470,112 @@ function spaceStyle(basemap: 'satellite' | 'night' | 'live'): StyleSpecification
   }
 }
 
-/** One MapLibre style for each entry in the service-map picker. */
-export function tracksMapStyle(basemap: TracksBasemap | TracksMapTheme): StyleSpecification {
-  const id: TracksBasemap = basemap === 'light' ? 'detailed' : basemap
-  if (id === 'satellite' || id === 'night' || id === 'live') return spaceStyle(id)
-  return vectorBase(id)
+const RAIL_FEATURES = ['rail', 'light_rail', 'tram', 'subway', 'narrow_gauge', 'funicular', 'miniature']
+/** South Yorkshire Supertram, matching the stations map. */
+const SUPERTRAM_BOX: GeoJSON.Polygon = {
+  type: 'Polygon',
+  coordinates: [[[-1.68, 53.305], [-1.28, 53.305], [-1.28, 53.525], [-1.68, 53.525], [-1.68, 53.305]]],
+}
+
+/** Open lines only. Proposed, under construction, and closed roads stay off the map. */
+function presentRailFilter(): ExpressionSpecification {
+  return [
+    'all',
+    ['in', ['get', 'feature'], ['literal', RAIL_FEATURES]],
+    ['==', ['coalesce', ['get', 'state'], 'present'], 'present'],
+  ]
+}
+
+function railLineColor(ink: string): ExpressionSpecification {
+  return [
+    'case',
+    ['in', ['get', 'feature'], ['literal', ['light_rail', 'tram', 'subway']]],
+    '#5ec269',
+    ink,
+  ]
+}
+
+function railLineWidth(): ExpressionSpecification {
+  return ['interpolate', ['linear'], ['zoom'], 4, 1, 8, 2, 10, 3, 16, 2.2, 19, 3]
+}
+
+function railLine(id: string, source: string, sourceLayer: string, ink: string, minzoom: number, maxzoom: number) {
+  return {
+    id,
+    type: 'line' as const,
+    source,
+    'source-layer': sourceLayer,
+    minzoom,
+    maxzoom,
+    filter: presentRailFilter(),
+    paint: {
+      'line-color': railLineColor(ink),
+      'line-width': railLineWidth(),
+      'line-opacity': 1,
+    },
+    layout: { 'line-cap': 'round' as const, 'line-join': 'round' as const },
+  }
+}
+
+/**
+ * Present railway tracks on top of a basemap and under the place names.
+ * Closed lines stay off, as they do on the stations map. The ink follows the
+ * basemap so a dark map and satellite keep the tracks visible.
+ */
+function withRailwayOverlay(base: StyleSpecification, ink: string): StyleSpecification {
+  const layers = (base.layers ?? []).map((layer) => {
+    if (layer.id !== 'roads_rail' || layer.type !== 'line') return layer
+    return { ...layer, paint: { ...layer.paint, 'line-opacity': 0 } }
+  })
+  const overlay = [
+    railLine('orm-tracks-low', 'orm-low', 'standard_railway_line_low', ink, 0, 7),
+    railLine('orm-tracks', 'orm-high', 'railway_line_high', ink, 7, 22),
+    {
+      ...railLine('orm-supertram', 'orm-high', 'railway_line_high', '#ff5700', 7, 22),
+      filter: [
+        'all',
+        ['in', ['get', 'feature'], ['literal', ['light_rail', 'tram']]],
+        ['==', ['coalesce', ['get', 'state'], 'present'], 'present'],
+        ['within', SUPERTRAM_BOX],
+      ] as ExpressionSpecification,
+      paint: {
+        'line-color': '#ff5700',
+        'line-width': railLineWidth(),
+        'line-opacity': 1,
+      },
+    },
+  ]
+  const names = layers.findIndex((layer) => layer.type === 'symbol')
+  layers.splice(names < 0 ? layers.length : names, 0, ...overlay)
+  return {
+    ...base,
+    sources: {
+      ...base.sources,
+      'orm-low': {
+        type: 'vector',
+        tiles: ['smoothorm://standard_railway_line_low/{z}/{x}/{y}'],
+        minzoom: 0,
+        maxzoom: 7,
+        attribution: '<a href="https://www.openrailwaymap.org/">OpenRailwayMap</a> © OpenStreetMap',
+      },
+      'orm-high': {
+        type: 'vector',
+        tiles: ['smoothorm://railway_line_high,railway_text_km/{z}/{x}/{y}'],
+        minzoom: 7,
+        maxzoom: OPENRAILWAYMAP_MAX_ZOOM,
+        attribution: '<a href="https://www.openrailwaymap.org/">OpenRailwayMap</a> © OpenStreetMap',
+      },
+    },
+    layers,
+  }
+}
+
+/** One MapLibre style for each entry in the service-map picker. `rails` draws the track overlay. */
+export function tracksMapStyle(basemap: TracksBasemap | TracksMapTheme, rails = false): StyleSpecification {
+  const id: TracksBasemap = basemap === 'light' || basemap === 'railway' ? 'detailed' : basemap
+  const base = id === 'satellite' || id === 'night' || id === 'live' ? spaceStyle(id) : vectorBase(id)
+  if (!rails && basemap !== 'railway') return base
+  return withRailwayOverlay(base, tracksRailInk(id))
 }
 
 /** Town labels the basemap should hide where the route already names the stop. */

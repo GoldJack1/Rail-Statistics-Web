@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { graphLegGoesBackwards, roundSharpCorners } from './tracksRailRoute'
+import { filletSharpBend, graphLegGoesBackwards, roundSharpCorners } from './tracksRailRoute'
 import { buildRailGraph, linesFromNetwork, routeOnGraph } from './tracksRailGraph'
 import { nominatimInBritain, nominatimSearchUrl } from '../app/api/nominatim-station/route'
 import { tracksDarkStyle, tracksFlavor, tracksMapStyle } from './tracksDarkStyle'
@@ -248,6 +248,13 @@ describe('route corner rounding', () => {
     expect(rounded[rounded.length - 1]).toEqual([51.01, -1.49])
   })
 
+  it('rounds a simplified curve and leaves a junction corner', () => {
+    const curve = filletSharpBend([[0, 0], [100, 0], [186, 50]], 16)
+    expect(curve.length).toBeGreaterThan(3)
+    expect(curve.some(([x, y]) => x === 100 && y === 0)).toBe(false)
+    expect(filletSharpBend([[0, 0], [100, 0], [100, 100]], 16)).toEqual([[0, 0], [100, 0], [100, 100]])
+  })
+
   it('leaves a gentle bend alone', () => {
     const path: [number, number][] = [
       [51, -1.5],
@@ -293,6 +300,27 @@ describe('tracks dark style', () => {
     expect(night.sources.night).toMatchObject({ type: 'raster' })
     const live = tracksMapStyle('live')
     expect(String((live.sources.live as { tiles?: string[] }).tiles?.[0])).toContain('MODIS_Terra')
+    const railway = tracksMapStyle('railway')
+    expect(String((railway.sources['orm-high'] as { tiles?: string[] }).tiles?.[0])).toContain('smoothorm://railway_line_high')
+    const tracks = railway.layers?.find((layer) => layer.id === 'orm-tracks')
+    expect(tracks && 'filter' in tracks && tracks.filter).toEqual([
+      'all',
+      ['in', ['get', 'feature'], ['literal', ['rail', 'light_rail', 'tram', 'subway', 'narrow_gauge', 'funicular', 'miniature']]],
+      ['==', ['coalesce', ['get', 'state'], 'present'], 'present'],
+    ])
+    expect(railway.layers?.some((layer) => layer.id === 'orm-tracks')).toBe(true)
+    expect(railway.layers?.some((layer) => layer.id === 'earth')).toBe(true)
+    const darkRails = tracksMapStyle('dark', true)
+    const darkInk = darkRails.layers?.find((layer) => layer.id === 'orm-tracks')
+    expect(darkInk && 'paint' in darkInk && darkInk.paint).toMatchObject({
+      'line-color': ['case', ['in', ['get', 'feature'], ['literal', ['light_rail', 'tram', 'subway']]], '#5ec269', '#cccccc'],
+    })
+    const dayRails = tracksMapStyle('detailed', true)
+    const dayInk = dayRails.layers?.find((layer) => layer.id === 'orm-tracks')
+    expect(dayInk && 'paint' in dayInk && dayInk.paint).toMatchObject({
+      'line-color': ['case', ['in', ['get', 'feature'], ['literal', ['light_rail', 'tram', 'subway']]], '#5ec269', '#000000'],
+    })
+    expect(tracksMapStyle('detailed').layers?.some((layer) => layer.id === 'orm-tracks')).toBe(false)
   })
 })
 

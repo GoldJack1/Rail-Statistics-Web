@@ -1,0 +1,36 @@
+{
+  "rules": [
+    {
+      "id": "mirfield-tpe",
+      "toc": ["TP"],
+      "at": ["MIR", "MIRFILD"],
+      "origin": ["EDB", "NCL", "RCC", "SLB", "SCA", "HUL"],
+      "after": ["MCV", "MCO", "MAN", "MIA", "DGT", "SFD", "SLR", "LIV", "LPY"],
+      "platform": "2",
+      "replace": ["", "1"]
+    },
+    {
+      "id": "morley-west",
+      "at": ["MLY", "MORLEY"],
+      "direction": "west",
+      "platform": "2",
+      "replace": ["", "1"]
+    },
+    {
+      "id": "shipley-to-leeds",
+      "toc": ["GR", "NT"],
+      "at": ["SHY", "SHPY"],
+      "before": ["BDQ", "BRADFS"],
+      "after": ["LDS", "LEEDS", "KGX", "KNGX"],
+      "platform": "3"
+    },
+    {
+      "id": "shipley-to-bradford",
+      "toc": ["GR", "NT"],
+      "at": ["SHY", "SHPY"],
+      "before": ["LDS", "LEEDS", "KGX", "KNGX"],
+      "after": ["BDQ", "BRADFS"],
+      "platform": "4"
+    }
+  ]
+}

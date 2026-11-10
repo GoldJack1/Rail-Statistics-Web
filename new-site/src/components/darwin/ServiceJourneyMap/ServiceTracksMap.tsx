@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CornersIn, CornersOut, Minus, NavigationArrow, Plus, Stack } from '@phosphor-icons/react'
 import * as maplibregl from 'maplibre-gl'
@@ -15,6 +15,8 @@ import { railwayDaySecondsFromClock } from '../../../utils/railwayOperatingDayUk
 import type { LatLngTuple } from '../../../utils/brouterRailRoute'
 import {
   liveJourneyPosition,
+  platformRouteWaypoints,
+  railStopMarks,
   snapLiveToRailPath,
   snapMarkerToPath,
   type JourneyMapStop,
@@ -22,7 +24,9 @@ import {
 } from '../../../utils/serviceJourneyMap'
 import {
   canonicalTracksBasemap,
+  OPENRAILWAYMAP_MAX_ZOOM,
   TRACKS_BASEMAP_GROUPS,
+  TRACKS_RAIL_CREDIT,
   tracksBasemapCredit,
   tracksMapStyle,
   tracksRouteCasing,
@@ -30,7 +34,8 @@ import {
   type TracksBasemap,
   type TracksMapTheme,
 } from '../../../utils/tracksDarkStyle'
-import { routeTracksJourney, splitRouteGaps } from '../../../utils/tracksRailRoute'
+import { ensureOrmSmoothProtocol } from '../../../utils/ormSmoothTiles'
+import { fetchPlatformRailRoute, routeTracksJourney, splitRouteGaps } from '../../../utils/tracksRailRoute'
 import { liftRouteColorForDarkBasemap } from '../../../utils/tocOperatorMap'
 import type { ServiceDetail, ServiceStop } from '../../../types/darwin'
 
@@ -44,6 +49,7 @@ export type BranchTrack = {
 }
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
+const NO_ROADS: Record<string, Record<string, RoutePlatform>> = {}
 
 let pmtilesReady = false
 function ensurePmtiles() {
@@ -67,10 +73,15 @@ function frameJourney(map: MapLibreMap, stops: JourneyMapStop[]) {
     south = Math.min(south, stop.lat)
     north = Math.max(north, stop.lat)
   }
-  map.fitBounds(
-    [[west, south], [east, north]],
-    { padding: 48, maxZoom: 10, duration: 0 },
-  )
+  if (![west, south, east, north].every(Number.isFinite)) return
+  try {
+    map.fitBounds(
+      [[west, south], [east, north]],
+      { padding: 48, maxZoom: 10, duration: 0 },
+    )
+  } catch {
+    // A map with no size yet cannot fit a camera.
+  }
 }
 
 function londonNowRailwaySeconds(): number {
@@ -105,6 +116,7 @@ function stopCollection(
   stops: JourneyMapStop[],
   path: LatLngTuple[] | null,
   platforms: Record<string, RoutePlatform>,
+  marks: Record<string, { lat: number; lng: number }> = {},
 ): GeoJSON.FeatureCollection {
   const placeOnTrack = Boolean(path && path.filter((point) => Number.isFinite(point[0])).length > stops.length + 2)
   const first = stops[0]?.index
@@ -116,11 +128,13 @@ function stopCollection(
       .map((stop) => {
         const onPlatform = platforms[String(stop.index)]
         const terminal = stop.index === first || stop.index === last
-        const at = (terminal && onPlatform?.bay)
-          ? onPlatform.bay
-          : (stop.calling && onPlatform?.stand)
+        const at = stop.kind === 'junction'
+          ? stop
+          : onPlatform?.stand
             ? onPlatform.stand
-            : onPlatform ?? (placeOnTrack ? snapMarkerToPath(stop, path, stop.kind === 'junction' ? 220 : 250) : stop)
+            : (terminal && onPlatform?.bay)
+              ? onPlatform.bay
+              : marks[String(stop.index)] ?? onPlatform ?? (placeOnTrack ? snapMarkerToPath(stop, path, 250) : stop)
         return {
           type: 'Feature' as const,
           properties: {
@@ -160,6 +174,7 @@ function withHeadcode(trainId: string, label: string): string {
 const ROUTE_LINE_WIDTH = 5
 const ROUTE_LINE_OPACITY = 1
 const BASEMAP_KEY = 'rs.service-map.basemap'
+type RouteMode = 'ours' | 'rail'
 
 function storedBasemap(): TracksBasemap | null {
   try {
@@ -222,11 +237,13 @@ export function ServiceTracksMap({
   stops,
   location,
   platforms,
+  platformRoads = NO_ROADS,
   routeColor,
   theme,
   fullscreen,
   onToggleFullscreen,
   callsOnly = false,
+  routeMode,
 }: {
   waypoints: LatLngTuple[]
   extraWaypoints?: LatLngTuple[][]
@@ -237,12 +254,15 @@ export function ServiceTracksMap({
   stops: ServiceDetail['stops']
   location: ServiceDetail['location']
   platforms: Record<string, RoutePlatform>
+  /** Every platform face at a pass that has no booked platform. */
+  platformRoads?: Record<string, Record<string, RoutePlatform>>
   routeColor: string
   theme: TracksMapTheme
   fullscreen: boolean
   onToggleFullscreen: () => void
   /** Simple view: passenger calls only, matching the calling list. */
   callsOnly?: boolean
+  routeMode: RouteMode
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MapLibreMap | null>(null)
@@ -252,7 +272,11 @@ export function ServiceTracksMap({
   const branchPathsRef = useRef<Map<string, LatLngTuple[]>>(new Map())
   const userPointRef = useRef<{ lat: number; lng: number } | null>(null)
   const [styleEpoch, setStyleEpoch] = useState(0)
-  const inputRef = useRef({ stops, mapped, extraMapped, location, platforms, trainId, branches, callsOnly })
+  const stopMarks = useMemo(
+    () => railStopMarks(mapped, platforms, platformRoads),
+    [mapped, platforms, platformRoads],
+  )
+  const inputRef = useRef({ stops, mapped, extraMapped, location, platforms, stopMarks, trainId, branches, callsOnly })
   const shownRef = useRef<{ lat: number; lng: number } | null>(null)
   const shownBranchesRef = useRef<Map<string, { lat: number; lng: number }>>(new Map())
   const userMovedRef = useRef(false)
@@ -261,14 +285,21 @@ export function ServiceTracksMap({
   const [layersOpen, setLayersOpen] = useState(false)
   const basemapChosen = useRef(false)
   const basemapRef = useRef(basemap)
+  const routeModeRef = useRef(routeMode)
   const lineColor = tracksRouteOnDark(basemap) ? liftRouteColorForDarkBasemap(routeColor) : routeColor
   const routeColorRef = useRef(lineColor)
-  const appliedBasemap = useRef(basemap)
+  const appliedStyle = useRef<string | null>(null)
+  const savedRouteRef = useRef<{ key: string; path: LatLngTuple[] } | null>(null)
+  const railWaypoints = platformRouteWaypoints(mapped, platforms, platformRoads)
+  const railWaypointKey = railWaypoints
+    .map((via) => `${via.lat.toFixed(5)},${via.lng.toFixed(5)}${via.exact ? '!' : ''}`)
+    .join('|')
   const tipRef = useRef<maplibregl.Popup | null>(null)
   const tipLiveRef = useRef<string | null>(null)
-  // Platform marks sit within about 100 m of the station. A finer key restarts
-  // the whole search when those chunks arrive, and the line disappears.
-  const waypointKey = waypoints.map((point) => `${point[0].toFixed(3)},${point[1].toFixed(3)}`).join('|')
+  // Four decimal places is about 10 m. A platform on the next road over, such
+  // as Huddersfield 2 beside 3, still changes the key and the route is drawn
+  // again. A finer key restarts the search on every chunk.
+  const waypointKey = waypoints.map((point) => `${point[0].toFixed(4)},${point[1].toFixed(4)}`).join('|')
   const extraKey = extraWaypoints
     .map((route) => route.map((point) => `${point[0].toFixed(3)},${point[1].toFixed(3)}`).join('|'))
     .join('||')
@@ -278,16 +309,18 @@ export function ServiceTracksMap({
   const frameStops = extraMapped.length ? [...mapped, ...extraMapped] : mapped
 
   useLayoutEffect(() => {
-    inputRef.current = { stops, mapped, extraMapped, location, platforms, trainId, branches, callsOnly }
+    inputRef.current = { stops, mapped, extraMapped, location, platforms, stopMarks, trainId, branches, callsOnly }
     routeColorRef.current = lineColor
     basemapRef.current = basemap
+    routeModeRef.current = routeMode
   })
 
   useEffect(() => {
     const stored = storedBasemap()
-    if (!stored) return
-    basemapChosen.current = true
-    setBasemap(stored)
+    if (stored) {
+      basemapChosen.current = true
+      setBasemap(stored)
+    }
   }, [])
 
   useEffect(() => {
@@ -300,13 +333,16 @@ export function ServiceTracksMap({
     if (!container || mapped.length < 1) return
     const center = [mapped[0].lng, mapped[0].lat]
     ensurePmtiles()
+    ensureOrmSmoothProtocol()
+    const rails = routeModeRef.current === 'rail'
+    appliedStyle.current = `${basemapRef.current}:${routeModeRef.current}`
     const map = new maplibregl.Map({
       container,
-      style: tracksMapStyle(basemapRef.current),
+      style: tracksMapStyle(basemapRef.current, rails),
       center: center as [number, number],
       zoom: 5,
       minZoom: 4,
-      maxZoom: 16,
+      maxZoom: rails ? OPENRAILWAYMAP_MAX_ZOOM : 16,
       maxCanvasSize: [8192, 8192],
       attributionControl: false,
       fadeDuration: 0,
@@ -438,6 +474,7 @@ export function ServiceTracksMap({
         shownStops(inputRef.current.mapped, inputRef.current.callsOnly),
         pathRef.current,
         inputRef.current.platforms,
+        inputRef.current.stopMarks,
       ))
       const user = userPointRef.current
       if (user) setSource(map, 'tracks-user', pointCollection(user.lat, user.lng, 'Your location'))
@@ -459,10 +496,12 @@ export function ServiceTracksMap({
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map || appliedBasemap.current === basemap) return
-    appliedBasemap.current = basemap
-    map.setStyle(tracksMapStyle(basemap))
-  }, [basemap])
+    const key = `${basemap}:${routeMode}`
+    if (!map || appliedStyle.current === key) return
+    appliedStyle.current = key
+    map.setMaxZoom(routeMode === 'rail' ? OPENRAILWAYMAP_MAX_ZOOM : 16)
+    map.setStyle(tracksMapStyle(basemap, routeMode === 'rail'))
+  }, [basemap, routeMode])
 
   useEffect(() => {
     const map = mapRef.current
@@ -482,7 +521,7 @@ export function ServiceTracksMap({
   }, [lineColor, basemap, mapReady])
 
   useEffect(() => {
-    if (waypoints.length < 2) return
+    if ((routeMode === 'rail' ? railWaypoints : waypoints).length < 2) return
     const controller = new AbortController()
     let gone = false
     const paint = (path: LatLngTuple[]) => {
@@ -495,20 +534,52 @@ export function ServiceTracksMap({
         shownStops(inputRef.current.mapped, inputRef.current.callsOnly),
         path,
         inputRef.current.platforms,
+        inputRef.current.stopMarks,
       ))
     }
-    void routeTracksJourney(waypoints, controller.signal, paint)
-      .then(paint)
+    const clearRailLine = () => {
+      pathRef.current = null
+      const map = mapRef.current
+      if (!map?.getSource('tracks-route')) return
+      setSource(map, 'tracks-route', EMPTY)
+      setSource(map, 'tracks-stops', stopCollection(
+        shownStops(inputRef.current.mapped, inputRef.current.callsOnly),
+        null,
+        inputRef.current.platforms,
+        inputRef.current.stopMarks,
+      ))
+    }
+    if (routeMode === 'rail') {
+      clearRailLine()
+    } else if (savedRouteRef.current?.key === waypointKey) {
+      paint(savedRouteRef.current.path)
+    }
+    const request = routeMode === 'rail'
+      ? fetchPlatformRailRoute(railWaypoints, controller.signal)
+      : routeTracksJourney(waypoints, controller.signal, (path) => {
+          savedRouteRef.current = { key: waypointKey, path }
+          paint(path)
+        })
+    void request
+      .then((path) => {
+        if (gone) return
+        if (!path || path.length < 2) {
+          if (routeMode === 'rail') clearRailLine()
+          return
+        }
+        if (routeMode === 'ours') savedRouteRef.current = { key: waypointKey, path }
+        paint(path)
+      })
       .catch(() => {
-        /* A replaced journey aborts the search. */
+        if (!gone && routeMode === 'rail') clearRailLine()
       })
     return () => {
       gone = true
       controller.abort()
     }
-    // waypointKey is the content of waypoints. The array identity changes every render.
+    // waypointKey and railWaypointKey are the point lists. Array identity changes every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waypointKey])
+  }, [routeMode, waypointKey, railWaypointKey])
 
   useEffect(() => {
     const map = mapRef.current
@@ -574,11 +645,12 @@ export function ServiceTracksMap({
       shownStops(current.mapped, current.callsOnly),
       pathRef.current,
       current.platforms,
+      current.stopMarks,
     ))
     if (map.getSource('tracks-extra-stops')) {
       setSource(map, 'tracks-extra-stops', stopCollection(shownStops(current.extraMapped, current.callsOnly), null, {}))
     }
-  }, [mapped, extraMapped, platforms, callsOnly, mapReady])
+  }, [mapped, extraMapped, platforms, stopMarks, callsOnly, mapReady])
 
   useEffect(() => {
     const map = mapRef.current
@@ -731,8 +803,12 @@ export function ServiceTracksMap({
                   />
                 </div>
               </div>
-              {tracksBasemapCredit(basemap) ? (
-                <p className="svc-journey-map__imagery">{tracksBasemapCredit(basemap)}</p>
+              {tracksBasemapCredit(basemap) || routeMode === 'rail' ? (
+                <p className="svc-journey-map__imagery">
+                  {[tracksBasemapCredit(basemap), routeMode === 'rail' ? TRACKS_RAIL_CREDIT : null]
+                    .filter((line): line is string => Boolean(line))
+                    .join('\n')}
+                </p>
               ) : null}
               <div className="map-user-location">
                 <BUTCircleButton

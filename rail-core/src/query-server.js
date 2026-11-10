@@ -21,6 +21,8 @@ import { osgbToWgs84 } from "./osgb.js";
 import { ensureDayImported, ridNeedsHsp, ridsNeedHsp, startBoardHspFill } from "./ensure-history-day.js";
 import { consistDocument, consistFromOrigin, endOfDayMilesForUnit, lookupConsist, normalizePtacVehicles, unitIdsFromConsistRow } from "./ptac-apply.js";
 import { ensurePassengerRail, passengerRailRevision, routePassengerJourney } from "./passenger-rail.js";
+import { platformCoords } from "./quai-platforms.js";
+import { readPlatformRules } from "./platform-rules.js";
 import {
   associationsForRid,
   combinedDestinationName,
@@ -1459,6 +1461,20 @@ const server = createServer(async (req, res) => {
       json(res, 200, { ready: true, segments, revision: passengerRailRevision() }, {
         "cache-control": "public, max-age=300",
       });
+      return;
+    }
+    if (url.pathname === "/api/platforms" && req.method === "GET") {
+      const coords = await platformCoords(url.searchParams.get("at"));
+      json(res, 200, { coords }, { "cache-control": "public, max-age=3600" });
+      return;
+    }
+    if (url.pathname === "/api/platform-rules" && req.method === "GET") {
+      const rules = readPlatformRules();
+      if (!rules) {
+        json(res, 404, { error: "no platform rules file" });
+        return;
+      }
+      json(res, 200, rules, { "cache-control": "public, max-age=60" });
       return;
     }
     if (url.pathname === "/api/window" || url.pathname === "/api/dates" || url.pathname === "/api/history/dates") {

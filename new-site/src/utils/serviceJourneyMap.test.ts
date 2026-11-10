@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { ServiceStop } from '../types/darwin'
 import {
@@ -11,10 +14,16 @@ import { formatMilesAndChains } from './milesAndChains'
 import {
   interpolateAlongPath,
   interpolateLatLng,
+  applyPlatformRules,
+  applyMirfieldPlatformOverride,
+  applyMorleyPlatformOverride,
+  applyShipleyPlatformOverride,
   journeyMapStops,
   journeyPointKind,
   liveJourneyPosition,
   mappedRouteWaypoints,
+  platformRouteWaypoints,
+  railStopMarks,
   matchStationCoord,
   pointsOnTheLeg,
   removeRouteReversals,
@@ -138,7 +147,7 @@ describe('serviceJourneyMap', () => {
     ])
   })
 
-  it('routes the dogleg through the junctions that leave the straight chord', () => {
+  it('keeps the dogleg junctions off the route between the stations', () => {
     const mapped = journeyMapStops(
       [
         stop('LEEDS', 'Leeds', 'OR', { lat: 53.79537, lng: -1.54644 }),
@@ -152,9 +161,6 @@ describe('serviceJourneyMap', () => {
     expect(mapped.filter((point) => point.kind === 'junction')).toHaveLength(3)
     expect(mappedRouteWaypoints(mapped)).toEqual([
       [53.79537, -1.54644],
-      [53.76683, -1.4986],
-      [53.72982, -1.40092],
-      [53.70958, -1.41324],
       [53.67839, -1.48698],
     ])
   })
@@ -181,7 +187,7 @@ describe('serviceJourneyMap', () => {
     expect(curved.map((point) => point.tpl)).toEqual(['BRHOUSE', 'GRTLNDJ', 'DYCLJN'])
   })
 
-  it('sends a junction near the start of the leg when it is the booked divergence', () => {
+  it('leaves a junction off the route even when it sits on the leg', () => {
     const mapped = journeyMapStops(
       [
         stop('HLFX', 'Halifax', 'IP', { lat: 53.72039, lng: -1.85398 }),
@@ -190,9 +196,9 @@ describe('serviceJourneyMap', () => {
       ],
       [],
     )
+    expect(mapped.find((point) => point.tpl === 'DYCLJN')?.kind).toBe('junction')
     expect(mappedRouteWaypoints(mapped)).toEqual([
       [53.72039, -1.85398],
-      [53.70883, -1.85522],
       [53.69821, -1.77944],
     ])
   })
@@ -237,6 +243,227 @@ describe('serviceJourneyMap', () => {
     ])
   })
 
+  it('puts each station on its stopping mark and leaves junctions out', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('LEEDS', 'Leeds', 'OR', { lat: 53.795, lng: -1.548, platform: '8' }),
+        stop('OUTWDJN', 'Outwood Junction', 'PP', { lat: 53.74, lng: -1.52 }),
+        stop('WAKEFLD', 'Wakefield', 'PP', { lat: 53.68, lng: -1.49, platform: '2' }),
+        stop('DONC', 'Doncaster', 'DT', { lat: 53.522, lng: -1.14 }),
+      ],
+      [],
+    )
+    expect(mapped.find((point) => point.tpl === 'OUTWDJN')?.kind).toBe('junction')
+    const platforms = {
+      0: {
+        lat: 53.7942,
+        lng: -1.5472,
+        ends: [
+          { lat: 53.7948, lng: -1.547 },
+          { lat: 53.7936, lng: -1.5474 },
+        ] as [{ lat: number; lng: number }, { lat: number; lng: number }],
+        stand: { lat: 53.7944, lng: -1.5471 },
+      },
+      2: {
+        lat: 53.6811,
+        lng: -1.4912,
+        ends: [
+          { lat: 53.6816, lng: -1.491 },
+          { lat: 53.6806, lng: -1.4914 },
+        ] as [{ lat: number; lng: number }, { lat: number; lng: number }],
+        stand: { lat: 53.6814, lng: -1.4911 },
+      },
+    }
+    expect(platformRouteWaypoints(mapped, platforms)).toEqual([
+      { lat: 53.7944, lng: -1.5471, exact: true, loose: { lat: 53.795, lng: -1.548 }, call: true },
+      { lat: 53.6814, lng: -1.4911, exact: true, loose: { lat: 53.68, lng: -1.49 }, call: false },
+      { lat: 53.522, lng: -1.14, exact: false, loose: { lat: 53.522, lng: -1.14 }, call: true },
+    ])
+    const marks = railStopMarks(mapped, platforms)
+    expect(marks['0']).toEqual({ lat: 53.7944, lng: -1.5471 })
+    expect(marks['2']).toEqual({ lat: 53.6814, lng: -1.4911 })
+    expect(marks['1']).toBeUndefined()
+    expect(marks['3']).toBeUndefined()
+  })
+
+  it('puts a westbound TransPennine pass through Mirfield on platform 2', () => {
+    const mapped = journeyMapStops(
+      [
+        stop('HULL', 'Hull', 'OR', { lat: 53.74, lng: -0.35, crs: 'HUL' }),
+        stop('MIRFILD', 'Mirfield', 'PP', { lat: 53.6714, lng: -1.6925, crs: 'MIR' }),
+        stop('MNCRVIC', 'Manchester Victoria', 'IP', { lat: 53.487, lng: -2.242, crs: 'MCV' }),
+        stop('LVRPLSH', 'Liverpool Lime Street', 'DT', { lat: 53.407, lng: -2.978, crs: 'LIV' }),
+      ],
+      [],
+    )
+    const overridden = applyMirfieldPlatformOverride(mapped, 'TP')
+    expect(overridden.find((point) => point.tpl === 'MIRFILD')?.platform).toBe('2')
+    expect(applyMirfieldPlatformOverride(mapped, 'NT').find((point) => point.tpl === 'MIRFILD')?.platform).toBeNull()
+
+    const eastbound = journeyMapStops(
+      [
+        stop('LVRPLSH', 'Liverpool Lime Street', 'OR', { lat: 53.407, lng: -2.978, crs: 'LIV' }),
+        stop('MIRFILD', 'Mirfield', 'PP', { lat: 53.6714, lng: -1.6925, crs: 'MIR' }),
+        stop('HULL', 'Hull', 'DT', { lat: 53.74, lng: -0.35, crs: 'HUL' }),
+      ],
+      [],
+    )
+    expect(applyMirfieldPlatformOverride(eastbound, 'TP').find((point) => point.tpl === 'MIRFILD')?.platform).toBeNull()
+
+    const stopping = journeyMapStops(
+      [
+        stop('SCARBRO', 'Scarborough', 'OR', { lat: 54.28, lng: -0.4, crs: 'SCA' }),
+        stop('MIRFILD', 'Mirfield', 'IP', { lat: 53.6714, lng: -1.6925, crs: 'MIR', platform: '3' }),
+        stop('MNCRPIC', 'Manchester Piccadilly', 'DT', { lat: 53.477, lng: -2.23, crs: 'MAN' }),
+      ],
+      [],
+    )
+    expect(applyMirfieldPlatformOverride(stopping, 'TP').find((point) => point.tpl === 'MIRFILD')?.platform).toBe('3')
+
+    const bookedEast = journeyMapStops(
+      [
+        stop('NWCSTLE', 'Newcastle', 'OR', { lat: 54.968, lng: -1.617, crs: 'NCL' }),
+        stop('MIRFILD', 'Mirfield', 'PP', { lat: 53.6714, lng: -1.6925, crs: 'MIR', platform: '1' }),
+        stop('MNCRIAP', 'Manchester Airport', 'DT', { lat: 53.365, lng: -2.273, crs: 'MIA' }),
+      ],
+      [],
+    )
+    expect(applyMirfieldPlatformOverride(bookedEast, 'TP').find((point) => point.tpl === 'MIRFILD')?.platform).toBe('2')
+  })
+
+  it('puts any westbound Morley train on platform 2', () => {
+    const west = journeyMapStops(
+      [
+        stop('LEEDS', 'Leeds', 'OR', { lat: 53.795, lng: -1.548, crs: 'LDS' }),
+        stop('MORLEY', 'Morley', 'PP', { lat: 53.75, lng: -1.599, crs: 'MLY', platform: '1' }),
+        stop('HUDDRS', 'Huddersfield', 'DT', { lat: 53.648, lng: -1.785, crs: 'HUD' }),
+      ],
+      [],
+    )
+    expect(applyMorleyPlatformOverride(west).find((point) => point.crs === 'MLY')?.platform).toBe('2')
+
+    const east = journeyMapStops(
+      [
+        stop('HUDDRS', 'Huddersfield', 'OR', { lat: 53.648, lng: -1.785, crs: 'HUD' }),
+        stop('MORLEY', 'Morley', 'IP', { lat: 53.75, lng: -1.599, crs: 'MLY', platform: '1' }),
+        stop('LEEDS', 'Leeds', 'DT', { lat: 53.795, lng: -1.548, crs: 'LDS' }),
+      ],
+      [],
+    )
+    expect(applyMorleyPlatformOverride(east).find((point) => point.crs === 'MLY')?.platform).toBe('1')
+
+    const booked = journeyMapStops(
+      [
+        stop('LEEDS', 'Leeds', 'OR', { lat: 53.795, lng: -1.548, crs: 'LDS' }),
+        stop('MORLEY', 'Morley', 'IP', { lat: 53.75, lng: -1.599, crs: 'MLY', platform: '3' }),
+        stop('HUDDRS', 'Huddersfield', 'DT', { lat: 53.648, lng: -1.785, crs: 'HUD' }),
+      ],
+      [],
+    )
+    expect(applyMorleyPlatformOverride(booked).find((point) => point.crs === 'MLY')?.platform).toBe('3')
+  })
+
+  it('puts LNER and Northern Shipley trains on platform 3 towards Leeds and 4 towards Bradford', () => {
+    const towardsLeeds = journeyMapStops(
+      [
+        stop('BRADFS', 'Bradford Forster Square', 'OR', { lat: 53.797, lng: -1.753, crs: 'BDQ' }),
+        stop('SHPY', 'Shipley', 'IP', { lat: 53.833, lng: -1.773, crs: 'SHY', platform: '4' }),
+        stop('LEEDS', 'Leeds', 'DT', { lat: 53.795, lng: -1.548, crs: 'LDS' }),
+      ],
+      [],
+    )
+    expect(applyShipleyPlatformOverride(towardsLeeds, 'NT').find((point) => point.crs === 'SHY')?.platform).toBe('3')
+    expect(applyShipleyPlatformOverride(towardsLeeds, 'GR').find((point) => point.crs === 'SHY')?.platform).toBe('3')
+    expect(applyShipleyPlatformOverride(towardsLeeds, 'TP').find((point) => point.crs === 'SHY')?.platform).toBe('4')
+
+    const towardsBradford = journeyMapStops(
+      [
+        stop('KNGX', 'London Kings Cross', 'OR', { lat: 51.531, lng: -0.123, crs: 'KGX' }),
+        stop('LEEDS', 'Leeds', 'IP', { lat: 53.795, lng: -1.548, crs: 'LDS' }),
+        stop('SHPY', 'Shipley', 'PP', { lat: 53.833, lng: -1.773, crs: 'SHY' }),
+        stop('BRADFS', 'Bradford Forster Square', 'DT', { lat: 53.797, lng: -1.753, crs: 'BDQ' }),
+      ],
+      [],
+    )
+    expect(applyShipleyPlatformOverride(towardsBradford, 'GR').find((point) => point.crs === 'SHY')?.platform).toBe('4')
+
+    const towardsSkipton = journeyMapStops(
+      [
+        stop('BRADFS', 'Bradford Forster Square', 'OR', { lat: 53.797, lng: -1.753, crs: 'BDQ' }),
+        stop('SHPY', 'Shipley', 'IP', { lat: 53.833, lng: -1.773, crs: 'SHY', platform: '1' }),
+        stop('SKIPTON', 'Skipton', 'DT', { lat: 53.958, lng: -2.026, crs: 'SKI' }),
+      ],
+      [],
+    )
+    expect(applyShipleyPlatformOverride(towardsSkipton, 'NT').find((point) => point.crs === 'SHY')?.platform).toBe('1')
+
+    const filedElsewhere = applyPlatformRules(towardsLeeds, 'NT', [
+      { at: ['SHY', 'SHPY'], toc: ['NT'], before: ['BDQ'], after: ['LDS'], platform: '1' },
+    ])
+    expect(filedElsewhere.find((point) => point.crs === 'SHY')?.platform).toBe('1')
+  })
+
+  it('keeps the site fallback rules identical to the VPS file', () => {
+    const here = dirname(fileURLToPath(import.meta.url))
+    const site = readFileSync(join(here, '../data/platform-rules.json'), 'utf8')
+    const vps = readFileSync(join(here, '../../../rail-core/config/platform-rules.json'), 'utf8')
+    expect(JSON.parse(site)).toEqual(JSON.parse(vps))
+  })
+
+  it('runs a westbound pass on the left-hand road, unless the path names one', () => {
+    const face = (lat: number, lng: number, standLat: number, standLng: number) => ({
+      lat,
+      lng,
+      ends: [
+        { lat: lat + 0.0002, lng },
+        { lat: lat - 0.0002, lng },
+      ] as [{ lat: number; lng: number }, { lat: number; lng: number }],
+      stand: { lat: standLat, lng: standLng },
+    })
+    const faces = {
+      1: face(53.67148, -1.6926, 53.67138, -1.6916),
+      2: face(53.67143, -1.6926, 53.67135, -1.6926),
+      3: face(53.67103, -1.6912, 53.67109, -1.6915),
+    }
+    const westbound = journeyMapStops(
+      [
+        stop('DWBY', 'Dewsbury', 'IP', { lat: 53.69, lng: -1.63, crs: 'DEW' }),
+        stop('MIRFILD', 'Mirfield', 'PP', { lat: 53.6714, lng: -1.6925, crs: 'MIR' }),
+        stop('HDRSFLD', 'Huddersfield', 'DT', { lat: 53.648, lng: -1.785, crs: 'HUD' }),
+      ],
+      [],
+    )
+    const mirfield = westbound.find((point) => point.tpl === 'MIRFILD')
+    expect(mirfield?.kind).toBe('pass')
+    const westRoads = { [String(mirfield?.index)]: faces }
+    expect(platformRouteWaypoints(westbound, {}, westRoads)[1]).toEqual({
+      lat: 53.67135,
+      lng: -1.6926,
+      exact: true,
+      loose: { lat: 53.6714, lng: -1.6925 },
+      call: false,
+    })
+    expect(railStopMarks(westbound, {}, westRoads)[String(mirfield?.index)]).toEqual({
+      lat: 53.67135,
+      lng: -1.6926,
+    })
+
+    const named = journeyMapStops(
+      [
+        stop('HDRSFLD', 'Huddersfield', 'OR', { lat: 53.648, lng: -1.785, crs: 'HUD' }),
+        stop('MIRFILD', 'Mirfield', 'PP', { lat: 53.6714, lng: -1.6925, crs: 'MIR', path: '2' }),
+        stop('DWBY', 'Dewsbury', 'DT', { lat: 53.69, lng: -1.63, crs: 'DEW' }),
+      ],
+      [],
+    )
+    const namedMirfield = named.find((point) => point.tpl === 'MIRFILD')
+    expect(platformRouteWaypoints(named, {}, { [String(namedMirfield?.index)]: faces })[1]).toMatchObject({
+      lat: 53.67135,
+      lng: -1.6926,
+      exact: true,
+    })
+  })
+
   it('starts a bay at the buffer and leaves along the platform', () => {
     const mapped = journeyMapStops(
       [
@@ -261,7 +488,6 @@ describe('serviceJourneyMap', () => {
       }),
     ).toEqual([
       [53.7939, -1.5482],
-      [53.79259, -1.55573],
       [53.544, -2.632],
     ])
   })
