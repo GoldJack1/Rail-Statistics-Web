@@ -23,6 +23,7 @@ import { consistDocument, consistFromOrigin, endOfDayMilesForUnit, lookupConsist
 import { ensurePassengerRail, passengerRailRevision, routePassengerJourney } from "./passenger-rail.js";
 import { platformCoords } from "./quai-platforms.js";
 import { readPlatformRules } from "./platform-rules.js";
+import { serviceRoute } from "./service-route.js";
 import {
   associationsForRid,
   combinedDestinationName,
@@ -1461,6 +1462,15 @@ const server = createServer(async (req, res) => {
       json(res, 200, { ready: true, segments, revision: passengerRailRevision() }, {
         "cache-control": "public, max-age=300",
       });
+      return;
+    }
+    if (url.pathname === "/api/service-route" && req.method === "POST") {
+      const drawn = await serviceRoute(await readJson(req, 256_000));
+      if (!drawn) {
+        json(res, 400, { error: "stops must be 2 to 400 placed timing points" });
+        return;
+      }
+      json(res, 200, drawn, { "cache-control": "no-store" });
       return;
     }
     if (url.pathname === "/api/platforms" && req.method === "GET") {

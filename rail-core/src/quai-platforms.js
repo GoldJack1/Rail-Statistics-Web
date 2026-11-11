@@ -48,13 +48,17 @@ async function stationTracks(lat, lng) {
 }
 
 /**
- * `at` as the site sends it: `id~lat~lng~platform|…`, `*` for every platform,
- * `left@<bearing>` for the left-hand road of a call with no booked platform.
+ * Platforms for a list of `{ id, lat, lng, platform }` requests. `*` is every
+ * platform, `left@<bearing>` the left-hand road of a call with no booked platform.
  */
-export async function platformCoords(at) {
-  const requests = parsePlatformQuery(at || "");
+export async function platformCoordsFor(requests) {
   if (requests.length === 0) return {};
   const asked = roadRequests(requests);
   const coords = applyPlatformFixes(await lookupQuaiPlatforms(asked, stationTracks), asked);
   return chooseLeftHandRoads(coords, requests);
+}
+
+/** `at` as the site sends it: `id~lat~lng~platform|…`, at most 40 stops. */
+export async function platformCoords(at) {
+  return platformCoordsFor(parsePlatformQuery(at || ""));
 }

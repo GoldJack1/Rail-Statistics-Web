@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CornersIn, CornersOut, Minus, NavigationArrow, Plus, Stack } from '@phosphor-icons/react'
 import * as maplibregl from 'maplibre-gl'
@@ -15,8 +15,6 @@ import { railwayDaySecondsFromClock } from '../../../utils/railwayOperatingDayUk
 import type { LatLngTuple } from '../../../utils/brouterRailRoute'
 import {
   liveJourneyPosition,
-  platformRouteWaypoints,
-  railStopMarks,
   snapLiveToRailPath,
   snapMarkerToPath,
   type JourneyMapStop,
@@ -33,7 +31,7 @@ import {
   type TracksBasemap,
 } from '../../../utils/tracksDarkStyle'
 import { ensureOrmSmoothProtocol } from '../../../utils/ormSmoothTiles'
-import { fetchPlatformRailRoute, routeTracksJourney, splitRouteGaps } from '../../../utils/tracksRailRoute'
+import { routeTracksJourney, splitRouteGaps } from '../../../utils/tracksRailRoute'
 import type { ServiceDetail, ServiceStop } from '../../../types/darwin'
 
 export type BranchTrack = {
@@ -46,7 +44,7 @@ export type BranchTrack = {
 }
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
-const NO_ROADS: Record<string, Record<string, RoutePlatform>> = {}
+const NO_MARKS: Record<string, { lat: number; lng: number }> = {}
 
 let pmtilesReady = false
 function ensurePmtiles() {
@@ -234,7 +232,8 @@ export function ServiceTracksMap({
   stops,
   location,
   platforms,
-  platformRoads = NO_ROADS,
+  stopMarks = NO_MARKS,
+  railPath = null,
   routeColor,
   fullscreen,
   onToggleFullscreen,
@@ -250,8 +249,10 @@ export function ServiceTracksMap({
   stops: ServiceDetail['stops']
   location: ServiceDetail['location']
   platforms: Record<string, RoutePlatform>
-  /** Every platform face at a pass that has no booked platform. */
-  platformRoads?: Record<string, Record<string, RoutePlatform>>
+  /** The point each call and pass is routed through, from the query service. */
+  stopMarks?: Record<string, { lat: number; lng: number }>
+  /** The rail-map line from the query service. Null until it answers, or when it has none. */
+  railPath?: LatLngTuple[] | null
   routeColor: string
   fullscreen: boolean
   onToggleFullscreen: () => void
@@ -267,10 +268,6 @@ export function ServiceTracksMap({
   const branchPathsRef = useRef<Map<string, LatLngTuple[]>>(new Map())
   const userPointRef = useRef<{ lat: number; lng: number } | null>(null)
   const [styleEpoch, setStyleEpoch] = useState(0)
-  const stopMarks = useMemo(
-    () => railStopMarks(mapped, platforms, platformRoads),
-    [mapped, platforms, platformRoads],
-  )
   const inputRef = useRef({ stops, mapped, extraMapped, location, platforms, stopMarks, trainId, branches, callsOnly })
   const shownRef = useRef<{ lat: number; lng: number } | null>(null)
   const shownBranchesRef = useRef<Map<string, { lat: number; lng: number }>>(new Map())
@@ -285,10 +282,6 @@ export function ServiceTracksMap({
   const routeColorRef = useRef(lineColor)
   const appliedStyle = useRef<string | null>(null)
   const savedRouteRef = useRef<{ key: string; path: LatLngTuple[] } | null>(null)
-  const railWaypoints = platformRouteWaypoints(mapped, platforms, platformRoads)
-  const railWaypointKey = railWaypoints
-    .map((via) => `${via.lat.toFixed(5)},${via.lng.toFixed(5)}${via.exact ? '!' : ''}`)
-    .join('|')
   const tipRef = useRef<maplibregl.Popup | null>(null)
   const tipLiveRef = useRef<string | null>(null)
   // Four decimal places is about 10 m. A platform on the next road over, such
@@ -511,7 +504,7 @@ export function ServiceTracksMap({
   }, [lineColor, basemap, mapReady])
 
   useEffect(() => {
-    if ((routeMode === 'rail' ? railWaypoints : waypoints).length < 2) return
+    if (routeMode !== 'rail' && waypoints.length < 2) return
     const controller = new AbortController()
     let gone = false
     const paint = (path: LatLngTuple[]) => {
@@ -540,36 +533,31 @@ export function ServiceTracksMap({
       ))
     }
     if (routeMode === 'rail') {
-      clearRailLine()
-    } else if (savedRouteRef.current?.key === waypointKey) {
-      paint(savedRouteRef.current.path)
+      // The query service drew this line. There is nothing to work out here.
+      if (railPath && railPath.length >= 2) paint(railPath)
+      else clearRailLine()
+      return () => {
+        gone = true
+      }
     }
-    const request = routeMode === 'rail'
-      ? fetchPlatformRailRoute(railWaypoints, controller.signal, paint)
-      : routeTracksJourney(waypoints, controller.signal, (path) => {
-          savedRouteRef.current = { key: waypointKey, path }
-          paint(path)
-        })
-    void request
+    if (savedRouteRef.current?.key === waypointKey) paint(savedRouteRef.current.path)
+    void routeTracksJourney(waypoints, controller.signal, (path) => {
+      savedRouteRef.current = { key: waypointKey, path }
+      paint(path)
+    })
       .then((path) => {
-        if (gone) return
-        if (!path || path.length < 2) {
-          if (routeMode === 'rail') clearRailLine()
-          return
-        }
-        if (routeMode === 'ours') savedRouteRef.current = { key: waypointKey, path }
+        if (gone || !path || path.length < 2) return
+        savedRouteRef.current = { key: waypointKey, path }
         paint(path)
       })
-      .catch(() => {
-        if (!gone && routeMode === 'rail') clearRailLine()
-      })
+      .catch(() => undefined)
     return () => {
       gone = true
       controller.abort()
     }
-    // waypointKey and railWaypointKey are the point lists. Array identity changes every render.
+    // waypointKey is the point list. Array identity changes every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeMode, waypointKey, railWaypointKey])
+  }, [routeMode, waypointKey, railPath, mapReady])
 
   useEffect(() => {
     const map = mapRef.current

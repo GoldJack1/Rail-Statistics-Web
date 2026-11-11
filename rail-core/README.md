@@ -59,7 +59,14 @@ OpenStreetMap, at `QUAI_URL` (default `http://127.0.0.1:5020`). Both query proce
   from north. `src/left-hand-road.js` answers with the left-hand road of the through pair, marked `guess`.
 - `src/quai-platforms-core.js` is built from `new-site/src/utils/quaiPlatforms.ts` (command at its top).
 
+The service map line is drawn by `POST /api/service-route` (`src/service-route.js`), for the website and the iOS app alike:
+
+- Body: `{ toc, stops: [{ index, lat, lng, crs, tpl, calling, kind, cancelled, platform, path, line }], draft? }`. The stops are the timing points the client has placed on the map.
+- Answer: `path` (`[lat, lng]` pairs, or null), `booked` (platforms a rule changed), `platforms`, `marks` (the point each stop is routed through), `markers` (where each dot is drawn) and `complete`.
+- Every routing decision is made here: the platform rules, the left-hand road, which points the line passes and the correction of a point on the wrong track. `draft: true` answers with the first line, before that correction.
+- The track geometry between the points comes from `RAIL_ROUTE_URL`, the site's `/api/rail-route`. It defaults to the beta site on the dev server and the main site on the live one. Routes are kept for 30 minutes.
+
 Manual tweaks live in `config/` and are read on each request, so editing them does not need a site deploy or a query restart:
 
-- `config/platform-rules.json` chooses the platform a service is routed through (Mirfield, Morley, Shipley). The site uses this list when `GET /api/platform-rules` is available, and keeps a built-in copy until then. Responses are cached for 60 seconds.
+- `config/platform-rules.json` chooses the platform a service is routed through (Mirfield, Morley, Shipley). `POST /api/service-route` applies it; the site and the app keep no copy. `GET /api/platform-rules` still serves the list.
 - `config/platform-fixes.json` places a platform on a measured rail. Huddersfield 1, 2 and 3 are a station block there: quai's old 1–4B are dropped, and a booking of 4, 4A or 4B uses platform 3. A one-off stand is `{ "near": [lat, lng], "withinM": 500, "ref": "1", "lat": 53.64, "lng": -1.78 }`. `/api/platforms` itself is cached for an hour.
