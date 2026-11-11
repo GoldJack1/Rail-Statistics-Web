@@ -24,7 +24,7 @@ const RAIL_ROUTE_URL = String(
       : "https://railstatistics.co.uk/api/rail-route"),
 );
 /** Bumps every cache when the rail line is laid differently. */
-export const RAIL_ROUTE_REV = "24";
+export const RAIL_ROUTE_REV = "25";
 const ROUTE_CACHE_MS = 30 * 60 * 1000;
 const ROUTE_CACHE_MAX = 400;
 const MAX_STOPS = 400;
@@ -365,7 +365,7 @@ function passingRoad(stop, prev, next, roads, travel) {
   } else if (from && !to) {
     to = origin;
   }
-  if (!from || !to) return faces[0][1];
+  if (!from || !to) return { ...faces[0][1], guess: true };
 
   const offLine = faces.map(([, place]) => Math.abs(leftOfDirection(from, to, from, roadFace(place))));
   const closest = Math.min(...offLine);
@@ -383,7 +383,8 @@ function passingRoad(stop, prev, next, roads, travel) {
     }
   }
   const side = pairGap <= 12 ? scored.slice(pairStart, pairStart + 2) : scored;
-  return side.reduce((best, row) => (row.left > best.left ? row : best), side[0]).place;
+  // Nothing names this road. It is the left-hand one by its position alone.
+  return { ...side.reduce((best, row) => (row.left > best.left ? row : best), side[0]).place, guess: true };
 }
 
 // ------------------------------------------------------------ the points
@@ -404,10 +405,10 @@ function railStops(mapped, platformAt, roadsAt) {
         ? passingRoad(stop, chosen[index - 1] ?? null, chosen[index + 1] ?? null, roadsAt?.[String(stop.index)], travelAt(chosen, index))
         : null);
     const call = stop.calling;
-    const guess = place?.guess ? { guess: true } : {};
+    const guess = { index: stop.index, ...(place?.guess ? { guess: true } : {}) };
     if (place?.stand) return { stop, via: { ...place.stand, loose: pin, call, ...guess } };
     if (place) return { stop, via: { lat: place.lat, lng: place.lng, loose: pin, call, ...guess } };
-    return { stop, via: { ...pin, loose: pin, call } };
+    return { stop, via: { ...pin, loose: pin, call, index: stop.index } };
   });
 }
 
@@ -441,9 +442,10 @@ export function platformRouteWaypoints(mapped, platformAt, roadsAt) {
 }
 
 /** Where each call and pass marker sits on the platform it is routed through, by stop index. */
-function railStopMarks(mapped, platformAt, roadsAt) {
+function railStopMarks(mapped, platformAt, roadsAt, offLine = new Set()) {
   const marks = {};
   for (const { stop, via } of railStops(mapped, platformAt, roadsAt)) {
+    if (offLine.has(stop.index)) continue;
     if (via.lat === stop.lat && via.lng === stop.lng) continue;
     marks[String(stop.index)] = { lat: via.lat, lng: via.lng };
   }
@@ -529,6 +531,52 @@ async function loadPlatforms(mapped, lookup) {
 }
 
 // -------------------------------------------------------- the rail route
+
+/** A platform road this far from the train's own line belongs to another line through the station. */
+const OWN_LINE_M = 8;
+
+function metresFromPath(path, point) {
+  const cos = Math.cos((point.lat * Math.PI) / 180);
+  const px = point.lng * 111_320 * cos;
+  const py = point.lat * 110_540;
+  let best = Infinity;
+  for (let i = 1; i < path.length; i++) {
+    const ax = path[i - 1][1] * 111_320 * cos;
+    const ay = path[i - 1][0] * 110_540;
+    const dx = path[i][1] * 111_320 * cos - ax;
+    const dy = path[i][0] * 110_540 - ay;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+    const away = Math.hypot(px - ax - dx * t, py - ay - dy * t);
+    if (away < best) best = away;
+  }
+  return best;
+}
+
+/**
+ * A pass with no booked platform is put on the left-hand platform road. That
+ * is only right when the train runs past those platforms. At Salford Central
+ * the platforms are on the Bolton lines, and a train for the Ordsall Chord
+ * runs on the pair beside them: sending it through a platform pulled it onto
+ * the wrong road. The line is first asked for without those passes. A guessed
+ * road is kept only when that line runs along it or along the road next to it.
+ * The stop indexes left out are returned with the points that stay.
+ */
+export async function passesOnTheLine(vias, route) {
+  const guessed = (via) => via.guess && !via.call;
+  const offLine = new Set();
+  if (!vias.some(guessed)) return { vias, offLine };
+  const sure = vias.filter((via) => !guessed(via));
+  if (sure.length < 2) return { vias, offLine };
+  const base = await route(sure.map((via) => [via.lat, via.lng]));
+  if (!base || base.length < 2) return { vias, offLine };
+  const kept = vias.filter((via) => {
+    if (!guessed(via) || metresFromPath(base, via) <= OWN_LINE_M) return true;
+    offLine.add(via.index);
+    return false;
+  });
+  return { vias: kept, offLine };
+}
 
 const routeCache = new Map();
 const routeInFlight = new Map();
@@ -913,10 +961,10 @@ export async function serviceRoute(body, options = {}) {
     if (stop.platform !== stops[i].platform) booked[String(stop.index)] = stop.platform;
   });
   const { platformAt, roadsAt, wire } = await loadPlatforms(mapped, lookup);
-  const vias = platformRouteWaypoints(mapped, platformAt, roadsAt);
+  const { vias, offLine } = await passesOnTheLine(platformRouteWaypoints(mapped, platformAt, roadsAt), route);
   const drawn = await platformRailRoute(vias, route, draft);
   const path = drawn.path && drawn.path.length >= 2 ? filletRailRoute(drawn.path) : null;
-  const stopMarks = railStopMarks(mapped, platformAt, roadsAt);
+  const stopMarks = railStopMarks(mapped, platformAt, roadsAt, offLine);
   const marks = {};
   for (const [id, at] of Object.entries(stopMarks)) marks[id] = [at.lat, at.lng];
   return {

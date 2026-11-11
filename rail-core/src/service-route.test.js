@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyPlatformRules, platformRailRoute, readStops, serviceRoute, unbookedCallBearings } from "./service-route.js";
+import { applyPlatformRules, passesOnTheLine, platformRailRoute, readStops, serviceRoute, unbookedCallBearings } from "./service-route.js";
 
 const stop = (index, lat, lng, more = {}) => ({
   index, lat, lng, tpl: `T${index}`, crs: null, calling: true, kind: "stop", cancelled: false, platform: null, path: null, line: null, ...more,
@@ -135,4 +135,30 @@ test("a booked call keeps its platform when the route reverses there", async () 
   delete vias[1].guess;
   await platformRailRoute(vias, shuntingRoute(calls));
   assert.equal(calls.length, 1);
+});
+
+test("a guessed pass on another line's platform is left out, and one beside the line is kept", async () => {
+  const end = (lat, lng) => ({ lat, lng, loose: { lat, lng }, call: true, index: 0 });
+  const pass = (lat, lng, index) => ({ lat, lng, loose: { lat, lng }, call: false, guess: true, index });
+  // The line runs due north along -1.5. One degree of longitude is about 66 km here.
+  const beside = pass(53.5, -1.5 - 4 / 66_000, 1);
+  const otherLine = pass(53.6, -1.5 - 12 / 66_000, 2);
+  const vias = [end(53.4, -1.5), beside, otherLine, { ...end(53.7, -1.5), index: 3 }];
+  const asked = [];
+  const { vias: kept, offLine } = await passesOnTheLine(vias, async (points) => {
+    asked.push(points);
+    return straight(points);
+  });
+  assert.equal(asked[0].length, 2);
+  assert.deepEqual(kept.map((via) => via.index), [0, 1, 3]);
+  assert.deepEqual([...offLine], [2]);
+});
+
+test("a service with no guessed pass is not routed twice", async () => {
+  const calls = [];
+  await passesOnTheLine(guessedVias(), async (points) => {
+    calls.push(points);
+    return straight(points);
+  });
+  assert.equal(calls.length, 0);
 });
