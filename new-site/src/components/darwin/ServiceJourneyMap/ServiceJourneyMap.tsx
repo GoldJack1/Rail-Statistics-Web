@@ -255,14 +255,21 @@ export function ServiceJourneyMap({
     if (routeMode !== 'rail' || placed.length < 2) return
     const controller = new AbortController()
     let finished = false
+    let shown = false
+    const show = (first: ServiceRoute) => {
+      if (finished || controller.signal.aborted) return
+      shown = true
+      setDrawn({ key: routeRequest, route: first })
+    }
     // The first line arrives quickly. The second has any point on the wrong track corrected.
     void fetchServiceRoute(routeRequest, true, controller.signal).then((first) => {
-      if (first && !finished && !controller.signal.aborted) setDrawn({ key: routeRequest, route: first })
+      if (first) show(first)
     })
-    void fetchServiceRoute(routeRequest, false, controller.signal).then((full) => {
+    void fetchServiceRoute(routeRequest, false, controller.signal, show).then((full) => {
       if (controller.signal.aborted) return
       finished = true
-      setDrawn({ key: routeRequest, route: full ?? { ...NO_SERVICE_ROUTE, complete: true } })
+      // A corrected line that never arrives leaves the first line on the map.
+      if (full?.path || !shown) setDrawn({ key: routeRequest, route: full ?? { ...NO_SERVICE_ROUTE, complete: true } })
     })
     return () => controller.abort()
     // routeRequest is the content of placed.

@@ -942,7 +942,10 @@ function markerPoints(mapped, platformAt, marks, path) {
 
 const round6 = (value) => Math.round(value * 1e6) / 1e6;
 const answers = new Map();
+const working = new Map();
 const ANSWER_CACHE_MAX = 300;
+const ANSWER_WITHIN_MS = 6000;
+const NO_ANSWER = { path: null, complete: false, booked: {}, platforms: {}, marks: {}, markers: {}, revision: RAIL_ROUTE_REV };
 
 /**
  * The answer for one service.
@@ -952,17 +955,45 @@ const ANSWER_CACHE_MAX = 300;
  * is where each booked platform sits, as `/api/platforms` writes it. `marks`
  * is the point each stop is routed through and `markers` where each stop's
  * dot is drawn. `complete` is false for a draft: the first line, before a
- * point on the wrong track is corrected.
+ * point on the wrong track is corrected. `pending` means the line is still
+ * being drawn and the same request should be sent again in a moment.
  */
 export async function serviceRoute(body, options = {}) {
   const stops = readStops(body);
   if (!stops) return null;
+  if (options.route || options.platforms || options.rules) return drawService(body, stops, options, null);
   // The same service is opened by many people and reopened often. Its answer is kept.
-  const cacheKey = options.route || options.platforms || options.rules
-    ? null
-    : JSON.stringify([RAIL_ROUTE_REV, body?.draft === true, String(body?.toc || ""), stops]);
-  const hit = cacheKey ? answers.get(cacheKey) : null;
+  const keyFor = (draft) => JSON.stringify([RAIL_ROUTE_REV, draft, String(body?.toc || ""), stops]);
+  const cacheKey = keyFor(body?.draft === true);
+  const hit = answers.get(cacheKey);
   if (hit && Date.now() - hit.at < ROUTE_CACHE_MS) return hit.answer;
+  let job = working.get(cacheKey);
+  if (!job) {
+    job = drawService(body, stops, options, cacheKey)
+      .catch((error) => {
+        console.warn("service route", error instanceof Error ? error.message : error);
+        return null;
+      })
+      .finally(() => working.delete(cacheKey));
+    working.set(cacheKey, job);
+  }
+  // The proxy in front of this server gives up after eight seconds. A long
+  // line that is not ready by then is still being drawn: the answer says so,
+  // carries the first line when there is one, and the client asks again.
+  let timer;
+  const ready = await Promise.race([
+    job,
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(undefined), ANSWER_WITHIN_MS);
+    }),
+  ]);
+  clearTimeout(timer);
+  if (ready !== undefined) return ready ?? { ...NO_ANSWER, complete: true };
+  const first = answers.get(keyFor(true));
+  return { ...(first ? first.answer : NO_ANSWER), complete: false, pending: true };
+}
+
+async function drawService(body, stops, options, cacheKey) {
   const lookup = options.platforms ?? platformCoordsFor;
   const route = options.route ?? requestRailRoute;
   const rules = options.rules ?? readPlatformRules()?.rules ?? [];

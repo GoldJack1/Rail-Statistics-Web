@@ -83,23 +83,45 @@ export function readServiceRoute(payload: unknown): ServiceRoute | null {
   return { path, complete: doc.complete !== false, booked, platforms, marks }
 }
 
-/** `request` is the JSON body: the service's operator and its placed timing points. Null on a miss. */
+const RETRY_MS = 2000
+const RETRIES = 20
+
+/**
+ * `request` is the JSON body: the service's operator and its placed timing
+ * points. A long line takes the query service a while the first time, and it
+ * answers `pending` until the line is ready, so the request is sent again.
+ * `onFirst` is given the first line while the corrected one is still coming.
+ * Null on a miss.
+ */
 export async function fetchServiceRoute(
   request: string,
   draft: boolean,
   signal: AbortSignal,
+  onFirst?: (route: ServiceRoute) => void,
 ): Promise<ServiceRoute | null> {
-  try {
-    const response = await fetch(resolveDarwinBrowserUrl('/api/darwin/service-route'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: draft ? `${request.slice(0, -1)},"draft":true}` : request,
-      signal,
-      cache: 'no-store',
-    })
-    if (!response.ok) return null
-    return readServiceRoute(await response.json())
-  } catch {
-    return null
+  const body = draft ? `${request.slice(0, -1)},"draft":true}` : request
+  for (let attempt = 0; attempt <= RETRIES; attempt++) {
+    if (signal.aborted) return null
+    let payload: unknown
+    try {
+      const response = await fetch(resolveDarwinBrowserUrl('/api/darwin/service-route'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body,
+        signal,
+        cache: 'no-store',
+      })
+      // The proxy in front of the query service gives up on a slow answer. The line is still being drawn.
+      if (response.status === 504 || response.status === 502) payload = { pending: true }
+      else if (!response.ok) return null
+      else payload = await response.json()
+    } catch {
+      return null
+    }
+    if (!(payload as { pending?: unknown } | null)?.pending) return readServiceRoute(payload)
+    const first = readServiceRoute(payload)
+    if (first?.path) onFirst?.({ ...first, complete: false })
+    await new Promise((resolve) => setTimeout(resolve, RETRY_MS))
   }
+  return null
 }
