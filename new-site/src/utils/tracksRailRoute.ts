@@ -380,6 +380,14 @@ function turnedBackAt(path: LatLngTuple[], points: LatLngTuple[]): Set<number> {
 }
 
 const RECHECKS = 3
+/** A station pin is on the platform or the concourse, this close to the line that serves it. */
+const CALL_ON_LINE_M = 80
+
+function routeMissesCall(path: LatLngTuple[], pin: LatLngTuple): boolean {
+  const drawn = path.filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
+  if (drawn.length < 2) return true
+  return !resample(drawn, 20).some((sample) => metresBetween(sample.point, pin) <= CALL_ON_LINE_M)
+}
 
 /**
  * The rail-map line, placed the way Trainlog places a journey. Each platform's
@@ -388,8 +396,12 @@ const RECHECKS = 3
  * is wrong: a platform point falls back to its station and a bare station is
  * left out, and the route is asked again. An intermediate call stays: the
  * train is booked to stop, and the reverse there is the onward working, as
- * at Leeds for Bradford, Skipton and Harrogate. The other platforms stay
- * exact, so one bad point never moves the whole line onto the station pins.
+ * at Leeds for Bradford, Skipton and Harrogate. A call with no booked
+ * platform is different: its point is a guess, and a pin on the right-hand
+ * track makes the route run to the next junction and shunt back. That call
+ * goes back to its pin, then is left out, and stays out only when the line
+ * still runs through the station. The other platforms stay exact, so one bad
+ * point never moves the whole line onto the station pins.
  */
 export async function fetchPlatformRailRoute(
   vias: RailVia[],
@@ -399,6 +411,9 @@ export async function fetchPlatformRailRoute(
   if (vias.length < 2) return null
   const loosened = new Set<number>()
   const dropped = new Set<number>()
+  /** Calls left out to see whether the line still serves them, and calls that have had that test. */
+  const onTrial = new Set<number>()
+  const tested = new Set<number>()
   const last = vias.length - 1
   const pointsNow = () => {
     const kept: { index: number; point: LatLngTuple }[] = []
@@ -421,10 +436,21 @@ export async function fetchPlatformRailRoute(
     for (const n of wrong) {
       const index = kept[n].index
       const via = vias[index]
-      // Origin and destination stay eligible: a reverse there is the route
-      // arriving from the wrong direction. An intermediate call is kept.
-      if (via.call && index !== 0 && index !== last) continue
       const onPlatform = via.lat !== via.loose.lat || via.lng !== via.loose.lng
+      // Origin and destination stay eligible: a reverse there is the route
+      // arriving from the wrong direction. An intermediate call on its booked
+      // platform is kept.
+      if (via.call && index !== 0 && index !== last) {
+        if (via.guess && !loosened.has(index)) {
+          loosened.add(index)
+          changed = true
+        } else if ((via.guess || !onPlatform) && !tested.has(index) && !dropped.has(index)) {
+          dropped.add(index)
+          onTrial.add(index)
+          changed = true
+        }
+        continue
+      }
       if (onPlatform && !loosened.has(index)) {
         loosened.add(index)
         changed = true
@@ -435,8 +461,22 @@ export async function fetchPlatformRailRoute(
     }
     if (!changed) break
     kept = pointsNow()
-    const next = await requestRailRoute(kept.map((row) => row.point), signal)
+    let next = await requestRailRoute(kept.map((row) => row.point), signal)
     if (!next) break
+    // The reverse was the booked working after all: without the call the
+    // line no longer runs through the station. Put it back.
+    const bypassed = [...onTrial].filter((index) => {
+      const pin: LatLngTuple = [vias[index].loose.lat, vias[index].loose.lng]
+      return routeMissesCall(next as LatLngTuple[], pin)
+    })
+    for (const index of onTrial) tested.add(index)
+    onTrial.clear()
+    if (bypassed.length) {
+      for (const index of bypassed) dropped.delete(index)
+      kept = pointsNow()
+      next = await requestRailRoute(kept.map((row) => row.point), signal)
+      if (!next) break
+    }
     path = next
     onProgress?.(await draw(path))
   }

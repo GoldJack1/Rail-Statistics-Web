@@ -14,6 +14,7 @@ import {
   mappedRouteWaypoints,
   pointsOnTheLeg,
   tiplocsNeedingCoordinates,
+  unbookedCallBearings,
   type RoutePlatform,
 } from '../../../utils/serviceJourneyMap'
 import { useTocOperators } from '../../../hooks/useTocOperators'
@@ -60,7 +61,7 @@ function readPlatformPlacement(value: unknown): RoutePlatform | null {
     return point ? { lat: point.lat, lng: point.lng } : null
   }
   if (!value || typeof value !== 'object') return null
-  const row = value as { lat?: unknown; lng?: unknown; ends?: unknown; bay?: unknown; stand?: unknown }
+  const row = value as { lat?: unknown; lng?: unknown; ends?: unknown; bay?: unknown; stand?: unknown; guess?: unknown }
   const lat = Number(row.lat)
   const lng = Number(row.lng)
   if (!isValidStationCoordinate(lat, lng)) return null
@@ -74,6 +75,7 @@ function readPlatformPlacement(value: unknown): RoutePlatform | null {
   if (bay) place.bay = bay
   const stand = readCoordPair(row.stand)
   if (stand) place.stand = stand
+  if (row.guess === true) place.guess = true
   return place
 }
 
@@ -204,17 +206,22 @@ export function ServiceJourneyMap({
     ),
     [service.stops, service.toc, stations, extraCoords, platformRules],
   )
+  const callBearings = useMemo(() => unbookedCallBearings(mapped), [mapped])
   const platformQuery = useMemo(
     () =>
       mapped
-        .filter((point) => point.kind !== 'junction' && (point.platform || point.kind === 'pass'))
+        .filter((point) => point.kind !== 'junction'
+          && (point.platform || point.kind === 'pass' || callBearings[String(point.index)] != null))
         .map((point) => {
           const place = `${point.lat.toFixed(5)}~${point.lng.toFixed(5)}`
           if (point.platform) return `${point.index}~${place}~${encodeURIComponent(point.platform)}`
+          // A call with no booked platform: the query service picks the left-hand road.
+          const bearing = callBearings[String(point.index)]
+          if (point.kind !== 'pass' && bearing != null) return `${point.index}~${place}~left@${bearing}`
           return `roads${point.index}~${place}~*`
         })
         .join('|'),
-    [mapped],
+    [mapped, callBearings],
   )
   const activePlatforms = useMemo(() => {
     if (platformQueryReady !== platformQuery) return NO_PLATFORMS

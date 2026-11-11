@@ -26,6 +26,7 @@ import {
   mappedRouteWaypoints,
   platformRouteWaypoints,
   railStopMarks,
+  unbookedCallBearings,
   matchStationCoord,
   pointsOnTheLeg,
   removeRouteReversals,
@@ -1032,5 +1033,55 @@ describe('serviceJourneyMap', () => {
     )
     expect(snapped.lat).toBeCloseTo(0, 5)
     expect(snapped.lng).toBeCloseTo(1, 5)
+  })
+  it('asks the query service for the left-hand road at a call with no booked platform', () => {
+    const pin = { lat: 54.3330789, lng: -1.441275691 }
+    const northbound = journeyMapStops(
+      [
+        stop('THIRSK', 'Thirsk', 'OR', { lat: 54.228474, lng: -1.373245, crs: 'THI' }),
+        stop('NLRTN', 'Northallerton', 'IP', { ...pin, crs: 'NTR' }),
+        stop('YARM', 'Yarm', 'DT', { lat: 54.49377, lng: -1.35309, crs: 'YRM' }),
+      ],
+      [],
+    )
+    const call = northbound.find((point) => point.tpl === 'NLRTN')
+    const id = String(call?.index)
+    // Only the call on the way is asked about, with its direction of travel.
+    const bearings = unbookedCallBearings(northbound)
+    expect(Object.keys(bearings)).toEqual([id])
+    expect(bearings[id] === 0 || bearings[id] >= 335 || bearings[id] <= 25).toBe(true)
+
+    const southbound = journeyMapStops(
+      [
+        stop('YARM', 'Yarm', 'OR', { lat: 54.49377, lng: -1.35309, crs: 'YRM' }),
+        stop('NLRTN', 'Northallerton', 'IP', { ...pin, crs: 'NTR' }),
+        stop('THIRSK', 'Thirsk', 'DT', { lat: 54.228474, lng: -1.373245, crs: 'THI' }),
+      ],
+      [],
+    )
+    const back = unbookedCallBearings(southbound)[String(southbound.find((point) => point.tpl === 'NLRTN')?.index)]
+    expect(back).toBeGreaterThan(150)
+    expect(back).toBeLessThan(215)
+
+    const withPlatform = journeyMapStops(
+      [
+        stop('THIRSK', 'Thirsk', 'OR', { lat: 54.228474, lng: -1.373245, crs: 'THI' }),
+        stop('NLRTN', 'Northallerton', 'IP', { ...pin, crs: 'NTR', platform: '2' }),
+        stop('YARM', 'Yarm', 'DT', { lat: 54.49377, lng: -1.35309, crs: 'YRM' }),
+      ],
+      [],
+    )
+    expect(unbookedCallBearings(withPlatform)).toEqual({})
+
+    // The road the query service answers with is routed exactly, and stays a guess.
+    const road = { lat: 54.333232, lng: -1.441844, stand: { lat: 54.333232, lng: -1.441844 }, guess: true as const }
+    expect(platformRouteWaypoints(northbound, { [id]: road })[1]).toEqual({
+      lat: 54.333232,
+      lng: -1.441844,
+      exact: true,
+      loose: pin,
+      call: true,
+      guess: true,
+    })
   })
 })

@@ -5,6 +5,7 @@
  */
 import { lookupQuaiPlatforms, parsePlatformQuery } from "./quai-platforms-core.js";
 import { applyPlatformFixes } from "./platform-rules.js";
+import { chooseLeftHandRoads, roadRequests } from "./left-hand-road.js";
 
 const QUAI_URL = String(process.env.QUAI_URL || "http://127.0.0.1:5020").replace(/\/$/, "");
 const STATION_MS = 24 * 60 * 60 * 1000;
@@ -46,10 +47,14 @@ async function stationTracks(lat, lng) {
   }
 }
 
-/** `at` as the site sends it: `id~lat~lng~platform|…`, `*` for every platform. */
+/**
+ * `at` as the site sends it: `id~lat~lng~platform|…`, `*` for every platform,
+ * `left@<bearing>` for the left-hand road of a call with no booked platform.
+ */
 export async function platformCoords(at) {
   const requests = parsePlatformQuery(at || "");
   if (requests.length === 0) return {};
-  const coords = await lookupQuaiPlatforms(requests, stationTracks);
-  return applyPlatformFixes(coords, requests);
+  const asked = roadRequests(requests);
+  const coords = applyPlatformFixes(await lookupQuaiPlatforms(asked, stationTracks), asked);
+  return chooseLeftHandRoads(coords, requests);
 }

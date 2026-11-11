@@ -174,6 +174,8 @@ export type RoutePlatform = {
   bay?: { lat: number; lng: number }
   /** Where a calling train stands, when the platform has a stopping mark. */
   stand?: { lat: number; lng: number }
+  /** No platform is booked. The query service chose the left-hand road. */
+  guess?: true
 }
 
 function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -549,6 +551,8 @@ export type RailVia = {
   loose: MapPoint
   /** The train calls here, so the route may reverse rather than pass through. */
   call: boolean
+  /** No platform is booked for this call. The road is the left-hand one, and may be wrong. */
+  guess?: true
 }
 
 type RoadsAt = Readonly<Record<string, Readonly<Record<string, RoutePlatform>>>>
@@ -559,7 +563,8 @@ type RoadsAt = Readonly<Record<string, Readonly<Record<string, RoutePlatform>>>>
  * is exact, whether the train calls or passes; the platform alone is
  * approximate. A pass with no booked platform takes the road its path or line
  * names, else the left-hand through road. A pass with no road found is left
- * out of the rail-map points.
+ * out of the rail-map points. A call with no booked platform is placed by the
+ * query service on its left-hand road, and arrives here marked as a guess.
  */
 function railStops(
   mapped: JourneyMapStop[],
@@ -580,10 +585,32 @@ function railStops(
         )
         : null)
     const call = stop.calling
-    if (place?.stand) return { stop, via: { ...place.stand, exact: true, loose: pin, call } }
-    if (place) return { stop, via: { lat: place.lat, lng: place.lng, exact: false, loose: pin, call } }
+    const guess = place?.guess ? { guess: true as const } : {}
+    if (place?.stand) return { stop, via: { ...place.stand, exact: true, loose: pin, call, ...guess } }
+    if (place) return { stop, via: { lat: place.lat, lng: place.lng, exact: false, loose: pin, call, ...guess } }
     return { stop, via: { ...pin, exact: false, loose: pin, call } }
   })
+}
+
+/**
+ * The direction of travel, in degrees from north, at each call on the way
+ * that has no booked platform. The query service turns it into the left-hand
+ * road at that station. The pin alone snaps to whichever track is nearest,
+ * and on the right-hand one the route shunts back from the next junction, as
+ * a northbound call at Northallerton did.
+ */
+export function unbookedCallBearings(mapped: JourneyMapStop[]): Record<string, number> {
+  const chosen = chosenRouteStops(mapped).filter((stop) => stop.kind !== 'junction')
+  const bearings: Record<string, number> = {}
+  chosen.forEach((stop, index) => {
+    if (!stop.calling || stop.platform || index === 0 || index === chosen.length - 1) return
+    const travel = travelAt(chosen, index)
+    const heading = travel && bearingOf(travel.from, travel.to)
+    if (heading == null) return
+    // Five degrees keeps the platform request, and its cache, steady.
+    bearings[String(stop.index)] = ((Math.round((heading * 180) / Math.PI / 5) * 5) % 360 + 360) % 360
+  })
+  return bearings
 }
 
 export function platformRouteWaypoints(

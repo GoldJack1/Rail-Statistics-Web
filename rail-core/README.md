@@ -55,6 +55,8 @@ OpenStreetMap, at `QUAI_URL` (default `http://127.0.0.1:5020`). Both query proce
 - On the VPS: `/home/darwin/quai`, Docker, API `127.0.0.1:5020`, database `127.0.0.1:5433`.
   `docker-compose.override.yml` keeps its build on cores 4-7.
 - Refresh GB from OSM: `cd /home/darwin/quai && QUAI_CORES=4 QUAI_SHARED_BUFFERS=2GB make all REGIONS=europe/great-britain`
+- A call with no booked platform asks for `id~lat~lng~left@<bearing>`, the direction of travel in degrees
+  from north. `src/left-hand-road.js` answers with the left-hand road of the through pair, marked `guess`.
 - `src/quai-platforms-core.js` is built from `new-site/src/utils/quaiPlatforms.ts` (command at its top).
 
 Manual tweaks live in `config/` and are read on each request, so editing them does not need a site deploy or a query restart:
