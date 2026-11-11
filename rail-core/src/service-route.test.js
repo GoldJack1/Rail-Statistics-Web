@@ -149,7 +149,7 @@ test("a guessed pass on another line's platform is left out, and one beside the 
     asked.push(points);
     return straight(points);
   });
-  assert.equal(asked[0].length, 2);
+  assert.ok(asked.some((points) => points.length === 2));
   assert.deepEqual(kept.map((via) => via.index), [0, 1, 3]);
   assert.deepEqual([...offLine], [2]);
 });

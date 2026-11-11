@@ -568,6 +568,11 @@ export async function passesOnTheLine(vias, route) {
   if (!vias.some(guessed)) return { vias, offLine };
   const sure = vias.filter((via) => !guessed(via));
   if (sure.length < 2) return { vias, offLine };
+  // Most services keep every guess, so the line through all of them is
+  // asked for at the same time and is ready when the check is done.
+  Promise.resolve()
+    .then(() => route(vias.map((via) => [via.lat, via.lng])))
+    .catch(() => null);
   const base = await route(sure.map((via) => [via.lat, via.lng]));
   if (!base || base.length < 2) return { vias, offLine };
   const kept = vias.filter((via) => {
@@ -575,7 +580,7 @@ export async function passesOnTheLine(vias, route) {
     offLine.add(via.index);
     return false;
   });
-  return { vias: kept, offLine };
+  return { vias: kept, offLine, base };
 }
 
 const routeCache = new Map();
@@ -936,6 +941,8 @@ function markerPoints(mapped, platformAt, marks, path) {
 // ---------------------------------------------------------- the endpoint
 
 const round6 = (value) => Math.round(value * 1e6) / 1e6;
+const answers = new Map();
+const ANSWER_CACHE_MAX = 300;
 
 /**
  * The answer for one service.
@@ -950,6 +957,12 @@ const round6 = (value) => Math.round(value * 1e6) / 1e6;
 export async function serviceRoute(body, options = {}) {
   const stops = readStops(body);
   if (!stops) return null;
+  // The same service is opened by many people and reopened often. Its answer is kept.
+  const cacheKey = options.route || options.platforms || options.rules
+    ? null
+    : JSON.stringify([RAIL_ROUTE_REV, body?.draft === true, String(body?.toc || ""), stops]);
+  const hit = cacheKey ? answers.get(cacheKey) : null;
+  if (hit && Date.now() - hit.at < ROUTE_CACHE_MS) return hit.answer;
   const lookup = options.platforms ?? platformCoordsFor;
   const route = options.route ?? requestRailRoute;
   const rules = options.rules ?? readPlatformRules()?.rules ?? [];
@@ -961,13 +974,15 @@ export async function serviceRoute(body, options = {}) {
     if (stop.platform !== stops[i].platform) booked[String(stop.index)] = stop.platform;
   });
   const { platformAt, roadsAt, wire } = await loadPlatforms(mapped, lookup);
-  const { vias, offLine } = await passesOnTheLine(platformRouteWaypoints(mapped, platformAt, roadsAt), route);
-  const drawn = await platformRailRoute(vias, route, draft);
+  const { vias, offLine, base } = await passesOnTheLine(platformRouteWaypoints(mapped, platformAt, roadsAt), route);
+  // A draft is whichever line is ready first. The line without the guessed
+  // passes has just been fetched, so it is not asked for twice.
+  const drawn = draft && base ? { path: base, complete: false } : await platformRailRoute(vias, route, draft);
   const path = drawn.path && drawn.path.length >= 2 ? filletRailRoute(drawn.path) : null;
   const stopMarks = railStopMarks(mapped, platformAt, roadsAt, offLine);
   const marks = {};
   for (const [id, at] of Object.entries(stopMarks)) marks[id] = [at.lat, at.lng];
-  return {
+  const answer = {
     path: path ? path.map(([lat, lng]) => [round6(lat), round6(lng)]) : null,
     complete: drawn.complete,
     booked,
@@ -976,4 +991,9 @@ export async function serviceRoute(body, options = {}) {
     markers: markerPoints(mapped, platformAt, stopMarks, path),
     revision: RAIL_ROUTE_REV,
   };
+  if (cacheKey && answer.path) {
+    answers.set(cacheKey, { at: Date.now(), answer });
+    if (answers.size > ANSWER_CACHE_MAX) answers.delete(answers.keys().next().value);
+  }
+  return answer;
 }
