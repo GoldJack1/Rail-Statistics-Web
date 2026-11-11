@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { densifyAlongWays, keepLeftHandTrack, railPathFromWays, routeLeavesTheRailway, routeOnRailWays, shapeLeftHandRuns, slideOntoLeftHandTrack, splitAtReversals } from './osmRailPath'
+import { densifyAlongWays, keepLeftHandTrack, railPathFromWays, roadChangesWithoutPoints, routeLeavesTheRailway, routeOnRailWays, shapeLeftHandRuns, slideOntoLeftHandTrack, splitAtReversals } from './osmRailPath'
 
 describe('osm rail path', () => {
   it('follows the railway curve instead of the chord when the router has left the corridor', () => {
@@ -115,6 +115,43 @@ describe('osm rail path', () => {
     expect(shaped[0][1]).toBeCloseTo(-2.2, 5)
     expect(shaped.some((point) => Math.abs(point[0] - 53.409) < 0.0003 && point[1] < -2.1999)).toBe(true)
     expect(shaped[shaped.length - 1][1]).toBeLessThan(-2.20004)
+  })
+
+  it('does not step across to the left-hand road at points that trail behind the train', () => {
+    // Northbound on the right-hand road. The crossover leaves the left-hand
+    // road at 53.409 and joins this one further north, so it cannot be taken
+    // without running back. Manchester Airport's platform roads are like this.
+    const right = [
+      { lat: 53.4, lng: -2.2 },
+      { lat: 53.4094, lng: -2.2 },
+      { lat: 53.42, lng: -2.2 },
+    ]
+    const left = [
+      { lat: 53.4, lng: -2.20008 },
+      { lat: 53.409, lng: -2.20008 },
+      { lat: 53.42, lng: -2.20008 },
+    ]
+    const crossover = [
+      { lat: 53.409, lng: -2.20008 },
+      { lat: 53.4094, lng: -2.2 },
+    ]
+    const path: [number, number][] = [
+      [53.402, -2.2],
+      [53.406, -2.2],
+      [53.4094, -2.2],
+      [53.416, -2.2],
+    ]
+    const ways = [right, left, crossover]
+    const shaped = shapeLeftHandRuns(path, ways, [path[0]])
+    expect(roadChangesWithoutPoints(shaped, ways)).toBe(0)
+    expect(shaped.every((point) => point[1] > -2.20004)).toBe(true)
+  })
+
+  it('counts a step between roads that do not join as a change without points', () => {
+    const right = [{ lat: 53.4, lng: -2.2 }, { lat: 53.42, lng: -2.2 }]
+    const left = [{ lat: 53.4, lng: -2.20008 }, { lat: 53.42, lng: -2.20008 }]
+    expect(roadChangesWithoutPoints([[53.402, -2.2], [53.406, -2.20008], [53.41, -2.20008]], [right, left])).toBe(1)
+    expect(roadChangesWithoutPoints([[53.402, -2.2], [53.406, -2.2], [53.41, -2.2]], [right, left])).toBe(0)
   })
 
   it('uses the left-hand road at a junction when the train is running south', () => {

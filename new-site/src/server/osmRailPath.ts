@@ -502,6 +502,8 @@ export async function osmRailPath(points: LatLngTuple[]): Promise<LatLngTuple[] 
 
 const LEFT_SHIFT_M = 2.2
 const STAY_ON_TRACK_M = 16
+/** A timing point this close to a rail is on that road. */
+const NAMED_ROAD_M = 2
 const JUNCTION_M = 80
 /** A crossover is shorter than this. It is not a running line. */
 const RUNNING_LINE_M = 40
@@ -701,11 +703,131 @@ function projectOnWay(way: Point[], here: Point, dir: { x: number; y: number } |
   return best
 }
 
+/** A point further than this from every rail is a station pin, not a place on a track. */
+const ON_RAIL_M = 5
+
+type RailGap = (from: Point, to: Point) => number | null
+
+const railGaps = new WeakMap<Point[][], RailGap>()
+
+/**
+ * Metres along the rails between two places that are each on a track. Null
+ * when either is off the rails, so there is nothing to compare. Infinity when
+ * the rails do not join them within a short walk: the two are on different
+ * roads with no points between them.
+ */
+function railGapOf(ways: Point[][]): RailGap {
+  const cached = railGaps.get(ways)
+  if (cached) return cached
+  const at = new Map<string, Point>()
+  const next = new Map<string, { id: string; metres: number }[]>()
+  const link = (from: string, to: string, metres: number) => {
+    const list = next.get(from)
+    if (list) list.push({ id: to, metres })
+    else next.set(from, [{ id: to, metres }])
+  }
+  const segments: { a: Point; b: Point; aId: string; bId: string; way: number }[] = []
+  ways.forEach((way, w) => {
+    for (let i = 1; i < way.length; i++) {
+      const a = way[i - 1]
+      const b = way[i]
+      const aId = nodeKey(a.lat, a.lng)
+      const bId = nodeKey(b.lat, b.lng)
+      at.set(aId, a)
+      at.set(bId, b)
+      if (aId === bId) continue
+      const metres = haversineM(a, b)
+      link(aId, bId, metres)
+      link(bId, aId, metres)
+      segments.push({ a, b, aId, bId, way: w })
+    }
+  })
+  const snap = (here: Point) => {
+    let best: { way: number; ends: { id: string; metres: number }[] } | null = null
+    let bestM = ON_RAIL_M
+    for (const segment of segments) {
+      const { a, b } = segment
+      if (Math.min(a.lat, b.lat) - here.lat > 0.0002 || here.lat - Math.max(a.lat, b.lat) > 0.0002) continue
+      if (Math.min(a.lng, b.lng) - here.lng > 0.0003 || here.lng - Math.max(a.lng, b.lng) > 0.0003) continue
+      const ab = localMetres(a, b)
+      const len = Math.hypot(ab.x, ab.y)
+      if (len < 0.5) continue
+      const ap = localMetres(a, here)
+      const t = Math.min(1, Math.max(0, (ap.x * ab.x + ap.y * ab.y) / (len * len)))
+      const distance = Math.hypot(ap.x - ab.x * t, ap.y - ab.y * t)
+      if (distance >= bestM) continue
+      bestM = distance
+      best = {
+        way: segment.way,
+        ends: [{ id: segment.aId, metres: len * t }, { id: segment.bId, metres: len * (1 - t) }],
+      }
+    }
+    return best
+  }
+  const gap: RailGap = (from, to) => {
+    const start = snap(from)
+    const goal = snap(to)
+    if (!start || !goal) return null
+    const straight = haversineM(from, to)
+    if (start.way === goal.way) return straight
+    const limit = straight * 2 + 200
+    const goalAt = new Map(goal.ends.map((end) => [end.id, end.metres]))
+    const cost = new Map<string, number>()
+    const queue: { id: string; cost: number }[] = []
+    for (const end of start.ends) {
+      if (end.metres < (cost.get(end.id) ?? Infinity)) {
+        cost.set(end.id, end.metres)
+        queue.push({ id: end.id, cost: end.metres })
+      }
+    }
+    let best = Infinity
+    while (queue.length) {
+      let pick = 0
+      for (let i = 1; i < queue.length; i++) if (queue[i].cost < queue[pick].cost) pick = i
+      const current = queue.splice(pick, 1)[0]
+      if (current.cost !== cost.get(current.id)) continue
+      if (current.cost >= best || current.cost > limit) break
+      const tail = goalAt.get(current.id)
+      if (tail != null) best = Math.min(best, current.cost + tail)
+      for (const edge of next.get(current.id) || []) {
+        const price = current.cost + edge.metres
+        if (price >= (cost.get(edge.id) ?? Infinity)) continue
+        cost.set(edge.id, price)
+        queue.push({ id: edge.id, cost: price })
+      }
+    }
+    return best
+  }
+  railGaps.set(ways, gap)
+  return gap
+}
+
+/** The rails between two places are much longer than the step: the line has changed road with no points. */
+function crossesWithoutPoints(gap: RailGap, from: Point, to: Point): boolean {
+  const along = gap(from, to)
+  if (along == null) return false
+  return along > haversineM(from, to) * 1.5 + 40
+}
+
+/** How many steps of a line change road where the rails do not join. */
+export function roadChangesWithoutPoints(path: LatLngTuple[], ways: Point[][]): number {
+  const gap = railGapOf(ways)
+  let count = 0
+  for (let i = 1; i < path.length; i++) {
+    const from = { lat: path[i - 1][0], lng: path[i - 1][1] }
+    const to = { lat: path[i][0], lng: path[i][1] }
+    if (!Number.isFinite(from.lat) || !Number.isFinite(to.lat)) continue
+    if (crossesWithoutPoints(gap, from, to)) count += 1
+  }
+  return count
+}
+
 /**
  * Move a running line onto the left-hand track in the direction of travel.
  * The train changes road only where the rails join, which is a set of
- * points. A parallel road that never meets this one is left alone. A timing
- * point that names its own road stays where it is.
+ * points, and only points the train can take in its direction of travel. A
+ * parallel road that never meets this one is left alone. A timing point that
+ * names its own road stays where it is.
  */
 export function keepLeftHandTrack(
   path: LatLngTuple[],
@@ -831,7 +953,18 @@ export function keepLeftHandTrack(
     }
     return best
   }
+  const railGap = railGapOf(usable)
   const held = anchors.map(([lat, lng]) => ({ lat, lng }))
+  // A timing point that sits on a rail is a platform's stopping mark. The
+  // train is on that road there, whichever side of the pair it is.
+  const onRoad = held.map((anchor) => {
+    for (const w of nearWays(anchor)) {
+      const hit = projectOnWay(usable[w], anchor, null)
+      if (hit && hit.distance <= NAMED_ROAD_M) return true
+    }
+    return false
+  })
+  const namesRoad = (here: Point) => held.some((anchor, n) => onRoad[n] && haversineM(anchor, here) <= 30)
   const out: LatLngTuple[] = []
     const emit = (point: Point, dir: { x: number; y: number } | null = null) => {
     const last = out[out.length - 1]
@@ -853,13 +986,16 @@ export function keepLeftHandTrack(
   const openingTravel = opening ? localMetres({ lat: path[0][0], lng: path[0][1] }, opening) : { x: 0, y: 0 }
   const openingSpan = Math.hypot(openingTravel.x, openingTravel.y)
   if (openingSpan >= 8) {
+    // A platform's stopping mark is on its own road. Only where roads meet
+    // at that mark is there a left-hand one to choose.
+    const reach = namesRoad({ lat: path[0][0], lng: path[0][1] }) ? NAMED_ROAD_M : 3
     const openDir = { x: openingTravel.x / openingSpan, y: openingTravel.y / openingSpan }
     const openLeft = { x: -openDir.y, y: openDir.x }
     const origin = { lat: path[0][0], lng: path[0][1] }
     let bestScore = -Infinity
     for (let w = 0; w < usable.length; w++) {
       const hit = projectOnWay(usable[w], origin, openDir)
-      if (!hit || hit.distance > 3 || hit.forward < 0.7) continue
+      if (!hit || hit.distance > reach || hit.forward < 0.7) continue
       if (!wayRunsForward(usable[w], hit.point, openDir, RUNNING_LINE_M)) continue
       const ahead = pointAheadOnWay(usable[w], origin, openDir, 30) || hit.point
       const offset = localMetres(origin, ahead)
@@ -875,7 +1011,9 @@ export function keepLeftHandTrack(
     if (held.some((anchor) => haversineM(anchor, here) <= 30)) {
       emit(here)
       const onCurrent = current == null ? null : projectOnWay(usable[current], here, null)
-      if (!onCurrent || onCurrent.distance > 8) {
+      // At a platform the line is on that platform's own road, and follows
+      // it to the points. The road at the start of a run is already chosen.
+      if (!onCurrent || onCurrent.distance > 8 || (i > 0 && namesRoad(here))) {
         const named = nearestWay(here)
         if (named != null) current = named
       }
@@ -951,6 +1089,9 @@ export function keepLeftHandTrack(
             if (!nose || !runsForward(land.way, nose, RUNNING_LINE_M, new Set())) continue
             const stayNose = pointAheadOnWay(usable[current], joint, dir, 20) || joint
             if (scoreOf(nose) - scoreOf(stayNose) < LEFT_SHIFT_M) continue
+            // Trailing points join the two roads behind the train. Taking
+            // them would mean stepping across and running back.
+            if (crossesWithoutPoints(railGap, stay.point, nose)) continue
             hopWay = land.way
             hopThrough = land.through
             hopAlong = ahead
@@ -1020,7 +1161,13 @@ export function shapeLeftHandRuns(
       piece = []
       return
     }
-    for (const run of splitAtReversals(piece)) appendRun(joined, keepLeftHandTrack(run, ways, anchors))
+    for (const run of splitAtReversals(piece)) {
+      const shaped = keepLeftHandTrack(run, ways, anchors)
+      // The router's line follows the rails. A shaped line that steps across
+      // to another road where there are no points is wrong, so it is not used.
+      const crossed = roadChangesWithoutPoints(shaped, ways) > roadChangesWithoutPoints(run, ways)
+      appendRun(joined, crossed ? run : shaped)
+    }
     piece = []
   }
   for (const point of path) {
