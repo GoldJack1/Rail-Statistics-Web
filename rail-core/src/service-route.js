@@ -621,101 +621,20 @@ async function fetchRailRoute(points, lay = true) {
   return path;
 }
 
-// ----------------------------------------------------- long routes in legs
-
-/** A route through more points than this is fetched as legs, side by side. */
-const LEG_SPLIT_OVER = 14;
-const LEG_STRIDE = 10;
-/** The two legs either side of a seam must agree on where the line runs. */
-const LEG_JOIN_M = 20;
-/** Requests to the rail router in flight at once. */
-const MAX_ROUTE_REQUESTS = 6;
-
-let routeRequestsActive = 0;
-const routeRequestWaiters = [];
-
-function withRouteSlot(job, size = 0) {
-  const queuedAt = Date.now();
-  return new Promise((resolve, reject) => {
-    const run = () => {
-      routeRequestsActive += 1;
-      const startedAt = Date.now();
-      job().then(resolve, reject).finally(() => {
-        const tookMs = Date.now() - startedAt;
-        if (tookMs > 3000 || startedAt - queuedAt > 1000) {
-          console.log(`rail route ${size}pts took ${tookMs}ms after waiting ${startedAt - queuedAt}ms for a slot`);
-        }
-        routeRequestsActive -= 1;
-        routeRequestWaiters.shift()?.();
-      });
-    };
-    if (routeRequestsActive < MAX_ROUTE_REQUESTS) run();
-    else routeRequestWaiters.push(run);
-  });
-}
-
 /**
- * A long route is one slow request, and a corrected line asks for it several
- * times. Cut at every tenth point, each leg runs a point either side of the
- * seam so the router still passes through it without turning back. The legs are
- * fetched together, kept one by one, and the next correction only asks for the
- * leg that changed. Null when the route is short enough to go in one.
+ * One rail route through every point, on the left-hand line. A miss is null.
+ * The site lays the line on the mapped rails where it leaves a station, which
+ * is a public lookup that can take seconds. A draft skips it (`lay: false`), so
+ * the first line is ready at once, and is kept apart from the laid one.
  */
-export function routeLegs(points) {
-  if (points.length <= LEG_SPLIT_OVER) return null;
-  const seams = [];
-  for (let i = LEG_STRIDE; i < points.length - 3; i += LEG_STRIDE) seams.push(i);
-  const legs = [];
-  for (let m = 0; m <= seams.length; m++) {
-    legs.push({
-      from: m === 0 ? 0 : seams[m - 1] - 1,
-      to: m === seams.length ? points.length - 1 : seams[m] + 1,
-    });
-  }
-  return { seams, legs };
-}
-
-function nearestVertex(path, point) {
-  let index = 0;
-  let best = Infinity;
-  path.forEach((vertex, i) => {
-    const away = metresBetween(vertex, point);
-    if (away < best) {
-      best = away;
-      index = i;
-    }
-  });
-  return index;
-}
-
-/**
- * The legs as one line, each cut at the vertex nearest its seam point. Null
- * when two legs do not meet there, so the whole route is asked for instead.
- */
-export function stitchLegs(paths, points, seams) {
-  const cuts = seams.map((seam, m) => {
-    const out = nearestVertex(paths[m], points[seam]);
-    const back = nearestVertex(paths[m + 1], points[seam]);
-    return metresBetween(paths[m][out], paths[m + 1][back]) <= LEG_JOIN_M ? { out, back } : null;
-  });
-  if (cuts.some((cut) => !cut)) return null;
-  const joined = [];
-  for (let m = 0; m < paths.length; m++) {
-    const start = m === 0 ? 0 : cuts[m - 1].back + 1;
-    const end = m === seams.length ? paths[m].length - 1 : cuts[m].out;
-    if (end < start - 1) return null;
-    for (let i = start; i <= end; i++) joined.push(paths[m][i]);
-  }
-  return joined.length >= 2 ? joined : null;
-}
-
-function keptRoute(points, load, tag = "") {
-  const key = routeKey(points) + tag;
+export async function requestRailRoute(points, { lay = true } = {}) {
+  if (points.length < 2) return null;
+  const key = routeKey(points) + (lay ? "" : "|plain");
   const hit = routeCache.get(key);
-  if (hit && Date.now() - hit.at < ROUTE_CACHE_MS) return Promise.resolve(hit.path);
+  if (hit && Date.now() - hit.at < ROUTE_CACHE_MS) return hit.path;
   const running = routeInFlight.get(key);
   if (running) return running;
-  const request = load()
+  const request = fetchRailRoute(points, lay)
     .then((path) => {
       if (path) {
         routeCache.set(key, { at: Date.now(), path });
@@ -730,37 +649,6 @@ function keptRoute(points, load, tag = "") {
     .finally(() => routeInFlight.delete(key));
   routeInFlight.set(key, request);
   return request;
-}
-
-/** One rail route through every point, on the left-hand line. A miss is null. */
-export async function requestRailRoute(points) {
-  if (points.length < 2) return null;
-  return keptRoute(points, async () => {
-    const plan = routeLegs(points);
-    if (plan) {
-      // Only the first leg leaves the station, so only it is laid on the mapped rails.
-      const paths = await Promise.all(
-        plan.legs.map(({ from, to }, m) => {
-          const leg = points.slice(from, to + 1);
-          const lay = m === 0;
-          return keptRoute(leg, () => withRouteSlot(() => fetchRailRoute(leg, lay), leg.length), lay ? "" : "|plain");
-        }),
-      );
-      // A leg that turns back on itself is asked for again with the lookup that corrects it.
-      await Promise.all(
-        paths.map(async (path, m) => {
-          if (m === 0 || !path) return;
-          const { from, to } = plan.legs[m];
-          const leg = points.slice(from, to + 1);
-          if (turnedBackAt(path, leg).length === 0) return;
-          paths[m] = await keptRoute(leg, () => withRouteSlot(() => fetchRailRoute(leg, true), leg.length));
-        }),
-      );
-      const joined = paths.every(Boolean) ? stitchLegs(paths, points, plan.seams) : null;
-      if (joined) return joined;
-    }
-    return withRouteSlot(() => fetchRailRoute(points), points.length);
-  });
 }
 
 function bearing(a, b) {
@@ -880,7 +768,7 @@ function routeMissesCall(path, pin) {
  * to its pin, then is left out, and stays out only when the line still runs
  * through the station. `draft` stops at the first answer.
  */
-export async function platformRailRoute(vias, route, draft = false) {
+export async function platformRailRoute(vias, route, draft = false, finish = null) {
   if (vias.length < 2) return { path: null, complete: true };
   const loosened = new Set();
   const dropped = new Set();
@@ -897,6 +785,7 @@ export async function platformRailRoute(vias, route, draft = false) {
   };
   let kept = pointsNow();
   let path = await route(kept.map((row) => row.point));
+  let pathPoints = kept.map((row) => row.point);
   if (draft && path) return { path, complete: false };
   for (let round = 0; path && round < RECHECKS; round++) {
     const wrong = turnedBackAt(path, kept.map((row) => row.point));
@@ -942,8 +831,14 @@ export async function platformRailRoute(vias, route, draft = false) {
       if (!next) break;
     }
     path = next;
+    pathPoints = kept.map((row) => row.point);
   }
-  if (path) return { path, complete: true };
+  if (path) {
+    // The checks above use the quick line. The one that is drawn is laid on
+    // the mapped rails, once, through the points that were settled on.
+    const laid = finish ? await finish(pathPoints) : null;
+    return { path: laid && laid.length >= 2 ? laid : path, complete: true };
+  }
   const loose = await route(vias.map((via) => [via.loose.lat, via.loose.lng]));
   return { path: loose, complete: true };
 }
@@ -1116,7 +1011,7 @@ async function drawService(body, stops, options, cacheKey) {
   const lookup = options.platforms ?? platformCoordsFor;
   const startedAt = Date.now();
   const calls = [];
-  const rawRoute = options.route ?? requestRailRoute;
+  const rawRoute = options.route ?? ((points) => requestRailRoute(points, { lay: false }));
   // Each route request is timed, so a slow service shows where its time went.
   const route = async (points) => {
     const at = Date.now();
@@ -1137,7 +1032,8 @@ async function drawService(body, stops, options, cacheKey) {
   const { vias, offLine, base } = await passesOnTheLine(platformRouteWaypoints(mapped, platformAt, roadsAt), route);
   // A draft is whichever line is ready first. The line without the guessed
   // passes has just been fetched, so it is not asked for twice.
-  const drawn = draft && base ? { path: base, complete: false } : await platformRailRoute(vias, route, draft);
+  const finish = draft || options.route ? null : (points) => requestRailRoute(points, { lay: true });
+  const drawn = draft && base ? { path: base, complete: false } : await platformRailRoute(vias, route, draft, finish);
   const path = drawn.path && drawn.path.length >= 2 ? filletRailRoute(drawn.path) : null;
   const stopMarks = railStopMarks(mapped, platformAt, roadsAt, offLine);
   const marks = {};

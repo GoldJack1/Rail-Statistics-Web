@@ -15,7 +15,7 @@ const routeCache = new Map<string, { at: number; coordinates: LatLngTuple[]; ttl
 const ROUTE_CACHE_MS = 30 * 60 * 1000
 /** The mapped-rails lookup is a public server. A line it did not answer for in time is kept briefly, so the next ask is quick. */
 const UNLAID_CACHE_MS = 3 * 60 * 1000
-const LAY_WITHIN_MS = 4500
+const LAY_WITHIN_MS = 2500
 
 function routeCacheKey(points: LatLngTuple[], strict: boolean, lay: boolean): string {
   return `geom24|${strict ? 'left|' : ''}${lay ? '' : 'nolay|'}${points.map(([lat, lng]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|')}`

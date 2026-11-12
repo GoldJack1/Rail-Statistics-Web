@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyPlatformRules, passesOnTheLine, platformRailRoute, readStops, routeLegs, serviceRoute, stitchLegs, unbookedCallBearings } from "./service-route.js";
+import { applyPlatformRules, passesOnTheLine, platformRailRoute, readStops, serviceRoute, unbookedCallBearings } from "./service-route.js";
 
 const stop = (index, lat, lng, more = {}) => ({
   index, lat, lng, tpl: `T${index}`, crs: null, calling: true, kind: "stop", cancelled: false, platform: null, path: null, line: null, ...more,
@@ -163,36 +163,26 @@ test("a service with no guessed pass is not routed twice", async () => {
   assert.equal(calls.length, 0);
 });
 
-// ------------------------------------------------------- long routes in legs
 
-const line = (from, to, steps) =>
-  Array.from({ length: steps + 1 }, (_, i) => [from + ((to - from) * i) / steps, 0.0001 * i]);
-
-test("a short route is not cut into legs", () => {
-  assert.equal(routeLegs(line(51, 52, 13)), null);
-});
-
-test("legs overlap by a point either side of each seam and cover every point", () => {
-  const { seams, legs } = routeLegs(line(51, 52, 29));
-  assert.deepEqual(seams, [10, 20]);
-  assert.deepEqual(legs, [{ from: 0, to: 11 }, { from: 9, to: 21 }, { from: 19, to: 29 }]);
-});
-
-test("the last leg is never a stub", () => {
-  const { legs } = routeLegs(line(51, 52, 20));
-  assert.ok(legs.every(({ from, to }) => to - from >= 3));
-});
-
-test("legs are stitched at the vertex nearest each seam", () => {
-  const road = line(51, 52, 60);
-  const points = [road[0], road[10], road[20], road[30], road[40], road[50], road[60]];
-  const paths = [road.slice(0, 31), road.slice(10, 51), road.slice(30, 61)];
-  assert.deepEqual(stitchLegs(paths, points, [2, 4]), road);
-});
-
-test("legs that do not meet at their seam are not stitched", () => {
-  const points = [[51, 0], [51.1, 0], [51.2, 0], [51.3, 0]];
-  const a = [[51, 0], [51.1, 0], [51.2, 0]];
-  const b = [[51.1, 0.01], [51.2, 0.01], [51.3, 0]];
-  assert.equal(stitchLegs([a, b], points, [2]), null);
+test("the checks use the quick line and only the final line is laid", async () => {
+  const via = (lat, lng, more = {}) => ({ lat, lng, loose: { lat, lng }, call: false, guess: false, ...more });
+  const vias = [via(54, -1), via(54.1, -1), via(54.2, -1)];
+  const quick = [];
+  const laid = [];
+  const result = await platformRailRoute(
+    vias,
+    async (points) => {
+      quick.push(points.length);
+      return points;
+    },
+    false,
+    async (points) => {
+      laid.push(points.length);
+      return [...points, [54.3, -1]];
+    },
+  );
+  assert.equal(laid.length, 1);
+  assert.equal(quick.length, 1);
+  assert.equal(result.path.length, 4);
+  assert.equal(result.complete, true);
 });
