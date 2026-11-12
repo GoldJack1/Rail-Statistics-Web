@@ -134,7 +134,8 @@ function stopCollection(
           type: 'Feature' as const,
           properties: {
             kind: stop.kind,
-            label: onPlatform && stop.platform ? `${stop.name} · Platform ${stop.platform}` : stop.name,
+            // The booked platform is named even where its position is not mapped, as the calling pattern does.
+            label: stop.platform ? `${stop.name} · Platform ${stop.platform}` : stop.name,
           },
           geometry: { type: 'Point' as const, coordinates: [at.lng, at.lat] },
         }
