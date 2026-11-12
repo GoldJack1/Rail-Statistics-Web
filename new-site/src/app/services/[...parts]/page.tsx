@@ -25,6 +25,7 @@ import SidebarDropdownSection from '@/components/misc/SidebarDropdownSection/Sid
 import type { ServiceDetail } from '@/types/darwin'
 import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
 import { formatLmTocName } from '@/utils/formatLmTocName'
+import { prefetchServiceRoute } from '@/utils/serviceRoutePrefetch'
 import { coachCountFromConsist, coachCountFromUnitIds, stopHasPublishedLoading, unitIdsFromConsist } from '@/utils/darwinCoachLoading'
 import {
   consumeLegacyFromParam,
@@ -316,6 +317,16 @@ const ServiceDetailPage: React.FC = () => {
     pollMs: historicalMode || futureTimetableMode ? 0 : 3_000,
   })
   const { stations } = useStations()
+  // Start drawing the map line while the calling pattern is on screen, so the
+  // map opens with the line already on its way.
+  useEffect(() => {
+    if (!data || stations.length === 0) return
+    const controller = new AbortController()
+    void prefetchServiceRoute(data, stations, controller.signal)
+    return () => controller.abort()
+    // `data` is replaced on every live poll. Its stops and operator are what the line depends on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.stops, data?.toc, stations])
   const pageSection: ServiceSection = HIDDEN_SERVICE_SECTIONS.has(section) ? 'calling' : section
 
   useEffect(() => {

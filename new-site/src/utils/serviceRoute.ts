@@ -83,13 +83,32 @@ export function readServiceRoute(payload: unknown): ServiceRoute | null {
   return { path, complete: doc.complete !== false, booked, platforms, marks }
 }
 
-const RETRY_MS = 2000
-const RETRIES = 20
+/** The query service holds an unfinished request for about six seconds, so a retry only re-joins the same job. */
+const RETRY_MS = 250
+/** A line that is still not drawn after this long is given up on. */
+const GIVE_UP_MS = 90_000
+/** Network errors and server errors are tried again this many times before a miss. */
+const MAX_FAILURES = 3
+const CLIENT_CACHE_MS = 10 * 60 * 1000
+const CLIENT_CACHE_MAX = 40
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    const timer = setTimeout(resolve, ms)
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer)
+      resolve()
+    }, { once: true })
+  })
+}
 
 /**
  * `request` is the JSON body: the service's operator and its placed timing
  * points. A long line takes the query service a while the first time, and it
  * answers `pending` until the line is ready, so the request is sent again.
+ * A dropped connection or a server error is tried again a few times, so one
+ * bad reply does not leave the map without a line.
  * `onFirst` is given the first line while the corrected one is still coming.
  * Null on a miss.
  */
@@ -100,9 +119,12 @@ export async function fetchServiceRoute(
   onFirst?: (route: ServiceRoute) => void,
 ): Promise<ServiceRoute | null> {
   const body = draft ? `${request.slice(0, -1)},"draft":true}` : request
-  for (let attempt = 0; attempt <= RETRIES; attempt++) {
+  const deadline = Date.now() + GIVE_UP_MS
+  let failures = 0
+  while (Date.now() < deadline) {
     if (signal.aborted) return null
-    let payload: unknown
+    let payload: unknown = null
+    let failed = false
     try {
       const response = await fetch(resolveDarwinBrowserUrl('/api/darwin/service-route'), {
         method: 'POST',
@@ -113,15 +135,88 @@ export async function fetchServiceRoute(
       })
       // The proxy in front of the query service gives up on a slow answer. The line is still being drawn.
       if (response.status === 504 || response.status === 502) payload = { pending: true }
+      else if (response.status === 429 || response.status === 503 || response.status >= 500) failed = true
       else if (!response.ok) return null
       else payload = await response.json()
     } catch {
-      return null
+      if (signal.aborted) return null
+      failed = true
+    }
+    if (failed) {
+      failures += 1
+      if (failures >= MAX_FAILURES) return null
+      await pause(500 * 2 ** (failures - 1), signal)
+      continue
     }
     if (!(payload as { pending?: unknown } | null)?.pending) return readServiceRoute(payload)
     const first = readServiceRoute(payload)
     if (first?.path) onFirst?.({ ...first, complete: false })
-    await new Promise((resolve) => setTimeout(resolve, RETRY_MS))
+    await pause(RETRY_MS, signal)
   }
   return null
+}
+
+type RouteListener = (route: ServiceRoute | null, final: boolean) => void
+
+type RouteJob = {
+  at: number
+  first: ServiceRoute | null
+  /** undefined while the corrected line is still coming; null on a miss. */
+  full: ServiceRoute | null | undefined
+  listeners: Set<RouteListener>
+}
+
+const jobs = new Map<string, RouteJob>()
+
+function startJob(request: string): RouteJob {
+  const job: RouteJob = { at: Date.now(), first: null, full: undefined, listeners: new Set() }
+  const controller = new AbortController()
+  const emit = (route: ServiceRoute | null, final: boolean) => {
+    for (const listener of [...job.listeners]) listener(route, final)
+  }
+  const early = (route: ServiceRoute) => {
+    if (job.full !== undefined || !route.path) return
+    job.first = route
+    emit(route, false)
+  }
+  // The job belongs to the request, not to the page that asked first, so a line
+  // started while the calling pattern is open is ready when the map is.
+  void fetchServiceRoute(request, true, controller.signal).then((first) => {
+    if (first) early(first)
+  })
+  void fetchServiceRoute(request, false, controller.signal, early).then((full) => {
+    job.full = full ?? null
+    // A miss is not kept, so the next visit asks again. The first line stays on screen.
+    if (!full?.path) jobs.delete(request)
+    emit(job.full, true)
+  })
+  jobs.set(request, job)
+  if (jobs.size > CLIENT_CACHE_MAX) jobs.delete(jobs.keys().next().value as string)
+  return job
+}
+
+function jobFor(request: string): RouteJob {
+  const kept = jobs.get(request)
+  if (kept && Date.now() - kept.at < CLIENT_CACHE_MS) return kept
+  return startJob(request)
+}
+
+/** Starts drawing a line now, with nobody waiting for it yet. */
+export function warmServiceRoute(request: string): void {
+  jobFor(request)
+}
+
+/**
+ * Follows the line for one request. The current state is given at once, then
+ * each update. `final` is the corrected line, or null on a miss.
+ * Returns the function that stops listening.
+ */
+export function watchServiceRoute(request: string, listener: RouteListener): () => void {
+  const job = jobFor(request)
+  job.listeners.add(listener)
+  if (job.full !== undefined) listener(job.full, true)
+  else if (job.first) listener(job.first, false)
+  return () => {
+    job.listeners.delete(listener)
+  }
 }

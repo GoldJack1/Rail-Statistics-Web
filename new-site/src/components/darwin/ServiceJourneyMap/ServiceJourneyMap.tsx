@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { railwayDaySecondsFromClock } from '../../../utils/railwayOperatingDayUk'
-import { isValidStationCoordinate } from '../../../utils/stationCoordinates'
 import {
   journeyMapStops,
   liveJourneyPosition,
@@ -11,7 +10,8 @@ import {
   tiplocsNeedingCoordinates,
   type RoutePlatform,
 } from '../../../utils/serviceJourneyMap'
-import { fetchServiceRoute, NO_SERVICE_ROUTE, type ServiceRoute } from '../../../utils/serviceRoute'
+import { NO_SERVICE_ROUTE, watchServiceRoute, type ServiceRoute } from '../../../utils/serviceRoute'
+import { fetchTiplocCoords, placedRouteStops, routeRequestBody } from '../../../utils/serviceRoutePrefetch'
 import { useTocOperators } from '../../../hooks/useTocOperators'
 import { resolveTocRouteColor } from '../../../utils/tocOperatorMap'
 import type { ServiceDetail, ServiceStop } from '../../../types/darwin'
@@ -24,34 +24,6 @@ import '@/components/darwin/callingPatternTones.css'
 import './ServiceJourneyMap.css'
 
 if (typeof window !== 'undefined') void loadGbRailGraph()
-
-const tiplocCoordCache = new Map<string, { lat: number; lng: number } | null>()
-
-async function fetchTiplocCoords(
-  tpls: string[],
-  signal: AbortSignal,
-): Promise<Record<string, { lat: number; lng: number }>> {
-  const missing = tpls.filter((tpl) => !tiplocCoordCache.has(tpl))
-  if (missing.length > 0) {
-    const params = new URLSearchParams({ tpl: missing.join('|') })
-    const response = await fetch(`/api/tiploc-coords?${params.toString()}`, { signal })
-    if (!response.ok) throw new Error('tiploc coords')
-    const payload = (await response.json()) as { coords?: Record<string, [number, number]> }
-    for (const tpl of missing) {
-      const hit = payload.coords?.[tpl]
-      tiplocCoordCache.set(
-        tpl,
-        hit && isValidStationCoordinate(hit[0], hit[1]) ? { lat: hit[0], lng: hit[1] } : null,
-      )
-    }
-  }
-  const out: Record<string, { lat: number; lng: number }> = {}
-  for (const tpl of tpls) {
-    const hit = tiplocCoordCache.get(tpl)
-    if (hit) out[tpl] = hit
-  }
-  return out
-}
 
 function londonNowRailwaySeconds(): number | null {
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -124,34 +96,13 @@ export function ServiceJourneyMap({
   )
 
   const placed = useMemo(
-    () => pointsOnTheLeg(
-      journeyMapStops(service.stops || [], stations, extraCoords),
-      (point) => !point.calling && !String(point.crs || '').trim(),
-    ),
+    () => placedRouteStops(service.stops, stations, extraCoords),
     [service.stops, stations, extraCoords],
   )
   // The query service decides the route: platform rules, the road through each
   // station and the line itself. This is the request, and changes only when
   // a timing point moves or its booking does.
-  const routeRequest = useMemo(
-    () => JSON.stringify({
-      toc: service.toc || null,
-      stops: placed.map((point) => ({
-        index: point.index,
-        lat: Number(point.lat.toFixed(6)),
-        lng: Number(point.lng.toFixed(6)),
-        crs: point.crs,
-        tpl: point.tpl,
-        calling: point.calling,
-        kind: point.kind,
-        cancelled: point.cancelled,
-        platform: point.platform,
-        path: point.path,
-        line: point.line,
-      })),
-    }),
-    [placed, service.toc],
-  )
+  const routeRequest = useMemo(() => routeRequestBody(placed, service.toc), [placed, service.toc])
   const route = drawn?.key === routeRequest ? drawn.route : NO_SERVICE_ROUTE
   const mapped = useMemo(
     () => placed.map((point) => {
@@ -253,25 +204,20 @@ export function ServiceJourneyMap({
 
   useEffect(() => {
     if (routeMode !== 'rail' || placed.length < 2) return
-    const controller = new AbortController()
-    let finished = false
     let shown = false
-    const show = (first: ServiceRoute) => {
-      if (finished || controller.signal.aborted) return
-      shown = true
-      setDrawn({ key: routeRequest, route: first })
-    }
-    // The first line arrives quickly. The second has any point on the wrong track corrected.
-    void fetchServiceRoute(routeRequest, true, controller.signal).then((first) => {
-      if (first) show(first)
-    })
-    void fetchServiceRoute(routeRequest, false, controller.signal, show).then((full) => {
-      if (controller.signal.aborted) return
-      finished = true
+    // The line may already be drawn: the calling pattern starts it. The first
+    // line arrives quickly. The second has any point on the wrong track corrected.
+    return watchServiceRoute(routeRequest, (line, final) => {
+      if (!final) {
+        if (line?.path) {
+          shown = true
+          setDrawn({ key: routeRequest, route: line })
+        }
+        return
+      }
       // A corrected line that never arrives leaves the first line on the map.
-      if (full?.path || !shown) setDrawn({ key: routeRequest, route: full ?? { ...NO_SERVICE_ROUTE, complete: true } })
+      if (line?.path || !shown) setDrawn({ key: routeRequest, route: line ?? { ...NO_SERVICE_ROUTE, complete: true } })
     })
-    return () => controller.abort()
     // routeRequest is the content of placed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeRequest, routeMode])
