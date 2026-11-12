@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly derived platforms
+
+[Timer]
+OnCalendar=Sun *-*-* 05:15:00 Europe/London
+Persistent=true
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target

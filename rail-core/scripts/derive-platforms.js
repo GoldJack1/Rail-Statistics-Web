@@ -12,7 +12,7 @@
  * have platforms for and reports how often the two agree, writing nothing.
  * `--days` is how many days of calls to read (14).
  */
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,8 +21,10 @@ import { derivePlatforms, localFrame } from "../src/derive-platforms.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || join(HERE, "../data");
 const QUAI_URL = String(process.env.QUAI_URL || "http://127.0.0.1:5020").replace(/\/$/, "");
-const OUT = join(HERE, "../config/platform-derived.json");
+const OUT = process.env.PLATFORM_DERIVED_PATH || join(HERE, "../config/platform-derived.json");
 /** A neighbour this far off gives the direction of travel. */
+/** Fewer stations than this is a failed run. */
+const MIN_STATIONS = 100;
 const FAR_M = Number(process.env.FAR_M || 600);
 
 const args = process.argv.slice(2);
@@ -237,7 +239,10 @@ async function main() {
     console.log("some wrong:", wrongList.slice(0, 12).join(","));
     return;
   }
-  writeFileSync(OUT, JSON.stringify({ generatedAt: new Date().toISOString(), days: days.length, stations: derived }, null, 1));
+  // A run that found next to nothing (quai down, no history) must not wipe a good file.
+  if (derived.length < MIN_STATIONS) throw new Error(`only ${derived.length} stations derived, keeping the existing file`);
+  writeFileSync(`${OUT}.tmp`, JSON.stringify({ generatedAt: new Date().toISOString(), days: days.length, stations: derived }, null, 1));
+  renameSync(`${OUT}.tmp`, OUT);
   console.log(`${derived.length} stations, ${derived.reduce((n, s) => n + s.tracks.length, 0)} platforms -> ${OUT}`);
 }
 

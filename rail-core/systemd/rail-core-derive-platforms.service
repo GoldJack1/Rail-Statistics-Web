@@ -1,0 +1,13 @@
+[Unit]
+Description=rail-core derive platforms for stations quai has none for
+After=network.target docker.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=30min
+WorkingDirectory=/home/darwin/rail-core
+EnvironmentFile=/home/darwin/rail-core/.env
+Environment=TZ=Europe/London
+Environment=ALSO_WRITE_TO=/home/darwin/rail-core-dev/config/platform-derived.json
+ExecStart=/home/darwin/rail-core/scripts/derive-platforms.sh
+User=darwin
