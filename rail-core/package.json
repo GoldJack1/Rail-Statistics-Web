@@ -20,6 +20,7 @@
     "import-corpus": "node src/import-corpus.js",
     "import-smart": "node src/import-smart.js",
     "import-tiploc-geo": "node src/import-tiploc-geo.js",
+    "derive-platforms": "node scripts/derive-platforms.js",
     "fetch-corpus": "node src/fetch-corpus.js",
     "fetch-smart": "node src/fetch-smart.js",
     "fetch-schedule": "node src/fetch-schedule.js",

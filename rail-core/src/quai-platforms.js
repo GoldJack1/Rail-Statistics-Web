@@ -6,6 +6,7 @@
 import { lookupQuaiPlatforms, parsePlatformQuery } from "./quai-platforms-core.js";
 import { applyPlatformFixes } from "./platform-rules.js";
 import { chooseLeftHandRoads, roadRequests } from "./left-hand-road.js";
+import { derivedTracksAt } from "./platform-derived.js";
 
 const QUAI_URL = String(process.env.QUAI_URL || "http://127.0.0.1:5020").replace(/\/$/, "");
 const STATION_MS = 24 * 60 * 60 * 1000;
@@ -31,19 +32,26 @@ async function fetchStationTracks(lat, lng) {
   return Array.isArray(station?.tracks) ? station.tracks : [];
 }
 
-/** The tracks of the station at a point. Null when quai cannot be reached. */
+/** Quai's tracks have platform numbers, or the station has none and its derived ones stand in. */
+function withDerived(lat, lng, tracks) {
+  if (Array.isArray(tracks) && tracks.some((track) => String(track?.ref ?? "").trim())) return tracks;
+  return derivedTracksAt(lat, lng) ?? tracks;
+}
+
+/** The tracks of the station at a point. Null when quai cannot be reached and none are derived. */
 async function stationTracks(lat, lng) {
   const key = stationKey(lat, lng);
   const hit = stations.get(key);
   if (hit && Date.now() < hit.until) return hit.tracks;
   try {
-    const tracks = await fetchStationTracks(lat, lng);
+    const tracks = withDerived(lat, lng, await fetchStationTracks(lat, lng));
     stations.set(key, { tracks, until: Date.now() + STATION_MS });
     return tracks;
   } catch (error) {
     console.warn("quai platforms", error instanceof Error ? error.message : error);
-    stations.set(key, { tracks: null, until: Date.now() + MISS_MS });
-    return null;
+    const tracks = derivedTracksAt(lat, lng);
+    stations.set(key, { tracks, until: Date.now() + MISS_MS });
+    return tracks;
   }
 }
 
