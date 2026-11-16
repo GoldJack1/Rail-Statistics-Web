@@ -6,6 +6,7 @@ import { addCalendarDays, locationBoardDays, londonCalendarYmd, londonInstant, s
 import { longRangeAheadDays } from "./cif-schedule.js";
 import { stationCrsGroup, tiplocsForStation } from "./station-groups.js";
 import { tocDisplayName } from "./toc-names.js";
+import { serveDrawing } from "./drawings-route.js";
 import { formatTiplocName, tidyStationName } from "./tiploc-names.js";
 import { collapseCallsByTiploc, collapseRevisits, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, publicCallTime, publicJourneyEnds, recoverBookedPublic, sortCallsByJourneyTime, sortCallsByWttTime } from "./journey-order.js";
 import { isPassengerHeadcode, trainClassDigit } from "./headcode.js";
@@ -1340,6 +1341,8 @@ const server = createServer(async (req, res) => {
     return;
   }
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+  // Train drawings are public static art (CC BY 4.0): no key, cached hard, served from DRAWINGS_DIR.
+  if (serveDrawing(req, res, url.pathname)) return;
   const key =
     url.searchParams.get("key") ??
     req.headers["x-internal-key"] ??

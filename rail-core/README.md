@@ -40,6 +40,8 @@ One ingest and one `DATA_DIR`. Staging is a second query process only:
 - `QUERY_READ_ONLY=1` on staging (no `ensureDayImported` / `persistInferred` / HSP fill writes)
 - systemd `EnvironmentFile=/home/darwin/rail-core-dev/.env` (prod secrets plus `QUERY_PORT=4002`; do not point the staging unit at prod `.env` or it stays on `:4001`)
 
+Train drawings (side-on car SVGs for boards, service and unit pages, and the apps) are static files the query server serves at `/api/drawings/index.json` and `/api/drawings/<group>/<class>/<operator>/<CODE>.svg`. They live in `assets/train-svgs/` inside each install (`DRAWINGS_DIR` overrides it), are public and read per request, so uploading new files needs no restart: build them in `new-site` (`scripts/formation-images/build_drawings.py`) and run `scripts/deploy-drawings.sh dev|prod` from the Mac. Contract and update steps: `new-site/docs/FORMATION_DIAGRAMS.md`. Promote does not copy `assets/`; deploy them with that script.
+
 Promote query code (does **not** restart ingest/kafka/stomp/tt):
 
 ```bash

@@ -1,11 +1,14 @@
 'use client'
 
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { resolveDarwinBrowserUrl } from '@/utils/darwinReadyFetch'
+import { drawingUrl } from '@/utils/trainDrawings'
 import './UnitDiagram.css'
 
 /**
- * Side-on drawings of trains, built from per-car SVGs in /public/train-svgs
- * (cut from GB Trains drawings, CC BY 4.0 — see docs/FORMATION_DIAGRAMS.md).
+ * Side-on drawings of trains, built from per-car SVGs served by the Darwin API at
+ * /api/darwin/drawings/... (cut from GB Trains drawings, CC BY 4.0 — see docs/FORMATION_DIAGRAMS.md).
+ * The art lives on the VPS, not in this repo, so it can be updated for every client at once.
  *
  * - `TrainDiagram`: one or more units in a row, optional per-car loading bars,
  *   `fallback` shown when we have no art (so callers keep their placeholder).
@@ -22,6 +25,8 @@ interface OperatorArt {
 }
 interface DiagramIndex {
   credit: string
+  /** Hash of the whole set; added to car URLs so an update bypasses cached cars. */
+  version?: string
   classes: Record<string, { group: string; operators: Record<string, OperatorArt> }>
 }
 
@@ -70,9 +75,15 @@ export function defaultDiagramUnitsForToc(toc: string | null | undefined): Diagr
 let indexPromise: Promise<DiagramIndex | null> | null = null
 function loadIndex(): Promise<DiagramIndex | null> {
   if (!indexPromise) {
-    indexPromise = fetch('/train-svgs/index.json')
+    // No `cache: 'no-store'` here: the API sends a short cache header, so repeat page loads are free.
+    indexPromise = fetch(drawingUrl('index.json', undefined, resolveDarwinBrowserUrl))
       .then((r) => (r.ok ? (r.json() as Promise<DiagramIndex>) : null))
       .catch(() => null)
+      .then((index) => {
+        // If the API was unreachable, try again later instead of caching the failure for the session.
+        if (!index) setTimeout(() => { indexPromise = null }, 30_000)
+        return index
+      })
   }
   return indexPromise
 }
@@ -134,7 +145,9 @@ function pickFormation(art: OperatorArt, n: number): CarRef[] | null {
 
 interface UnitView {
   slug: string
-  base: string
+  /** <group>/<class>/<operator> under /api/drawings */
+  path: string
+  version?: string
   art: OperatorArt
   cars: CarRef[]
   total: number
@@ -162,7 +175,7 @@ function buildView(
   if (reversed) cars = [...cars].reverse().map((c) => ({ ...c, flip: !c.flip }))
   const total = cars.reduce((s, c) => s + (art.sizes[c.car] || 0), 0)
   if (!total) return null
-  return { slug, base: `/train-svgs/${cls.group}/${slug}/${opKey}`, art, cars, total }
+  return { slug, path: `${cls.group}/${slug}/${opKey}`, version: index.version, art, cars, total }
 }
 
 /** Footer label for a drawing slug. */
@@ -361,7 +374,7 @@ export const TrainDiagram: React.FC<{
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     className={c.flip ? 'cmap-diagram-car cmap-diagram-car--flip' : 'cmap-diagram-car'}
-                    src={`${v.base}/${c.car}.svg`}
+                    src={drawingUrl(`${v.path}/${c.car}.svg`, v.version, resolveDarwinBrowserUrl)}
                     alt=""
                     draggable={false}
                   />

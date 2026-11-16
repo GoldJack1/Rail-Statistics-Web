@@ -8,7 +8,7 @@ Goal: a side-on train formation diagram per service (like Realtime Trains shows)
 
 ## PRIMARY SOURCE (decided 2026-11-16): GB Trains, https://gbtrains.uk/stock/classes/
 Vector SVG schematic side elevations per class (+ operator livery drawings where drawn), **CC BY 4.0** (attribution only, no share-alike). Credit: "Drawing: GB Trains, gbtrains.uk, CC BY 4.0", linked to the class page; keep the credit embedded in each SVG. Author per site footer: Kyle Barnard.
-- Downloaded by `scripts/formation-images/download_gbtrains.py` into `data/formation-images/gbtrains/<class>/`, with `manifest.json`. Class pages: `https://gbtrains.uk/stock/<class>/` (e.g. 150, 800; hauled sets: `ic125`, `ic225`, `68`, `67`).
+- Downloaded by `scripts/formation-images/download_gbtrains_all.py` (skips folders already present) into `data/formation-images/gbtrains/<class>/`, with `manifest.json`. Class pages: `https://gbtrains.uk/stock/<class>/` (e.g. 150, 800; hauled sets: `ic125`, `ic225`, `68`, `67`).
 - Not on GB Trains: classes 4, 5, 57 (check what 4/5 are). 155 is listed.
 - Gaps inside classes: only some operator liveries drawn; many drawings are 2-car — join cars for longer sets.
 - Realtime Trains images are NOT usable: their terms (cl. 6.1, 6.4, 8.1, 10.1) forbid copying graphics and scraping.
@@ -20,6 +20,28 @@ Vector SVG schematic side elevations per class (+ operator livery drawings where
 - Car codes are neutral: `END` (end vehicle), `MID`, `SINGLE`, numbered when art differs (`END2`, `MID3`), `-raised` suffix for pantograph-up art. RTT-style DMF/DMS/T/M codes need a per-class role map still (not machine-readable on GB Trains pages).
 - `train-svgs/index.json` lists classes in order with, per operator, the car codes, car widths (px at 10 px/m) and `formations` (standard / raised / 2car) as ordered car lists with a `flip` flag (mirror the car for the far end). 163 classes, ~1,760 car files.
 - Each car file keeps the GB Trains credit (comment, desc). Car groups = top-level `<g>` with a transform and no class; `class="ole"` is the overhead wire overlay.
+
+### Serving: from the VPS API, not the site (so every platform updates at once)
+The finished car SVGs are **not in the repo or the web build**. They live on the VPS and the query server serves them (`rail-core/src/drawings-route.js`), public and read-only (the art is CC BY 4.0):
+
+| Request | Returns |
+|---|---|
+| `GET /api/drawings/index.json` | `{ credit, licence, licenceUrl, source, version, classes }`. Per class: `group` and `operators.<operator>.formations.{standard,2car}` (ordered `[{car, flip}]`) and `sizes` (car width, 10 units per metre). |
+| `GET /api/drawings/<group>/<class>/<operator>/<CODE>.svg` | One car, e.g. `80x/800/gwr/END5.svg`. Draw each at `width = size x scale`, mirror it when `flip` is true. |
+
+- **Hosts:** `https://api-dev.railstatistics.co.uk` (dev) and `https://api-raildata.railstatistics.co.uk` (live). The web site reaches them as `/api/darwin/drawings/...` through the same origin handling as every other API call (`resolveDarwinBrowserUrl`).
+- **Updating:** append `?v=<index.version>` to car URLs. `index.json` is cached 5 minutes, cars up to a day, and the version changes whenever any file changes, so an update reaches web, iOS and Android within minutes with no app or site release. Treat a failed index fetch as "no drawing" and keep the old pills.
+- **Credit:** show "Train drawings: GB Trains (gbtrains.uk), CC BY 4.0" wherever a drawing is on screen (`credit` and `source` are in the index).
+- **Choosing the class and livery (web logic in `UnitDiagram.tsx`):** class from the PTAC `fleetId` (`800/1` gives 800; `G91/M` and `NL##` set numbers map to `ic225`, `555` to `t-w-555`) or the first three digits of a six-digit unit number; operator folder from the Darwin TOC code (`GW` gives `gwr`, and so on) falling back to `base`; fit a different car count by repeating or dropping the middle cars.
+
+**To update the drawings**
+```
+python3 -I new-site/scripts/formation-images/cut_cars.py        # only if the GB Trains source changed
+python3 -I new-site/scripts/formation-images/tighten_cars.py
+python3 -I new-site/scripts/formation-images/build_drawings.py   # writes new-site/data/formation-images/publish (local, not committed)
+rail-core/scripts/deploy-drawings.sh dev                         # then prod
+```
+The server reads the folder on every request (default `rail-core*/assets/train-svgs`, override with `DRAWINGS_DIR`), so no restart is needed.
 
 ## Secondary source: WestRail642fan on Wikimedia Commons
 ~200 side-on livery drawings of UK units, one consistent style, **CC BY-SA 4.0**, author user `WestRail642fan` (https://commons.wikimedia.org/wiki/Special:ListFiles/WestRail642fan). 119–200 px tall, up to 12,000 px wide, PNG. Covers 800/801/802/803/805/807/810-era Hitachi, 390, 220/221, 158, 165/166, 168/170/171/172, 175, 180, 185, 195/196/197, 231, 331, 334, 345, 350, 357, 360, 365, 375/376/377/378, 379, 380, 385, 387, 395, 397, 444/450/458, 465/466, 700/701/707/710/717, 720/730, 745/755/756, 777, Eurostar/373/374 and more, per operator livery and car count.
