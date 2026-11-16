@@ -4,6 +4,8 @@
  *
  *   GET /api/drawings/index.json                         classes, formations per operator, version
  *   GET /api/drawings/<group>/<class>/<operator>/<CODE>.svg   one car, e.g. 80x/800/gwr/END5.svg
+ *   GET /api/drawings/<group>/<class>/<operator>/<CODE>.png   the same car pre-rendered (index.png.pxPerUnit
+ *                                                         pixels per drawing unit) for clients without SVG
  *
  * Public and read-only (the art is CC BY 4.0, GB Trains). Anything outside that shape is a 404,
  * so a path can never leave the directory. `index.json` carries a `version`; clients append
@@ -38,7 +40,7 @@ export function resolveDrawingPath(pathname, dir) {
     clean.push(seg);
   }
   const isIndex = clean.length === 1 && clean[0] === "index.json";
-  const isCar = clean.length === 4 && clean[3].endsWith(".svg") && clean[3].length > 4;
+  const isCar = clean.length === 4 && /\.(svg|png)$/.test(clean[3]) && clean[3].length > 4;
   if (!isIndex && !isCar) return null;
   const root = resolve(dir);
   const file = resolve(root, ...clean);
@@ -71,9 +73,10 @@ export function serveDrawing(req, res, pathname, { dir = drawingsDir() } = {}) {
     return true;
   }
   const isIndex = file.endsWith("index.json");
+  const isPng = file.endsWith(".png");
   const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
   const headers = {
-    "content-type": isIndex ? "application/json; charset=utf-8" : "image/svg+xml; charset=utf-8",
+    "content-type": isIndex ? "application/json; charset=utf-8" : isPng ? "image/png" : "image/svg+xml; charset=utf-8",
     "cache-control": isIndex ? INDEX_CACHE : CAR_CACHE,
     etag,
     "last-modified": stat.mtime.toUTCString(),

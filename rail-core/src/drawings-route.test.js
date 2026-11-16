@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveDrawingPath, serveDrawing } from "./drawings-route.js";
 
+const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 let root;
 let dir;
 let server;
@@ -18,6 +19,7 @@ before(async () => {
   mkdirSync(join(dir, "80x", "800", "gwr"), { recursive: true });
   writeFileSync(join(dir, "index.json"), JSON.stringify({ version: "t1", classes: {} }));
   writeFileSync(join(dir, "80x", "800", "gwr", "END5.svg"), SVG);
+  writeFileSync(join(dir, "80x", "800", "gwr", "END5.png"), Buffer.from(PNG_B64, "base64"));
   writeFileSync(join(root, "secret.svg"), "SECRET"); // sibling of the drawings dir
   writeFileSync(join(root, "secret.json"), "SECRET");
   server = createServer((req, res) => {
@@ -92,7 +94,7 @@ test("paths cannot leave the drawings directory", async () => {
     "/api/drawings/80x/800/gwr/.hidden.svg",
     "/api/drawings/80x/800/gwr/END5.svg/extra",
     "/api/drawings/80x/800/END5.svg", // wrong depth
-    "/api/drawings/80x/800/gwr/END5.png", // wrong type
+    "/api/drawings/80x/800/gwr/END5.gif", // wrong type
     "/api/drawings/index.json/",
     "/api/drawings/",
     "/api/drawings",
@@ -119,4 +121,18 @@ test("resolveDrawingPath only accepts the index or a four-part svg path", () => 
 test("paths outside /api/drawings are not handled", async () => {
   const res = await fetch(`${base}/api/health`);
   assert.equal(res.status, 418);
+});
+
+test("serves the pre-rendered PNG of a car", async () => {
+  const res = await fetch(`${base}/api/drawings/80x/800/gwr/END5.png?v=1`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "image/png");
+  assert.match(res.headers.get("cache-control"), /s-maxage=604800/);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  assert.deepEqual([...bytes.slice(1, 4)], [0x50, 0x4e, 0x47]); // "PNG"
+});
+
+test("other image types are not served", async () => {
+  assert.equal((await fetch(`${base}/api/drawings/80x/800/gwr/END5.jpg`)).status, 404);
+  assert.equal((await fetch(`${base}/api/drawings/80x/800/gwr/END5.png.svg`)).status, 404);
 });
