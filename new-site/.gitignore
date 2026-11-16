@@ -50,3 +50,7 @@ next-env.d.ts
 # firebase functions (built on deploy)
 /functions/node_modules
 /functions/lib
+
+# Local formation-diagram dataset (raw GB Trains / Commons downloads and the per-car cut, ~120 MB).
+# Regenerate with scripts/formation-images/*.py; only public/train-svgs is committed.
+/data/formation-images/

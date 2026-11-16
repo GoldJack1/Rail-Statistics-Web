@@ -27,6 +27,7 @@ export const NRE_TOC_CODE_TO_NAME: Readonly<Record<string, string>> = {
   NR: 'Network Rail',
   NT: 'Northern',
   SE: 'Southeastern',
+  SJ: 'South Yorkshire Supertram',
   SN: 'Southern',
   SR: 'ScotRail',
   SW: 'South Western Railway',

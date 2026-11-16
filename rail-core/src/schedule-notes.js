@@ -120,11 +120,28 @@ function mphOf(speed) {
   return String(n);
 }
 
+const HAULED_TRACTION = { D: "diesel", E: "electric", ED: "electro-diesel" };
+
+/**
+ * Locomotive-hauled power types (D, E, ED) carry a planned load in tonnes in the timing
+ * load field, not a class number: "E" + "330" is an electric-hauled path of 330 tonnes.
+ */
+function hauledLoadTonnes(power, timingLoad) {
+  if (!HAULED_TRACTION[power]) return null;
+  const n = Number(String(timingLoad || "").trim());
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 /** "Pathed as Class 150/153/155/156 DMU at 75mph". EMU uses RTT's electric wording. */
 export function pathedAsLabel({ powerType, timingLoad, speed } = {}) {
   const power = String(powerType || "").trim().toUpperCase();
-  const classes = classList(timingLoad);
   const mph = mphOf(speed);
+  const tonnes = hauledLoadTonnes(power, timingLoad);
+  if (tonnes) {
+    const body = `Pathed as ${HAULED_TRACTION[power]} locomotive-hauled, ${tonnes} tonnes`;
+    return mph ? `${body} at ${mph}mph` : body;
+  }
+  const classes = classList(timingLoad);
   if (!power && !classes) return null;
   const traction = power === "EMU" ? "on electric" : power;
   const classPart = classes ? `Class ${classes}` : "";

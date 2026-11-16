@@ -41,3 +41,22 @@ test("public schedule fills the overview from the stored service", () => {
   assert.match(schedule.activatedAt, /18\/10\/2026 12:29/);
   assert.equal(schedule.pathedAs, "Pathed as Class 150/153/155/156 DMU at 75mph");
 });
+
+test("hauled power types read the timing load as tonnes, not a class", () => {
+  assert.equal(
+    pathedAsLabel({ powerType: "E", timingLoad: "330" }),
+    "Pathed as electric locomotive-hauled, 330 tonnes",
+  );
+  assert.equal(
+    pathedAsLabel({ powerType: "D", timingLoad: "1200", speed: "60" }),
+    "Pathed as diesel locomotive-hauled, 1200 tonnes at 60mph",
+  );
+  assert.equal(
+    pathedAsLabel({ powerType: "ED", timingLoad: "450" }),
+    "Pathed as electro-diesel locomotive-hauled, 450 tonnes",
+  );
+  // unit types keep their class wording
+  assert.equal(pathedAsLabel({ powerType: "EMU", timingLoad: "350" }), "Pathed as Class 350 on electric");
+  // a hauled type with no usable tonnage falls back to the old wording
+  assert.equal(pathedAsLabel({ powerType: "E", timingLoad: "" }), "Pathed as E");
+});

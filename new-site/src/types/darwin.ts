@@ -133,6 +133,9 @@ export interface DepartureRow {
   formation?: FormationData | null;
   /** PTAC unit numbers extracted from consist when present. */
   unitIds?: string[] | null;
+  /** Timetable timing load / power type (e.g. "330" / "E" for LNER's electric-hauled IC225). */
+  timingLoad?: string | null;
+  powerType?: string | null;
   hasAssociations: boolean;
   hasAlerts: boolean;
 

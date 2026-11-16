@@ -23,6 +23,7 @@ export const TOC_NAMES = {
   NR: "Network Rail",
   NT: "Northern",
   SE: "Southeastern",
+  SJ: "South Yorkshire Supertram",
   SN: "Southern",
   SR: "ScotRail",
   SW: "South Western Railway",

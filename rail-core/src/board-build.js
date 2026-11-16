@@ -293,7 +293,8 @@ export function buildStationBoard({
   const q = db.prepare(
     `SELECT c.*, s.rid as s_rid, s.uid, s.rs_id, s.toc, s.operator_name, s.origin_crs, s.origin_name,
             s.destination_crs, s.destination_name, s.via, s.service_type, s.cancelled as s_cancelled,
-            s.cancel_reason, s.delay_reason, s.is_charter, s.category, s.headcode, s.train_id
+            s.cancel_reason, s.delay_reason, s.is_charter, s.category, s.headcode, s.train_id,
+            s.timing_load, s.power_type
      FROM calls c JOIN services s ON s.rid = c.rid
      WHERE ${tiplocOnly ? `c.tiploc IN (${placeholders})` : `(c.crs = ? ${tpls.length ? `OR c.tiploc IN (${placeholders})` : ""})`}`
   );
@@ -498,6 +499,9 @@ export function buildStationBoard({
       cancellation: cancelInfo,
       delayReason: r.delay_reason ? { source: "ts", reason: r.delay_reason } : null,
       trainLength: r.length_cars ?? null,
+      // Lets the site pick stock art for services with no unit numbers (e.g. LNER 91 + Mk4 = timing load 330).
+      timingLoad: r.timing_load || null,
+      powerType: r.power_type || null,
       platform: plat,
       livePlatform: plat,
       loadingPercentage: r.loading_percentage ?? null,

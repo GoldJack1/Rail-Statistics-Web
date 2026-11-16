@@ -1,0 +1,99 @@
+/* Side-on train drawings (GB Trains art, beta only). Used by cards, boards and the unit page.
+   Every car is drawn at the same scale: width = real car length x --cmap-diagram-scale.
+   Longer trains are wider than their box and scroll sideways. */
+.cmap-diagram {
+  --cmap-diagram-scale: 0.42; /* px per drawing unit (the art is 10 units per metre) */
+  /* Neighbouring cars overlap by 0.4 m (min 1px) so rounded roof corners and sub-pixel seams
+     leave no gap. Resolved on this element, so it follows a larger scale set by a text card. */
+  --cmap-diagram-overlap: max(1px, calc(var(--cmap-diagram-scale) * 4px));
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 0 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+.cmap-diagram-track {
+  display: flex;
+  align-items: flex-end;
+  width: max-content; /* never squeezed: scroll instead */
+  min-width: 100%;
+  padding: 0 1px 2px 0;
+}
+.cmap-diagram-unit {
+  display: flex;
+  align-items: flex-end;
+  flex: 0 0 auto;
+}
+/* Cars sit flush. Each cell is drawn 1px wider (see UnitDiagram.tsx) and pulled back by
+   1px, so it overlaps its neighbour: no hairline seam, and coupled units touch too. */
+.cmap-diagram-cell {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  margin-right: calc(-1 * var(--cmap-diagram-overlap, 1px));
+}
+.cmap-diagram-car {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.cmap-diagram-car--flip {
+  transform: scaleX(-1);
+}
+.cmap-diagram-load {
+  display: block;
+  height: 4px;
+  margin: 2px 1px 0;
+  border-radius: 2px;
+}
+
+/* Text cards (departure/arrival boards, service formation card) show the drawing larger:
+   same scale for every car, trains wider than the card scroll sideways. */
+.rs-service-card__formation-bar .cmap-diagram,
+.svc-formation-card .cmap-diagram {
+  --cmap-diagram-scale: 0.6;
+}
+
+/* Scrolling: drag with a mouse, swipe or trackpad. A fade on the right edge says there is more. */
+.cmap-diagram--scrollable {
+  cursor: grab;
+  touch-action: pan-x pan-y;
+  padding-bottom: 2px;
+}
+.cmap-diagram--scrollable:active {
+  cursor: grabbing;
+}
+.cmap-diagram--scrollable .cmap-diagram-car {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+.cmap-diagram--more {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+/* Left fade appears only once the strip has been scrolled. */
+.cmap-diagram--less {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+.cmap-diagram--more.cmap-diagram--less {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+
+/* Board cards switch pointer events off on their formation bar (the whole card is one button).
+   The strip needs them to scroll; a plain click still bubbles up and opens the card, and a
+   drag is swallowed in UnitDiagram.tsx so it does not. */
+.cmap-diagram {
+  pointer-events: auto;
+}
+
+/* Service detail formation card: centre the train when it is narrower than the card.
+   Auto margins collapse to 0 when it is wider, so it still scrolls from the left edge. */
+.svc-formation-card .cmap-diagram-track {
+  min-width: 0;
+  margin-inline: auto;
+}

@@ -34,19 +34,28 @@ const CATEGORY: Record<string, string> = {
   BR: 'Bus Replacement',
 }
 
+const HAULED_TRACTION: Record<string, string> = { D: 'diesel', E: 'electric', ED: 'electro-diesel' }
+
 export function pathedAsText(
   powerType?: string | null,
   timingLoad?: string | null,
   speed?: string | null,
 ): string | null {
   const power = String(powerType || '').trim().toUpperCase()
+  const mph = Number(String(speed || '').trim())
+  const atSpeed = (body: string) => (Number.isFinite(mph) && mph > 0 ? `${body} at ${mph}mph` : body)
+  // Hauled power types (D, E, ED) put a planned load in tonnes in the timing load field,
+  // not a class number: "E" + "330" is an electric-hauled path of 330 tonnes.
+  const tonnes = Number(String(timingLoad || '').trim())
+  if (HAULED_TRACTION[power] && Number.isInteger(tonnes) && tonnes > 0) {
+    return atSpeed(`Pathed as ${HAULED_TRACTION[power]} locomotive-hauled, ${tonnes} tonnes`)
+  }
   const load = String(timingLoad || '').trim().toUpperCase().replace(/^0+/, '')
   const classes = CLASS_GROUPS[load] || (/^\d{3}$/.test(load) ? load : '')
-  const mph = Number(String(speed || '').trim())
   if (!power && !classes) return null
   const traction = power === 'EMU' ? 'on electric' : power
   const body = ['Pathed as', classes ? `Class ${classes}` : '', traction].filter(Boolean).join(' ')
-  return Number.isFinite(mph) && mph > 0 ? `${body} at ${mph}mph` : body
+  return atSpeed(body)
 }
 
 export function categoryText(code?: string | null): string | null {

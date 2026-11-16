@@ -18,6 +18,7 @@ import { fetchDarwin } from '@/utils/darwinReadyFetch'
 import { filterStationsLikeFaresSearch } from '@/utils/darwinStationFaresSearch'
 import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
 import { goToServicePath } from '@/utils/serviceUrl'
+import { DiagramAttribution } from '@/components/darwin/CarriageMap'
 import '@/styles/browsePageLayout.css'
 import '@/app/bash-planner/BashPlannerPage.css'
 
@@ -632,6 +633,9 @@ const BashPlannerPageClient: React.FC = () => {
               </div>
             </>
           )}
+          <p className="bash-diagram-credit">
+            <DiagramAttribution />
+          </p>
         </main>
       </div>
     </div>

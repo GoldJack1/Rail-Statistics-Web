@@ -13,6 +13,12 @@ import {
 } from '@/utils/darwinCoachLoading'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
 import { boardDestinationLabel } from '@/utils/splitWorking'
+import {
+  TrainDiagram,
+  defaultDiagramUnitsForToc,
+  type DiagramUnit,
+  type DiagramLoadTone,
+} from '@/components/darwin/CarriageMap'
 import '../StationCard/StationCard.css'
 import '../StationCardActionBar/StationCardActionBar.css'
 import '@/components/buttons/base/BUTBaseButton/BUTBaseButton.css'
@@ -230,6 +236,16 @@ function coachClassName(index: number, count: number): string {
   return 'rs-service-card__coach'
 }
 
+/** One diagram unit per unit number; the coach count is split evenly, else drawn as one train. */
+function diagramUnits(unitIds: string[] | null | undefined, count: number | null): DiagramUnit[] {
+  const ids = (unitIds || []).filter(Boolean).slice(0, 4)
+  if (!count || ids.length === 0) return []
+  if (ids.length > 1 && count % ids.length === 0) {
+    return ids.map((unitId) => ({ unitId, vehicleCount: count / ids.length }))
+  }
+  return [{ unitId: ids[0], vehicleCount: count }]
+}
+
 const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
   row,
   historicalMode,
@@ -296,6 +312,15 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
       </section>
       {showFormation ? (
         <section className="rs-station-text-card rs-service-card__formation-bar" aria-hidden="true">
+          <TrainDiagram
+            units={(() => {
+              const own = diagramUnits(row.unitIds, coachCount)
+              return own.length > 0 ? own : defaultDiagramUnitsForToc(row.toc)
+            })()}
+            reversed={row.reverseFormation}
+            toc={row.toc}
+            loadTones={loadValues.map((v): DiagramLoadTone => coachLoadTone(v ?? null, loadAsPercent))}
+            fallback={
           <div
             className={[
               'rs-service-card__coaches',
@@ -331,6 +356,8 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
                 })
               : <span className="rs-service-card__coach" />}
           </div>
+            }
+          />
           <p className="rs-service-card__formation">{formation || '\u00a0'}</p>
         </section>
       ) : null}

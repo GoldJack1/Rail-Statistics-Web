@@ -7,7 +7,7 @@ import { CalendarBlank, Info, Train, WarningCircle } from '@phosphor-icons/react
 import { BUTBaseButton, BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import { TextCard } from '@/components/cards'
-import { CarriageMap } from '@/components/darwin/CarriageMap'
+import { CarriageMap, DiagramAttribution } from '@/components/darwin/CarriageMap'
 import DataLicenceAttribution from '@/components/darwin/DataLicenceAttribution'
 import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
 import { ServiceStopList } from '@/components/darwin/ServiceStopList/ServiceStopList'
@@ -606,6 +606,7 @@ const UnitLookupPage: React.FC = () => {
                       reverse={latestService.reverseFormation}
                       initialTpl={latestService.origin}
                       layout="stock-only"
+                      toc={latestService.toc}
                       onUnitClick={(id) => {
                         if (id.trim().toUpperCase() === unitId) return
                         const qp = new URLSearchParams()
@@ -687,7 +688,8 @@ const UnitLookupPage: React.FC = () => {
             {data && (
               <p className="unit-muted darwin-details-source">
                 Source: Network Rail Darwin Push Port and PTAC feed.{' '}
-                <DataLicenceAttribution />
+                <DataLicenceAttribution />{' '}
+                <DiagramAttribution className="darwin-details-diagram-credit" />
               </p>
             )}
     </DarwinDetailsLayout>

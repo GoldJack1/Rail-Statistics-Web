@@ -200,3 +200,23 @@ test("a continuation keeps the unit that starts at its origin", () => {
     ["185109"],
   );
 });
+
+test("PTAC parser keeps locomotive-hauled set codes such as NL16 (class 91 + Mk4)", () => {
+  const xml = SAMPLE_XML
+    .replace("<Company>9925</Company>", "<Company>9980</Company>")
+    .replace("1P90G24937", "1N09C02040")
+    .replace("<OperationalTrainNumber>1P90</OperationalTrainNumber>", "<OperationalTrainNumber>1N09</OperationalTrainNumber>")
+    .replace("<ResourceGroupId>185111</ResourceGroupId>", "<ResourceGroupId>NL16</ResourceGroupId>")
+    .replace("<FleetId>185</FleetId>", "<FleetId>G91/M</FleetId>");
+  const parsed = parsePtacMessage({ bytes: xml });
+  assert.deepEqual(parsed.unitIds, ["NL16"]);
+  assert.equal(parsed.uid, "C02040");
+  assert.equal(parsed.headcode, "1N09");
+});
+
+test("PTAC parser still rejects junk resource group ids", () => {
+  for (const bad of ["", "AB", "NL", "has space1", "A-1234", "x".repeat(11) + "1"]) {
+    const xml = SAMPLE_XML.replace("<ResourceGroupId>185111</ResourceGroupId>", `<ResourceGroupId>${bad}</ResourceGroupId>`);
+    assert.deepEqual(parsePtacMessage({ bytes: xml }).unitIds, [], `should reject ${JSON.stringify(bad)}`);
+  }
+});

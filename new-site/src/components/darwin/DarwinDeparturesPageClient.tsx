@@ -23,6 +23,7 @@ import TXTINPBUTIconWideButtonSearch from '@/components/textInputButtons/special
 import { StationMessages } from '@/components/darwin/StationMessages'
 import { KnowledgebaseIncidentsBanner } from '@/components/darwin/KnowledgebaseIncidentsBanner'
 import DarwinQueryEnvBanner from '@/components/darwin/DarwinQueryEnvBanner/DarwinQueryEnvBanner'
+import { DiagramAttribution } from '@/components/darwin/CarriageMap'
 import { railwayOperatingDayIsoFromLondonParts, scheduledTimeInRailwayWindow, normalizeClockHhmm } from '@/utils/railwayOperatingDayUk'
 import { paramAsString } from '@/utils/nextParams'
 import { fetchDarwin } from '@/utils/darwinReadyFetch'
@@ -1465,6 +1466,7 @@ const DarwinDeparturesPage: React.FC<{ initialSnapshot?: DeparturesSnapshot | nu
                   </span>
                   <span className="dep-footer-sep" aria-hidden="true">·</span>
                   <span>Contains public sector information licensed under the Open Government Licence v3.0.</span>
+                  <DiagramAttribution before={<span className="dep-footer-sep" aria-hidden="true">·</span>} />
                   <span className="dep-footer-sep" aria-hidden="true">·</span>
                   <span>Updated {new Date(data.updatedAt).toLocaleString('en-GB', { timeZone: 'Europe/London', hourCycle: 'h23', hour12: false })}</span>
                 </footer>

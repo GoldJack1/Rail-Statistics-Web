@@ -20,13 +20,22 @@ function extractXml(payload) {
   return "";
 }
 
+/**
+ * Resource group ids: six-digit unit numbers (185111), and set codes for locomotive-hauled
+ * rakes such as LNER's InterCity 225 sets (NL16, fleet G91/M). Requiring digits only used to
+ * drop every consist for the 91 workings, so they never reached a service.
+ */
+export function isUnitId(id) {
+  return /^(?=.*\d)[A-Z0-9]{3,10}$/i.test(String(id || "").trim());
+}
+
 function fromConsist(consist) {
   const join = consistJoinKey(consist);
   const unitIds = [];
   for (const alloc of consist.allocations || []) {
     for (const group of alloc.resourceGroups || []) {
       const id = String(group.unitId || "").trim();
-      if (/^\d{3,8}$/.test(id)) unitIds.push(id);
+      if (isUnitId(id)) unitIds.push(id);
     }
   }
   const coreParsed = parseCore(consist.core);

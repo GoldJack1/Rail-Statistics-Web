@@ -10,7 +10,13 @@ import { useStations } from '@/hooks/useStations'
 import { BUTTwoButtonBar, BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import { TextCard } from '@/components/cards'
-import { CarriageMap } from '@/components/darwin/CarriageMap'
+import {
+  CarriageMap,
+  DiagramAttribution,
+  TrainDiagram,
+  defaultDiagramUnitsForToc,
+  type DiagramUnit,
+} from '@/components/darwin/CarriageMap'
 import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
 import { ServiceSchedulePanel } from '@/components/darwin/ServiceSchedulePanel'
 import { ServiceStopList } from '@/components/darwin/ServiceStopList/ServiceStopList'
@@ -132,13 +138,22 @@ function serviceCoachCount(data: ServiceDetail): number | null {
 function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
   const count = serviceCoachCount(data)
   const units = serviceUnitIds(data)
-  if (count == null && !units.length) return null
+  const fallbackUnits = defaultDiagramUnitsForToc(data.toc)
+  if (count == null && !units.length && !fallbackUnits.length) return null
   const visible = count != null ? Math.min(count, 12) : 0
   const prefix = data.cancelled ? 'Was formed of' : 'Formed of'
   const carriagePhrase = count != null ? `${count} carriage${count === 1 ? '' : 's'}` : ''
   const title = [prefix, carriagePhrase, units.length ? `by ${units.join(' + ')}` : '']
     .filter(Boolean)
     .join(' ')
+  const pills = visible > 0 ? (
+    <span className="svc-formation-strip__coaches">
+      {Array.from({ length: visible }, (_, index) => {
+        const place = visible === 1 ? 'solo' : index === 0 ? 'front' : index === visible - 1 ? 'rear' : 'mid'
+        return <span key={index} className={`svc-formation-strip__coach svc-formation-strip__coach--${place}`} />
+      })}
+    </span>
+  ) : undefined
   return (
     <TextCard
       static
@@ -146,16 +161,26 @@ function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
       className="svc-formation-card"
       title={title}
       ariaLabel={title}
-      description={visible > 0 ? (
-        <span className="svc-formation-strip__coaches">
-          {Array.from({ length: visible }, (_, index) => {
-            const place = visible === 1 ? 'solo' : index === 0 ? 'front' : index === visible - 1 ? 'rear' : 'mid'
-            return <span key={index} className={`svc-formation-strip__coach svc-formation-strip__coach--${place}`} />
-          })}
-        </span>
-      ) : undefined}
+      description={
+        <TrainDiagram
+          units={diagramUnitsFor(units, count).length ? diagramUnitsFor(units, count) : fallbackUnits}
+          reversed={data.reverseFormation}
+          toc={data.toc}
+          fallback={pills}
+        />
+      }
     />
   )
+}
+
+/** One diagram unit per unit number; the coach count is split evenly, else the train is drawn as one. */
+function diagramUnitsFor(unitIds: string[], count: number | null): DiagramUnit[] {
+  if (!count || unitIds.length === 0) return []
+  const ids = unitIds.slice(0, 4)
+  if (ids.length > 1 && count % ids.length === 0) {
+    return ids.map((unitId) => ({ unitId, vehicleCount: count / ids.length }))
+  }
+  return [{ unitId: ids[0], vehicleCount: count }]
 }
 
 function WorkingFooter({
@@ -775,6 +800,9 @@ const ServiceDetailPage: React.FC = () => {
               Signalling actuals come from Network Rail TRUST, where shown.
             </p>
             <p>Contains public sector information licensed under the Open Government Licence v3.0.</p>
+            <p>
+              <DiagramAttribution />
+            </p>
             <p>
               Map data ©{' '}
               <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">

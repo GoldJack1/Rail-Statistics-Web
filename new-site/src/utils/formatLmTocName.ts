@@ -1,3 +1,5 @@
+import { lookupNreTocCodeName } from './nreTocCodes'
+
 const LNWR_CRS = new Set([
   'EUS', 'MKC', 'NMP', 'BDM', 'BLY', 'WFJ', 'TRI', 'LIV', 'CRE', 'RUG', 'COV', 'BHI', 'LET',
 ])
@@ -13,6 +15,11 @@ export function formatLmTocName(
 ): string {
   const raw = (tocName || tocCode || '').replace(/&amp;/gi, '&').trim()
   if (!raw) return 'Unknown Operator'
+  // The API falls back to the bare code when it has no name for a TOC (e.g. "SJ").
+  if (/^[A-Za-z]{2}$/.test(raw) && raw.toUpperCase() !== 'LM') {
+    const named = lookupNreTocCodeName(raw)
+    if (named) return named
+  }
   const isLm = raw.toUpperCase() === 'LM' || /^LNR\s*&\s*WMR$/i.test(raw) || /West Midlands Trains/i.test(raw)
   if (!isLm) return raw
   const ends = [originCrs, destCrs].map((c) => (c || '').toUpperCase())
