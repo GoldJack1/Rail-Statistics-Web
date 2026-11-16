@@ -10,12 +10,12 @@ import { useStations } from '@/hooks/useStations'
 import { BUTTwoButtonBar, BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import { TextCard } from '@/components/cards'
+import { diagramUnitsForTrain } from '@/utils/diagramUnits'
 import {
   CarriageMap,
   DiagramAttribution,
   TrainDiagram,
   defaultDiagramUnitsForToc,
-  type DiagramUnit,
 } from '@/components/darwin/CarriageMap'
 import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
 import { ServiceSchedulePanel } from '@/components/darwin/ServiceSchedulePanel'
@@ -163,7 +163,7 @@ function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
       ariaLabel={title}
       description={
         <TrainDiagram
-          units={diagramUnitsFor(units, count).length ? diagramUnitsFor(units, count) : fallbackUnits}
+          units={diagramUnitsForTrain(units, count).length ? diagramUnitsForTrain(units, count) : fallbackUnits}
           reversed={data.reverseFormation}
           toc={data.toc}
           fallback={pills}
@@ -173,15 +173,6 @@ function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
   )
 }
 
-/** One diagram unit per unit number; the coach count is split evenly, else the train is drawn as one. */
-function diagramUnitsFor(unitIds: string[], count: number | null): DiagramUnit[] {
-  if (!count || unitIds.length === 0) return []
-  const ids = unitIds.slice(0, 4)
-  if (ids.length > 1 && count % ids.length === 0) {
-    return ids.map((unitId) => ({ unitId, vehicleCount: count / ids.length }))
-  }
-  return [{ unitId: ids[0], vehicleCount: count }]
-}
 
 function WorkingFooter({
   previous,
