@@ -65,6 +65,53 @@ def rasterize(svg_files):
     return done
 
 
+def _car_parts(path):
+    """viewBox numbers and the drawing inside <g>...</g> of a cut car SVG."""
+    text = path.read_text()
+    vb = [float(v) for v in re.search(r'viewBox="([^"]+)"', text).group(1).split()]
+    inner = re.search(r"<g>(.*)</g></svg>\s*$", text, re.S).group(1)
+    return vb, inner
+
+
+def _suffix_ids(inner, suffix):
+    for ident in sorted(set(re.findall(r'\bid="([^"]+)"', inner)), key=len, reverse=True):
+        inner = (inner.replace(f'id="{ident}"', f'id="{ident}{suffix}"')
+                 .replace(f"url(#{ident})", f"url(#{ident}{suffix})")
+                 .replace(f'href="#{ident}"', f'href="#{ident}{suffix}"'))
+    return inner
+
+
+def make_middle_car(car_dir, a_code, b_code, out_code, slug):
+    """A middle car (no cab) in an operator's livery, for a 3-car set drawn only as two cab cars.
+
+    Each cab car's art has the cab at the left and a plain gangway end at the right (the far car is the
+    same art mirrored). The middle car is the plain right half of car A, with the plain right half of car B
+    mirrored in front of it, so both ends are gangway ends and the livery matches the cab cars.
+    Returns (width, height) in drawing units.
+    """
+    (xa, ya, wa, ha), inner_a = _car_parts(car_dir / f"{a_code}.svg")
+    (xb, yb, wb, hb), inner_b = _car_parts(car_dir / f"{b_code}.svg")
+    half_a, half_b = wa / 2, wb / 2
+    mid_a, mid_b = xa + half_a, xb + half_b
+    total = half_a + half_b
+    inner_b = _suffix_ids(inner_b, "-m")
+    credit = "Drawing: GB Trains, gbtrains.uk, CC BY 4.0"
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 {ya} {total:.2f} {ha}" role="img" '
+        f'aria-label="Class {slug} car {out_code}"><title>Class {slug} car {out_code}</title>'
+        f"<!-- {credit}. Licence CC BY 4.0 https://creativecommons.org/licenses/by/4.0/ "
+        f"Source https://gbtrains.uk/stock/{slug}/. Middle car assembled from the plain halves of the two cab cars. -->"
+        f"<desc>Assembled from the GB Trains drawing. {credit}.</desc>"
+        f'<defs><clipPath id="mid-right"><rect x="{mid_a:.2f}" y="{ya - 5}" width="{half_a + 1:.2f}" height="{ha + 10}"/></clipPath>'
+        f'<clipPath id="mid-left"><rect x="{mid_b:.2f}" y="{yb - 5}" width="{half_b + 1:.2f}" height="{hb + 10}"/></clipPath></defs>'
+        f'<g transform="translate({half_b - mid_a:.3f} 0)"><g clip-path="url(#mid-right)">{inner_a}</g></g>'
+        f'<g transform="translate({half_b + mid_b:.3f} 0) scale(-1 1)"><g clip-path="url(#mid-left)">{inner_b}</g></g>'
+        "</svg>"
+    )
+    (car_dir / f"{out_code}.svg").write_text(svg)
+    return round(total, 2), round(ha, 2)
+
+
 idx = json.load(open(SRC / "index.json"))
 out = {"credit": idx["credit"], "licence": idx["licence"], "licenceUrl": idx["licenceUrl"],
        "source": idx["source"], "classes": {}}
@@ -78,7 +125,7 @@ for c in CLASSES:
         continue
     ops = {}
     for op, d in e["operators"].items():
-        forms = {k: v for k, v in d["formations"].items() if k in ("standard", "2car")}
+        forms = {k: v for k, v in d["formations"].items() if k == "standard" or re.fullmatch(r"\d+car", k)}
         codes = {x["car"] for f in forms.values() for x in f}
         if not codes:
             continue
@@ -93,6 +140,23 @@ for c in CLASSES:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src, dst)
             n += 1
+    # An operator drawn only as two cab cars gets a 3-car set in its own livery when the class is also
+    # drawn in 3 cars in the generic art (170, 165): a middle car assembled from its cab cars. Without
+    # this a 3-car Northern 170 would be drawn in the generic (ScotRail) livery.
+    base_lens = {len(f) for f in ops.get("base", {}).get("formations", {}).values()}
+    for op, art in ops.items():
+        std = art["formations"].get("standard", [])
+        has_len3 = any(len(f) == 3 for f in art["formations"].values())
+        if (op == "base" or 3 not in base_lens or has_len3 or len(std) != 2
+                or std[0]["flip"] or not std[1]["flip"]):
+            continue
+        car_dir = DST / e["group"] / c / op
+        mid_code = "MIDX"
+        w, h = make_middle_car(car_dir, std[0]["car"], std[1]["car"], mid_code, c)
+        art["sizes"][mid_code] = w
+        art["heights"][mid_code] = h
+        art["formations"]["3car"] = [std[0], {"car": mid_code, "flip": False}, std[1]]
+        print("  middle car for", c, op)
     out["classes"][c] = {"group": e["group"], "operators": ops}
 n_png = rasterize(sorted(DST.rglob("*.svg")))
 print("png cars", n_png)

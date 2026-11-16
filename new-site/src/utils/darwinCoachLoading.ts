@@ -37,8 +37,18 @@ export function unitIdsFromConsist(consist: ConsistData | null | undefined): str
   return ids.length ? ids : null
 }
 
+/**
+ * Classes whose length depends on who runs them, keyed by TOPS class then Darwin TOC code. Used before
+ * the class default. Northern's 170s are all 3-car; East Midlands Railway's are 2-car.
+ */
+const CARS_BY_CLASS_AND_TOC: Record<number, Record<string, number>> = {
+  170: { NT: 3, EM: 2 },
+}
+
 /** Typical vehicles per TOPS class, used when Darwin has no trainLength. */
-function carsForClassNumber(n: number): number {
+function carsForClassNumber(n: number, toc?: string | null): number {
+  const byOperator = toc ? CARS_BY_CLASS_AND_TOC[n]?.[toc.trim().toUpperCase()] : undefined
+  if (byOperator) return byOperator
   if (n === 139 || n === 153) return 1
   if (n === 159 || n === 166 || n === 185 || n === 195 || n === 196 || n === 197) return 3
   if (n === 180) return 5
@@ -65,13 +75,14 @@ function carsForClassNumber(n: number): number {
   return 2
 }
 
-export function coachCountFromUnitIds(unitIds: string[] | null | undefined): number | null {
+/** Estimated vehicles for a list of unit numbers. `toc` (Darwin operator code) refines classes that vary by operator. */
+export function coachCountFromUnitIds(unitIds: string[] | null | undefined, toc?: string | null): number | null {
   if (!unitIds?.length) return null
   let total = 0
   for (const raw of unitIds) {
     const match = String(raw).match(/^(\d{3})/)
     if (!match) continue
-    total += carsForClassNumber(Number(match[1]))
+    total += carsForClassNumber(Number(match[1]), toc)
   }
   return total > 0 ? total : null
 }
@@ -82,7 +93,7 @@ export function coachCountFromRow(row: DepartureRow): number | null {
   if (formationCoaches && formationCoaches > 0) return formationCoaches
   const loadingCoaches = row.coachLoading?.length
   if (loadingCoaches && loadingCoaches > 0) return loadingCoaches
-  return coachCountFromUnitIds(row.unitIds)
+  return coachCountFromUnitIds(row.unitIds, row.toc)
 }
 
 export function coachLoadValues(row: DepartureRow, count: number): Array<number | null> {

@@ -2,6 +2,10 @@
    Every car is drawn at the same scale: width = real car length x --cmap-diagram-scale.
    Longer trains are wider than their box and scroll sideways. */
 .cmap-diagram {
+  /* The strip takes whatever width its card has and scrolls inside it. Without this a long train's
+     full width fed into the card's size (a grid item with min-width: auto), so on a phone the card
+     grew past the screen and the strip never overflowed. */
+  contain: inline-size;
   --cmap-diagram-scale: 0.42; /* px per drawing unit (the art is 10 units per metre) */
   /* Neighbouring cars overlap by 0.4 m (min 1px) so rounded roof corners and sub-pixel seams
      leave no gap. Resolved on this element, so it follows a larger scale set by a text card. */
@@ -96,4 +100,14 @@
 .svc-formation-card .cmap-diagram-track {
   min-width: 0;
   margin-inline: auto;
+}
+
+/* Touch screens: no scrollbar under the train. The edge fade says there is more, and a swipe scrolls. */
+@media (pointer: coarse) {
+  .cmap-diagram {
+    scrollbar-width: none;
+  }
+  .cmap-diagram::-webkit-scrollbar {
+    display: none;
+  }
 }

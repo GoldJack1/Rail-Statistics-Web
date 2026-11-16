@@ -1,6 +1,6 @@
 """Cut GB Trains whole-train SVG drawings into one SVG per car.
 
-Input : data/formation-images/gbtrains/<slug>/*.svg  (base, -liv-<operator>, -raised; -x2 skipped)
+Input : data/formation-images/gbtrains/<slug>/*.svg  (base, -liv-<operator>, -raised, -<N>car; -x2 skipped)
 Output: data/formation-images/train-svgs/<group>/<slug>/<operator>/<CODE>.svg
         data/formation-images/train-svgs/index.json   (classes sorted, formations as ordered car lists)
 
@@ -42,14 +42,17 @@ def parse_name(slug, fname):
     raised = rest.endswith("-raised")
     if raised:
         rest = rest[: -len("-raised")]
-    two = rest.endswith("-2car")
-    if two:
-        rest = rest[: -len("-2car")]
+    # "-2car", "-3car", ...: the same train drawn with that many cars (formation name "<N>car").
+    cars = None
+    mc = re.search(r"-(\d+)car$", rest)
+    if mc:
+        cars = int(mc.group(1))
+        rest = rest[: -len(mc.group(0))]
     m = re.fullmatch(r"-liv-(.+)", rest)
     op = m.group(1) if m else ("base" if rest == "" else None)
     if op is None:
         return None
-    return op, raised, two
+    return op, raised, cars
 
 
 def car_groups(root):
@@ -111,7 +114,7 @@ def main():
     index = {}
     for f in files:
         slug = f.parent.name
-        op, raised, two = parse_name(slug, f.name)
+        op, raised, cars = parse_name(slug, f.name)
         root = ET.parse(f).getroot()
         vb = [float(v) for v in root.get("viewBox").split()]
         groups = car_groups(root)
@@ -147,7 +150,7 @@ def main():
                 (cls_dir / f"{code}.svg").write_text(svg)
                 opd.setdefault("sizes", {})[code] = round(w, 2)
             formation.append({"car": codes[key], "flip": flip})
-        name = ("raised" if raised else "") + ("2car" if two else "") or "standard"
+        name = ("raised" if raised else "") + (f"{cars}car" if cars else "") or "standard"
         opd["formations"][f"{name}"] = formation
     # clean helper fields, sort by class
     for slug, e in index.items():

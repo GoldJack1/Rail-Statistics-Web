@@ -153,6 +153,27 @@ interface UnitView {
   total: number
 }
 
+/**
+ * Which operator's art to draw. The operator's own livery when it has one; the generic ("base") art when
+ * the operator has none, or when only the generic art is drawn at the right length (a Northern 170 is
+ * 3-car but only the generic 170 is drawn in 3 cars), so the car count is right even if the livery is not.
+ */
+export function chooseOperatorKey(
+  operators: Record<string, { formations: Record<string, CarRef[]> }>,
+  wanted: string,
+  vehicleCount: number,
+): string | undefined {
+  const hasLength = (key: string) =>
+    Object.values(operators[key]?.formations || {}).some((f) => f.length === vehicleCount)
+  if (operators[wanted]) {
+    if (vehicleCount > 0 && wanted !== 'base' && !hasLength(wanted) && operators.base && hasLength('base')) {
+      return 'base'
+    }
+    return wanted
+  }
+  return operators.base ? 'base' : Object.keys(operators)[0]
+}
+
 function buildView(
   index: DiagramIndex,
   unit: DiagramUnit,
@@ -163,7 +184,7 @@ function buildView(
   const cls = slug ? index.classes[slug] : null
   if (!slug || !cls) return null
   const wanted = (toc && TOC_TO_OPERATOR[toc.toUpperCase()]) || 'base'
-  const opKey = cls.operators[wanted] ? wanted : cls.operators.base ? 'base' : Object.keys(cls.operators)[0]
+  const opKey = chooseOperatorKey(cls.operators, wanted, unit.vehicleCount)
   const art = opKey ? cls.operators[opKey] : null
   if (!art) return null
   // vehicleCount 0 = unknown: draw the set as GB Trains drew it.

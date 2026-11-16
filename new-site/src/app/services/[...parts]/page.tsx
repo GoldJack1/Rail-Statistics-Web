@@ -132,7 +132,7 @@ function serviceCoachCount(data: ServiceDetail): number | null {
   if (formationCount > 0) return formationCount
   const consistCount = coachCountFromConsist(data.consist)
   if (consistCount) return consistCount
-  return coachCountFromUnitIds(serviceUnitIds(data))
+  return coachCountFromUnitIds(serviceUnitIds(data), data.toc)
 }
 
 function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
