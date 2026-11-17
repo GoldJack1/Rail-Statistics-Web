@@ -1,4 +1,6 @@
-import type { DiagramUnit } from '@/components/darwin/CarriageMap'
+import type { DiagramUnit, DiagramVehicle } from '@/components/darwin/CarriageMap'
+import type { ConsistData, PtacVehicle } from '@/types/darwin'
+import { collectPtacStages } from './ptacStages'
 
 /**
  * Cars a unit of a class can have, largest first, for classes that run in more than one fixed
@@ -51,4 +53,76 @@ export function diagramUnitsForTrain(unitIds: ReadonlyArray<string | null | unde
     }
   }
   return [{ unitId: ids[0], vehicleCount: total }]
+}
+
+/** A unit's PTAC vehicles as drawing vehicles, front first: a reversed formation runs the other way. */
+export function diagramVehiclesFromPtac(vehicles: ReadonlyArray<PtacVehicle>, reversed: boolean): DiagramVehicle[] {
+  const ordered = reversed ? [...vehicles].reverse() : [...vehicles]
+  return ordered.map((v) => ({
+    lengthMm: v.lengthMm,
+    cabs: v.cabs,
+    isLoco: String(v.typeOfVehicle || '').trim().toUpperCase() === 'L',
+    id: v.vehicleId,
+  }))
+}
+
+/** One leg of a journey for the drawings: where it runs and the units drawn from their own vehicles. */
+export interface DiagramStage {
+  startTpl: string | null
+  endTpl: string | null
+  startDt: string | null
+  endDt: string | null
+  units: DiagramUnit[]
+}
+
+/**
+ * The formation of each leg, taken from the consist's own vehicles, so the order and the direction are
+ * the ones the consist gives (a locomotive-hauled set can lead with the driving trailer, then reverse
+ * so the locomotive leads). Empty when there is no consist, or a unit in it lists no vehicles.
+ */
+export function diagramStagesFromConsist(consist: ConsistData | null | undefined): DiagramStage[] {
+  const stages = collectPtacStages(consist)
+  if (stages.length === 0) return []
+  const out: DiagramStage[] = []
+  for (const stage of stages) {
+    if (stage.units.length === 0 || stage.units.some((u) => u.vehicles.length === 0)) return []
+    out.push({
+      startTpl: stage.startTpl,
+      endTpl: stage.endTpl,
+      startDt: stage.startDt,
+      endDt: stage.endDt,
+      units: stage.units.map((u) => ({
+        fleetId: u.fleetId,
+        unitId: u.unitId,
+        vehicleCount: u.vehicles.length,
+        vehicles: diagramVehiclesFromPtac(u.vehicles, u.reversed),
+      })),
+    })
+  }
+  return out
+}
+
+/**
+ * How a locomotive-hauled set is described, as Realtime Trains does: the coaches between the locomotive and the
+ * driving trailer, the locomotive number and the set. Null when the consist has no locomotive.
+ */
+export function hauledSetSummary(
+  consist: ConsistData | null | undefined,
+): { coaches: number; locomotives: string[]; sets: string[] } | null {
+  const stages = collectPtacStages(consist)
+  const locomotives: string[] = []
+  const sets: string[] = []
+  let coaches = 0
+  for (const stage of stages) {
+    for (const unit of stage.units) {
+      const loco = unit.vehicles.find((v) => String(v.typeOfVehicle || '').trim().toUpperCase() === 'L')
+      if (!loco) continue
+      const id = String(loco.vehicleId || '').trim()
+      if (id && !locomotives.includes(id)) locomotives.push(id)
+      if (unit.unitId && !sets.includes(unit.unitId)) sets.push(unit.unitId)
+      const here = unit.vehicles.filter((v) => String(v.typeOfVehicle || '').trim().toUpperCase() !== 'L' && !(v.cabs && v.cabs > 0)).length
+      coaches = Math.max(coaches, here)
+    }
+  }
+  return locomotives.length > 0 ? { coaches, locomotives, sets } : null
 }

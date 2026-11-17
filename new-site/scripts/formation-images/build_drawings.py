@@ -4,7 +4,7 @@ Only classes seen on the site (see /units) and only the non-raised drawings are 
 Re-run after cut_cars.py / tighten_cars.py, then upload with rail-core/scripts/deploy-drawings.sh.
 
 Output (local, not committed): data/formation-images/publish/
-    index.json                                  classes, formations, car widths and heights, credit, "png", "version"
+    index.json                                  classes, formations, car widths, heights and end insets, credit, "png", "version"
     <group>/<class>/<operator>/<CODE>.svg
     <group>/<class>/<operator>/<CODE>.png       the same car pre-rendered at PNG_PX_PER_UNIT, for clients
                                                 that cannot draw SVG (iOS; index.png.pxPerUnit says the scale)
@@ -35,14 +35,32 @@ def rasterize(svg_files):
         img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(f.svg);
         try { await img.decode(); } catch (e) { out[f.name] = null; continue; }
         const c = document.createElement('canvas'); c.width = f.w; c.height = f.h;
-        c.getContext('2d').drawImage(img, 0, 0, f.w, f.h);
-        out[f.name] = c.toDataURL('image/png').split(',')[1];
+        const g = c.getContext('2d'); g.drawImage(img, 0, 0, f.w, f.h);
+        // How far the solid body starts in from each end (pixels). Body rows are the rows that are solid
+        // across nearly the whole car; an end counts as reached where half of those rows are filled.
+        const W = f.w, H = f.h, d = g.getImageData(0, 0, W, H).data, body = [];
+        for (let y = 0; y < H; y++) {
+          let first = -1, last = -1, n = 0;
+          for (let x = 0; x < W; x++) { if (d[(y*W+x)*4+3] > 40) { if (first < 0) first = x; last = x; n++; } }
+          if (first < 0) continue;
+          const span = last - first + 1;
+          if (span >= 0.6 * W && n / span >= 0.9) body.push(y);
+        }
+        let ins = [0, 0];
+        if (body.length) {
+          const frac = (x) => { let k = 0; for (const y of body) if (d[(y*W+x)*4+3] > 40) k++; return k / body.length; };
+          let L = 0; while (L < W && frac(L) < 0.5) L++;
+          let R = 0; while (R < W && frac(W - 1 - R) < 0.5) R++;
+          ins = [L, R];
+        }
+        out[f.name] = { png: c.toDataURL('image/png').split(',')[1], ins };
       }
       document.getElementById('out').textContent = JSON.stringify(out);
     })();
     """
     tmp = Path(__file__).parent / "_raster.html"
     done = 0
+    insets = {}
     for i in range(0, len(svg_files), 20):
         batch = []
         for p in svg_files[i:i + 20]:
@@ -56,13 +74,14 @@ def rasterize(svg_files):
                               "--dump-dom", f"file://{tmp}"], capture_output=True, text=True, timeout=600).stdout
         m = re.search(r'<pre id="out">(.*?)</pre>', res, re.S)
         data = json.loads(html.unescape(m.group(1))) if m else {}
-        for name, b64 in data.items():
-            if not b64:
+        for name, item in data.items():
+            if not item:
                 raise SystemExit("could not rasterize " + name)
-            Path(name).with_suffix(".png").write_bytes(base64.b64decode(b64))
+            Path(name).with_suffix(".png").write_bytes(base64.b64decode(item["png"]))
+            insets[name] = [round(item["ins"][0] / PNG_PX_PER_UNIT, 1), round(item["ins"][1] / PNG_PX_PER_UNIT, 1)]
             done += 1
     tmp.unlink(missing_ok=True)
-    return done
+    return done, insets
 
 
 def _car_parts(path):
@@ -158,8 +177,16 @@ for c in CLASSES:
         art["formations"]["3car"] = [std[0], {"car": mid_code, "flip": False}, std[1]]
         print("  middle car for", c, op)
     out["classes"][c] = {"group": e["group"], "operators": ops}
-n_png = rasterize(sorted(DST.rglob("*.svg")))
+n_png, insets = rasterize(sorted(DST.rglob("*.svg")))
 print("png cars", n_png)
+# Publish each car's end insets (drawing units, left and right as drawn) so a client can close the gap at a
+# joint exactly: the gap is the first car's right inset plus the next car's left inset.
+for cls_id, entry in out["classes"].items():
+    for op_id, art in entry["operators"].items():
+        art["insets"] = {
+            code: insets.get(str(DST / entry["group"] / cls_id / op_id / f"{code}.svg"), [0, 0])
+            for code in art["sizes"]
+        }
 out["png"] = {"pxPerUnit": PNG_PX_PER_UNIT}
 h = hashlib.sha256()
 for f in sorted(DST.rglob("*.svg")):

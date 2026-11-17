@@ -23,6 +23,7 @@ import {
   type PtacStage,
 } from '../../../utils/ptacStages'
 import { UnitDiagram } from './UnitDiagram'
+import { diagramVehiclesFromPtac } from '../../../utils/diagramUnits'
 import './CarriageMap.css'
 
 const SHOW_ALL_STOPS = '__all__'
@@ -490,8 +491,8 @@ function renderPtacStages(
                       <UnitDiagram
                         fleetId={g.fleetId}
                         vehicleCount={g.vehicles.length}
-                        reversed={g.reversed}
                         toc={toc}
+                        vehicles={diagramVehiclesFromPtac(g.vehicles, g.reversed)}
                       />
                     )}
                     {purpose === 'stock' ? (

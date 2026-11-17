@@ -31,8 +31,9 @@
   align-items: flex-end;
   flex: 0 0 auto;
 }
-/* Cars sit flush. Each cell is drawn 1px wider (see UnitDiagram.tsx) and pulled back by
-   1px, so it overlaps its neighbour: no hairline seam, and coupled units touch too. */
+/* Cars sit flush. Each car keeps its true width and the next one is pulled back over its end by the
+   joint overlap set inline in UnitDiagram.tsx (sized from the two cars that meet), so there is no
+   hairline seam or notch, and coupled units touch too. */
 .cmap-diagram-cell {
   display: flex;
   flex-direction: column;
@@ -110,4 +111,18 @@
   .cmap-diagram::-webkit-scrollbar {
     display: none;
   }
+}
+
+/* Service page: one strip per leg when the formation changes (e.g. a set that reverses at Leeds). */
+.svc-formation-stages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+.svc-formation-stage__label {
+  margin: 0 0 4px;
+  font-size: 12px;
+  text-align: center;
+  opacity: 0.75;
 }

@@ -33,3 +33,21 @@ describe('coachCountFromUnitIds by operator', () => {
     expect(coachCountFromUnitIds(['170401'], 'nt')).toBe(3)
   })
 })
+
+describe('coachCountFromUnitIds for InterCity 225 sets', () => {
+  it('counts an NL set as 9 vehicles: locomotive, seven coaches and the driving trailer', () => {
+    expect(coachCountFromUnitIds(['NL12'])).toBe(9)
+    expect(coachCountFromUnitIds(['nl08'], 'GR')).toBe(9)
+  })
+
+  it('adds a coupled pair and mixes with numbered units', () => {
+    expect(coachCountFromUnitIds(['NL12', 'NL17'])).toBe(18)
+    expect(coachCountFromUnitIds(['NL12', '800113'])).toBe(14)
+  })
+
+  it('does not treat other ids as sets', () => {
+    expect(coachCountFromUnitIds(['NL1'])).toBeNull()
+    expect(coachCountFromUnitIds(['NLX12'])).toBeNull()
+    expect(coachCountFromUnitIds(['AB12'])).toBeNull()
+  })
+})

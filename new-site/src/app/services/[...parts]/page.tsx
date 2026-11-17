@@ -10,7 +10,7 @@ import { useStations } from '@/hooks/useStations'
 import { BUTTwoButtonBar, BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import { TextCard } from '@/components/cards'
-import { diagramUnitsForTrain } from '@/utils/diagramUnits'
+import { diagramStagesFromConsist, diagramUnitsForTrain, hauledSetSummary } from '@/utils/diagramUnits'
 import {
   CarriageMap,
   DiagramAttribution,
@@ -143,9 +143,20 @@ function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
   const visible = count != null ? Math.min(count, 12) : 0
   const prefix = data.cancelled ? 'Was formed of' : 'Formed of'
   const carriagePhrase = count != null ? `${count} carriage${count === 1 ? '' : 's'}` : ''
-  const title = [prefix, carriagePhrase, units.length ? `by ${units.join(' + ')}` : '']
-    .filter(Boolean)
-    .join(' ')
+  // A locomotive-hauled set reads like Realtime Trains: "Formed of 7 coaches by 91130 (set NL12)".
+  const hauled = hauledSetSummary(data.consist)
+  const title = hauled
+    ? [
+        prefix,
+        `${hauled.coaches} coach${hauled.coaches === 1 ? '' : 'es'}`,
+        `by ${hauled.locomotives.join(' + ')}`,
+        hauled.sets.length ? `(set ${hauled.sets.join(' + ')})` : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+    : [prefix, carriagePhrase, units.length ? `by ${units.join(' + ')}` : '']
+        .filter(Boolean)
+        .join(' ')
   const pills = visible > 0 ? (
     <span className="svc-formation-strip__coaches">
       {Array.from({ length: visible }, (_, index) => {
@@ -154,6 +165,12 @@ function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
       })}
     </span>
   ) : undefined
+  // Drawn from the consist's own vehicles when it lists them, one strip per leg when the formation changes
+  // (a hauled set can leave with the driving trailer leading and reverse so the locomotive leads).
+  const stages = diagramStagesFromConsist(data.consist)
+  const stopName = new Map((data.stops || []).map((stop) => [stop.tpl, stop.name || stop.tpl]))
+  const place = (tpl: string | null) => (tpl ? stopName.get(tpl) || tpl : '?')
+  const clock = (dt: string | null) => (dt ? dt.slice(11, 16) : '')
   return (
     <TextCard
       static
@@ -162,12 +179,28 @@ function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
       title={title}
       ariaLabel={title}
       description={
-        <TrainDiagram
-          units={diagramUnitsForTrain(units, count).length ? diagramUnitsForTrain(units, count) : fallbackUnits}
-          reversed={data.reverseFormation}
-          toc={data.toc}
-          fallback={pills}
-        />
+        stages.length > 0 ? (
+          <div className="svc-formation-stages">
+            {stages.map((stage, i) => (
+              <div key={`${stage.startTpl}-${stage.startDt}-${i}`} className="svc-formation-stage">
+                {stages.length > 1 && (
+                  <p className="svc-formation-stage__label">
+                    {place(stage.startTpl)} → {place(stage.endTpl)}
+                    {clock(stage.startDt) ? ` · ${clock(stage.startDt)}–${clock(stage.endDt)}` : ''}
+                  </p>
+                )}
+                <TrainDiagram units={stage.units} toc={data.toc} fallback={i === 0 ? pills : null} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <TrainDiagram
+            units={diagramUnitsForTrain(units, count).length ? diagramUnitsForTrain(units, count) : fallbackUnits}
+            reversed={data.reverseFormation}
+            toc={data.toc}
+            fallback={pills}
+          />
+        )
       }
     />
   )

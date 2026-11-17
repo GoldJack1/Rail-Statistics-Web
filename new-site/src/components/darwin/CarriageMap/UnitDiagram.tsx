@@ -22,6 +22,38 @@ interface CarRef { car: string; flip: boolean }
 interface OperatorArt {
   formations: Record<string, CarRef[]>
   sizes: Record<string, number>
+  /** How far the solid body starts in from each end of a car, [left, right] as drawn, in drawing units. */
+  insets?: Record<string, [number, number]>
+}
+
+/** Overlap between neighbouring cars is never less than this (0.4 m): rounded roof corners leave a notch otherwise. */
+const MIN_JOIN_OVERLAP_UNITS = 4
+const MAX_JOIN_OVERLAP_UNITS = 40
+
+/** One car as laid out in the strip, with what is needed to close the joint to the next car. */
+interface PlacedCar {
+  car: string
+  flip: boolean
+  size: number
+  insetLeft: number
+  insetRight: number
+}
+
+/**
+ * How far to overlap two neighbouring cars so their bodies meet. The gap at a joint is the empty space at the
+ * first car's right end plus the empty space at the next car's left end (which end that is depends on the
+ * mirroring). Cars that butt exactly keep the minimum; articulated and tapered-end stock overlap by the gap.
+ */
+export function joinOverlapUnits(a: PlacedCar | undefined, b: PlacedCar | undefined): number {
+  if (!a || !b) return MIN_JOIN_OVERLAP_UNITS
+  const right = a.flip ? a.insetLeft : a.insetRight
+  const left = b.flip ? b.insetRight : b.insetLeft
+  return Math.min(MAX_JOIN_OVERLAP_UNITS, Math.max(MIN_JOIN_OVERLAP_UNITS, right + left + 1))
+}
+
+/** CSS length for an overlap in drawing units, at the strip's scale (at least 1px). */
+function overlapCss(units: number): string {
+  return `max(1px, calc(${units} * var(--cmap-diagram-scale, 0.42) * 1px))`
 }
 interface DiagramIndex {
   credit: string
@@ -32,12 +64,29 @@ interface DiagramIndex {
 
 export type DiagramLoadTone = 'ontime' | 'delayed' | 'cancelled' | null
 
+/** One vehicle of a unit as the consist lists it (PTAC). */
+export interface DiagramVehicle {
+  lengthMm?: number | null
+  /** Driving cabs on this vehicle. A vehicle with a cab (or a locomotive) is drawn with a cab end. */
+  cabs?: number | null
+  /** A locomotive (PTAC type "L"). */
+  isLoco?: boolean
+  /** The vehicle number, e.g. "11312". Used to tell the coach types of a locomotive-hauled set apart. */
+  id?: string | null
+}
+
 export interface DiagramUnit {
   /** PTAC fleet id such as "800/1". Preferred when present. */
   fleetId?: string | null
   /** Unit number such as "800033"; the class is read from its first three digits. */
   unitId?: string | null
   vehicleCount: number
+  /**
+   * The unit's actual vehicles, front first (already reversed for a reversed formation). When given, the
+   * cars are chosen vehicle by vehicle, so a locomotive and a driving trailer land where the consist puts
+   * them. Without it the set is drawn from the vehicle count alone.
+   */
+  vehicles?: DiagramVehicle[]
 }
 
 const ENABLED = process.env.NEXT_PUBLIC_BETA_SITE === 'true'
@@ -143,6 +192,101 @@ function pickFormation(art: OperatorArt, n: number): CarRef[] | null {
   return candidates[0]
 }
 
+/**
+ * The drawn formation turned to match the unit: the art is drawn with one particular end at the left, so
+ * when the unit's first vehicle is the length of the art's last car (the other end), the art is reversed and
+ * every car mirrored. A locomotive-hauled set drawn locomotive-first is reversed when the driving trailer leads.
+ */
+function orientToVehicles(drawn: CarRef[], vehicles: DiagramVehicle[], sizes: Record<string, number>): CarRef[] {
+  if (drawn.length < 2 || vehicles.length < 2) return drawn
+  const len = (v: DiagramVehicle) => (v.lengthMm ?? 0) / 100
+  const first = vehicles[0]
+  const last = vehicles[vehicles.length - 1]
+  if (len(first) <= 0 || len(last) <= 0) return drawn
+  const sz = (c: CarRef) => sizes[c.car] || 0
+  const asDrawn = Math.abs(sz(drawn[0]) - len(first)) + Math.abs(sz(drawn[drawn.length - 1]) - len(last))
+  const turned = Math.abs(sz(drawn[drawn.length - 1]) - len(first)) + Math.abs(sz(drawn[0]) - len(last))
+  if (turned >= asDrawn) return drawn
+  return [...drawn].reverse().map((c) => ({ ...c, flip: !c.flip }))
+}
+
+/**
+ * Coach kinds of a Mk4 (InterCity 225) set, from the vehicle number, as Realtime Trains tells them apart:
+ * 10xxx buffet (RSB), 11xxx First (TFO), 122xx Standard end (TSOE), other 12xxx Standard (TSO).
+ */
+export function mk4CoachKind(vehicleId: string | null | undefined): 'tfo' | 'rsb' | 'tsoe' | 'tso' | null {
+  const id = String(vehicleId || '').trim()
+  if (/^10\d{3}$/.test(id)) return 'rsb'
+  if (/^11\d{3}$/.test(id)) return 'tfo'
+  if (/^122\d{2}$/.test(id)) return 'tsoe'
+  if (/^12\d{3}$/.test(id)) return 'tso'
+  return null
+}
+
+/** The IC225 art's coaches in the order GB Trains drew them (locomotive end first): which kind each is. */
+const MK4_ART_KIND: Record<string, 'tfo' | 'rsb' | 'tsoe' | 'tso'> = {
+  MID8: 'tsoe', MID9: 'tso', MID10: 'tso', MID11: 'tso', MID12: 'rsb', MID13: 'tfo', MID14: 'tfo',
+}
+
+/**
+ * Cars for a unit's actual vehicles, front first. The drawn formation supplies the art: its first and last
+ * cars are the cab (end) cars, the rest are the middle cars. The art is turned to match which end leads (see
+ * orientToVehicles), the first vehicle takes the first end car (cab facing left) and the last takes the other
+ * (cab facing right), and the other vehicles take the middle cars in turn. For a Mk4 set the coaches are
+ * matched by kind (First, buffet, Standard) from their vehicle numbers, so each lands where it really is.
+ */
+export function carsFromVehicles(
+  drawn: CarRef[],
+  vehicles: DiagramVehicle[],
+  sizes: Record<string, number>,
+): CarRef[] {
+  if (drawn.length === 0 || vehicles.length === 0) return []
+  const pool = orientToVehicles(drawn, vehicles, sizes)
+  const poolMids = pool.slice(1, -1)
+  const last = vehicles.length - 1
+
+  // Mk4 coaches by kind, when every non-cab vehicle can be told apart and the art has a coach of that kind.
+  // The pool is already turned to match the unit, so its cars carry the right mirroring.
+  const byKind: Record<string, CarRef[]> = {}
+  for (const mid of poolMids) {
+    const kind = MK4_ART_KIND[mid.car]
+    if (kind) (byKind[kind] ||= []).push(mid)
+  }
+  const isEndVehicle = (v: DiagramVehicle) => !!v.isLoco || (v.cabs ?? 0) > 0
+  const kinds = vehicles.map((v) => (isEndVehicle(v) ? null : mk4CoachKind(v.id)))
+  const middleCount = vehicles.filter((v) => !isEndVehicle(v)).length
+  const useKinds =
+    middleCount > 0 && vehicles.every((v, i) => isEndVehicle(v) || (kinds[i] !== null && byKind[kinds[i]!]?.length > 0))
+
+  const used: Record<string, number> = {}
+  let midNo = 0
+  return vehicles.map((v, i) => {
+    if (!isEndVehicle(v)) {
+      if (useKinds) {
+        const kind = kinds[i]!
+        used[kind] = (used[kind] ?? -1) + 1
+        const options = byKind[kind]
+        const pick = options[used[kind] % options.length]
+        return { car: pick.car, flip: pick.flip }
+      }
+      const mid = poolMids.length ? poolMids[midNo++ % poolMids.length] : pool[0]
+      return { car: mid.car, flip: mid.flip }
+    }
+    if (i === 0) return { car: pool[0].car, flip: pool[0].flip }
+    if (i === last) return { car: pool[pool.length - 1].car, flip: pool[pool.length - 1].flip }
+    // A cab vehicle in the middle of the unit: the end car closest to its length.
+    const want = (v.lengthMm ?? 0) / 100
+    const ends = [pool[0], pool[pool.length - 1]]
+    let best = ends[0]
+    if (want > 0) {
+      for (const candidate of ends) {
+        if (Math.abs((sizes[candidate.car] || 0) - want) < Math.abs((sizes[best.car] || 0) - want)) best = candidate
+      }
+    }
+    return { car: best.car, flip: best.flip }
+  })
+}
+
 interface UnitView {
   slug: string
   /** <group>/<class>/<operator> under /api/drawings */
@@ -187,13 +331,23 @@ function buildView(
   const opKey = chooseOperatorKey(cls.operators, wanted, unit.vehicleCount)
   const art = opKey ? cls.operators[opKey] : null
   if (!art) return null
-  // vehicleCount 0 = unknown: draw the set as GB Trains drew it.
-  const drawn = unit.vehicleCount > 0
-    ? pickFormation(art, unit.vehicleCount)
+  const withVehicles = !!unit.vehicles?.length
+  const count = withVehicles ? unit.vehicles!.length : unit.vehicleCount
+  // count 0 = unknown: draw the set as GB Trains drew it.
+  const drawn = count > 0
+    ? pickFormation(art, count)
     : (art.formations.standard?.length ? art.formations.standard : pickFormation(art, 99))
   if (!drawn) return null
-  let cars = unit.vehicleCount > 0 ? fitCars(drawn, unit.vehicleCount) : drawn
-  if (reversed) cars = [...cars].reverse().map((c) => ({ ...c, flip: !c.flip }))
+  let cars: CarRef[]
+  if (withVehicles) {
+    // The vehicles are already in display order, so nothing is reversed here.
+    cars = carsFromVehicles(drawn, unit.vehicles!, art.sizes)
+  } else {
+    cars = count > 0 ? fitCars(drawn, count) : drawn
+    // The IC225 art has the locomotive at the left. In the consist's own (unreversed) order the driving
+    // trailer is first, so for this set "not reversed" means the trailer leads.
+    if (reversed !== (slug === 'ic225')) cars = [...cars].reverse().map((c) => ({ ...c, flip: !c.flip }))
+  }
   const total = cars.reduce((s, c) => s + (art.sizes[c.car] || 0), 0)
   if (!total) return null
   return { slug, path: `${cls.group}/${slug}/${opKey}`, version: index.version, art, cars, total }
@@ -277,7 +431,9 @@ export const TrainDiagram: React.FC<{
   className?: string
 }> = ({ units, reversed = false, toc, loadTones, fallback = null, className }) => {
   const index = useDiagramIndex()
-  const unitsKey = units.map((u) => `${u.fleetId || ''}|${u.unitId || ''}|${u.vehicleCount}`).join(',')
+  const unitsKey = units
+    .map((u) => `${u.fleetId || ''}|${u.unitId || ''}|${u.vehicleCount}|${(u.vehicles || []).map((v) => `${v.lengthMm ?? ''}/${v.cabs ?? ''}/${v.isLoco ? 'L' : ''}`).join('+')}`)
+    .join(',')
 
   const views = useMemo(() => {
     if (!ENABLED || !index || units.length === 0) return null
@@ -360,6 +516,16 @@ export const TrainDiagram: React.FC<{
 
   // Keep every car the same height: if any car shows a loading bar, reserve the space on all.
   const showBars = !!loadTones?.some(Boolean)
+  // Every car in the strip, in order, so the joint between two units is closed like the joints inside one.
+  const placed: PlacedCar[] = views.flatMap((v) =>
+    v.cars.map((c) => ({
+      car: c.car,
+      flip: c.flip,
+      size: v.art.sizes[c.car] || 0,
+      insetLeft: v.art.insets?.[c.car]?.[0] ?? 0,
+      insetRight: v.art.insets?.[c.car]?.[1] ?? 0,
+    })),
+  )
   let carNo = 0
   return (
     <div
@@ -385,12 +551,20 @@ export const TrainDiagram: React.FC<{
         {views.map((v, vi) => (
           <div key={`${v.slug}-${vi}`} className="cmap-diagram-unit">
             {v.cars.map((c, i) => {
-              const tone = loadTones?.[carNo++] ?? null
+              const at = carNo++
+              const tone = loadTones?.[at] ?? null
+              // A car keeps its true width; the next car is pulled back over its end by the joint overlap.
+              // The last car has nothing after it, so it sits flush with the end of the strip.
+              const isLast = at === placed.length - 1
+              const overlap = overlapCss(joinOverlapUnits(placed[at], placed[at + 1]))
               return (
                 <div
                   key={`${c.car}-${i}`}
                   className="cmap-diagram-cell"
-                  style={{ width: `calc(${v.art.sizes[c.car] || 0} * var(--cmap-diagram-scale, 0.42) * 1px + var(--cmap-diagram-overlap, 1px))` }}
+                  style={{
+                    width: `calc(${v.art.sizes[c.car] || 0} * var(--cmap-diagram-scale, 0.42) * 1px)`,
+                    marginRight: isLast ? 0 : `calc(-1 * ${overlap})`,
+                  }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -421,8 +595,10 @@ export const UnitDiagram: React.FC<{
   vehicleCount: number
   reversed?: boolean
   toc?: string | null
-}> = ({ fleetId, vehicleCount, reversed = false, toc }) => (
-  <TrainDiagram units={[{ fleetId, vehicleCount }]} reversed={reversed} toc={toc} />
+  /** The unit's vehicles front first; when given the drawing follows them (see DiagramUnit.vehicles). */
+  vehicles?: DiagramVehicle[]
+}> = ({ fleetId, vehicleCount, reversed = false, toc, vehicles }) => (
+  <TrainDiagram units={[{ fleetId, vehicleCount, vehicles }]} reversed={reversed} toc={toc} />
 )
 
 export default UnitDiagram
