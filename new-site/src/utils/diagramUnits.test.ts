@@ -110,4 +110,18 @@ describe('hauledSetSummary', () => {
     expect(hauledSetSummary(emu)).toBeNull()
     expect(hauledSetSummary(null)).toBeNull()
   })
+
+  it('names both power cars of an InterCity 125 set and counts only its coaches', () => {
+    const hst = [
+      { vehicleId: '43031', typeOfVehicle: 'L', position: 1, lengthMm: 17800, cabs: null },
+      ...[2, 3, 4, 5, 6].map((p) => ({ vehicleId: `4${p}000`, typeOfVehicle: 'C', position: p, lengthMm: 23000, cabs: null })),
+      { vehicleId: '43012', typeOfVehicle: 'L', position: 7, lengthMm: 17800, cabs: null },
+    ]
+    const c = { allocations: [{
+      allocationOrigin: { tiploc: 'ABRDEEN' }, allocationOriginDateTime: '2026-11-17T11:00:00',
+      allocationDestination: { tiploc: 'GLGQHL' }, allocationDestinationDateTime: '2026-11-17T14:00:00',
+      resourceGroupPosition: 1, reversed: false, resourceGroups: [{ unitId: 'HA01', fleetId: '253/4', vehicles: hst }],
+    }] } as never
+    expect(hauledSetSummary(c)).toEqual({ coaches: 5, locomotives: ['43031', '43012'], sets: ['HA01'] })
+  })
 })

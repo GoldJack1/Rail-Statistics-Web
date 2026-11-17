@@ -1,27 +1,98 @@
 .ds-tdp-page { background-color: var(--bg-tertiary); }
 .ds-tdp { padding: var(--space-lg) 0 var(--space-4xl); display: flex; flex-direction: column; gap: var(--space-lg); }
-.ds-tdp__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-md); }
+
+/* Three short info cards, one per topic */
+.ds-tdp__info { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--space-md); }
+.ds-tdp__info-card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: var(--space-md); }
+.ds-tdp__info-card h2 { margin: 0 0 4px; font-size: var(--text-base, 1rem); }
+.ds-tdp__info-card p { margin: 0; font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.45; }
+
+/* Sticky bar: search, filters, progress, actions */
+.ds-tdp__bar {
+  position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-md);
+  padding: var(--space-sm) var(--space-md); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px;
+}
 .ds-tdp__search {
-  flex: 1 1 16rem; min-width: 0; padding: 0.6rem 0.9rem; font: inherit;
-  color: var(--text-primary); background: var(--bg-secondary);
-  border: 1px solid var(--border-color); border-radius: var(--radius-md, 8px);
+  flex: 1 1 14rem; min-width: 0; padding: 0.55rem 0.85rem; font: inherit; color: var(--text-primary);
+  background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px;
 }
-.ds-tdp__toggle { display: inline-flex; align-items: center; gap: 0.4rem; font-size: var(--text-sm); color: var(--text-secondary); }
-.ds-tdp__note { margin: 0; font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.45; max-width: 52rem; }
-.ds-tdp__class { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-lg, 12px); padding: var(--space-md); min-width: 0; }
-.ds-tdp__class-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-sm); }
-.ds-tdp__class-head h2 { margin: 0; font-size: var(--text-xl, 1.25rem); }
-.ds-tdp__lengths { font-size: var(--text-sm); color: var(--text-secondary); }
-.ds-tdp__fleets { list-style: none; margin: var(--space-sm) 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-xs, 6px); }
-.ds-tdp__fleet {
-  display: inline-flex; flex-direction: column; gap: 2px; padding: 6px 10px; font-size: 12px;
-  background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-secondary);
+.ds-tdp__chips { display: flex; gap: 6px; }
+.ds-tdp__chip {
+  padding: 0.4rem 0.8rem; font: inherit; font-size: 13px; color: var(--text-secondary); cursor: pointer;
+  background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 999px;
 }
+.ds-tdp__chip.is-on { color: #fff; background: var(--accent-base, #b5202e); border-color: var(--accent-base, #b5202e); }
+.ds-tdp__progress { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; color: var(--text-secondary); }
+.ds-tdp__count--ok { color: hsl(141 60% 34%); }
+.ds-tdp__count--remove { color: hsl(0 65% 48%); }
+.ds-tdp__actions { display: flex; flex-wrap: wrap; gap: var(--space-sm); margin-left: auto; }
+.ds-tdp__loading { margin: 0; color: var(--text-secondary); font-size: var(--text-sm); }
+
+/* Class card */
+.ds-tdp__class { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: var(--space-md); min-width: 0; display: flex; flex-direction: column; gap: var(--space-md); }
+.ds-tdp__class-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.ds-tdp__class-head h2 { margin: 0 6px 0 0; font-size: var(--text-xl, 1.25rem); }
+.ds-tdp__pill { padding: 2px 10px; font-size: 12px; color: var(--text-secondary); background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 999px; }
+.ds-tdp__pill--done { color: hsl(141 60% 30%); border-color: hsl(141 60% 42%); }
+.ds-tdp__link { margin-left: auto; padding: 0; font: inherit; font-size: 13px; color: var(--accent-base, #b5202e); background: none; border: 0; cursor: pointer; text-decoration: underline; }
+
+.ds-tdp__fleets { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.ds-tdp__fleet { display: inline-flex; flex-direction: column; gap: 2px; padding: 6px 10px; font-size: 12px; color: var(--text-secondary); background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px; }
 .ds-tdp__fleet strong { color: var(--text-primary); font-size: 13px; }
 .ds-tdp__fleet--ok { border-color: hsl(141 72% 42%); }
 .ds-tdp__fleet--bad { border-color: hsl(0 72% 52%); background: hsl(0 72% 52% / 0.1); }
-.ds-tdp__operator h3 { margin: var(--space-md) 0 var(--space-xs, 6px); font-size: var(--text-sm); text-transform: capitalize; color: var(--text-secondary); }
-.ds-tdp__row { display: grid; grid-template-columns: 9rem minmax(0, 1fr); align-items: end; gap: var(--space-sm); padding: 4px 0; }
-.ds-tdp__row-label { font-size: 12px; color: var(--text-secondary); padding-bottom: 10px; }
+
+/* One card per operator, drawings stacked inside */
+.ds-tdp__operators { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 26rem), 1fr)); gap: var(--space-md); }
+.ds-tdp__operator { min-width: 0; padding: var(--space-sm) var(--space-md); background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 10px; }
+.ds-tdp__operator h3 { margin: 0 0 var(--space-xs, 6px); font-size: var(--text-sm); text-transform: capitalize; }
+.ds-tdp__row { padding: 8px; margin: 0 -8px; border-radius: 8px; border: 1px solid transparent; }
+.ds-tdp__row + .ds-tdp__row { margin-top: 4px; }
+.ds-tdp__row--ok { background: hsl(141 60% 42% / 0.1); border-color: hsl(141 60% 42% / 0.45); }
+.ds-tdp__row--remove { background: hsl(0 72% 52% / 0.1); border-color: hsl(0 72% 52% / 0.45); }
+.ds-tdp__row--remove .cmap-diagram { opacity: 0.45; }
+.ds-tdp__row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.ds-tdp__row-label { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.ds-tdp__row-label em { font-weight: 400; font-style: normal; color: var(--text-secondary); }
 .ds-tdp__row .cmap-diagram { margin-bottom: 0; }
-@media (max-width: 600px) { .ds-tdp__row { grid-template-columns: minmax(0, 1fr); gap: 0; } .ds-tdp__row-label { padding-bottom: 0; } }
+
+/* Correct / Remove: two buttons in one pill, only one can be on */
+.ds-tdp__seg { display: inline-flex; flex: 0 0 auto; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; }
+.ds-tdp__seg-btn { padding: 4px 12px; font: inherit; font-size: 12px; color: var(--text-secondary); cursor: pointer; background: var(--bg-secondary); border: 0; }
+.ds-tdp__seg-btn + .ds-tdp__seg-btn { border-left: 1px solid var(--border-color); }
+.ds-tdp__seg-btn--ok.is-on { color: #fff; background: hsl(141 60% 34%); }
+.ds-tdp__seg-btn--remove.is-on { color: #fff; background: hsl(0 65% 48%); }
+.ds-tdp__seg-btn:focus-visible, .ds-tdp__chip:focus-visible, .ds-tdp__link:focus-visible { outline: 2px solid var(--accent-base, #b5202e); outline-offset: 2px; }
+
+.ds-tdp__notes { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-secondary); }
+.ds-tdp__notes textarea { width: 100%; padding: 0.5rem 0.7rem; font: inherit; font-size: var(--text-sm); color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px; resize: vertical; }
+
+@media (max-width: 600px) { .ds-tdp__bar { position: static; } .ds-tdp__actions { margin-left: 0; } }
+
+.ds-tdp__gap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13px; color: var(--text-secondary); }
+/* Own track and thumb: the site's global input styles would otherwise turn it into a wide white box. */
+.ds-tdp__gap input[type='range'], .ds-tdp__scale input[type='range'] {
+  -webkit-appearance: none; appearance: none; flex: 0 1 22rem; width: 22rem; max-width: 100%; min-width: 8rem;
+  height: 22px !important; min-height: 0 !important; margin: 0; padding: 0; background: transparent; border: 0; box-shadow: none; cursor: pointer;
+}
+.ds-tdp__gap input[type='range']::-webkit-slider-runnable-track, .ds-tdp__scale input[type='range']::-webkit-slider-runnable-track { height: 6px; background: hsl(0 0% 55% / 0.55); border-radius: 3px; }
+.ds-tdp__gap input[type='range']::-moz-range-track, .ds-tdp__scale input[type='range']::-moz-range-track { height: 6px; background: hsl(0 0% 55% / 0.55); border-radius: 3px; }
+.ds-tdp__gap input[type='range']::-webkit-slider-thumb, .ds-tdp__scale input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 18px; height: 18px; margin-top: -6px; border-radius: 50%;
+  background: var(--accent-base, #b5202e); border: 2px solid var(--bg-secondary); box-shadow: 0 0 0 1px var(--accent-base, #b5202e);
+}
+.ds-tdp__gap input[type='range']::-moz-range-thumb, .ds-tdp__scale input[type='range']::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%; background: var(--accent-base, #b5202e); border: 2px solid var(--bg-secondary);
+}
+.ds-tdp__gap input[type='range']:focus-visible, .ds-tdp__scale input[type='range']:focus-visible { outline: 2px solid var(--accent-base, #b5202e); outline-offset: 3px; }
+.ds-tdp__gap output { min-width: 5.5rem; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.ds-tdp__link--inline { margin-left: 0; }
+.ds-tdp__link:disabled { opacity: 0.4; cursor: default; text-decoration: none; }
+
+/* Bigger drawings here than on the site, so joints and liveries can be judged. */
+.ds-tdp .cmap-diagram { --cmap-diagram-scale: var(--tdp-scale, 0.95); }
+
+.ds-tdp__scale { display: flex; align-items: center; gap: 8px 10px; font-size: 13px; color: var(--text-secondary); }
+.ds-tdp__scale input[type='range'] { flex: 0 1 12rem; width: 12rem; }
+.ds-tdp__scale output { min-width: 3.2rem; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.ds-tdp__scale-hint { font-size: 12px; opacity: 0.7; }

@@ -5,6 +5,17 @@ const slug = (fleetId: string | null, unitId: string | null = null) =>
   classSlug({ fleetId, unitId, vehicleCount: 1 })
 
 describe('classSlug', () => {
+  it('maps the ScotRail HST sets to the IC125 drawing, by fleet or by set number', () => {
+    expect(classSlug({ fleetId: '253/5', vehicleCount: 7 })).toBe('ic125')
+    expect(classSlug({ unitId: 'HA18', vehicleCount: 0 })).toBe('ic125')
+  })
+
+  it('reads the named drawings (IC125, IC225, 555) straight from the fleet id', () => {
+    expect(classSlug({ fleetId: 'ic125', vehicleCount: 6 })).toBe('ic125')
+    expect(classSlug({ fleetId: 'IC225', vehicleCount: 9 })).toBe('ic225')
+    expect(classSlug({ fleetId: 't-w-555', vehicleCount: 5 })).toBe('t-w-555')
+  })
+
   it('reads the class from a plain fleet id', () => {
     expect(slug('800/1')).toBe('800')
     expect(slug('444/0')).toBe('444')
@@ -174,5 +185,12 @@ describe('joinOverlapUnits', () => {
     expect(joinOverlapUnits(car(0, 60), car(60, 0))).toBe(40)
     expect(joinOverlapUnits(undefined, car(0, 0))).toBe(4)
     expect(joinOverlapUnits(car(0, 0), undefined)).toBe(4)
+  })
+
+  it('uses the fixed joint overlap of a class', () => {
+    const a = { car: 'a', flip: false, size: 100, insetLeft: 0, insetRight: 15, fixedOverlap: 1.75 }
+    const b = { car: 'b', flip: false, size: 100, insetLeft: 15, insetRight: 0, fixedOverlap: 1.75 }
+    expect(joinOverlapUnits(a, b)).toBe(1.75)
+    expect(joinOverlapUnits(a, { ...b, fixedOverlap: undefined })).toBe(31)
   })
 })

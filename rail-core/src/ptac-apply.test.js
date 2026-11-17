@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "path";
 import { openCatalog } from "./db.js";
-import { applyPtacUnit, consistFromOrigin, lookupConsist, lookupConsistsForUids, replayPtac } from "./ptac-apply.js";
+import { applyPtacUnit, consistFromOrigin, lookupConsist, lookupConsistsForUids, replayPtac, vehicleCountAtBoardCall } from "./ptac-apply.js";
 import { parsePtacMessage } from "./parse-ptac.js";
 
 const SAMPLE_XML = `<?xml version="1.0"?>
@@ -219,4 +219,23 @@ test("PTAC parser still rejects junk resource group ids", () => {
     const xml = SAMPLE_XML.replace("<ResourceGroupId>185111</ResourceGroupId>", `<ResourceGroupId>${bad}</ResourceGroupId>`);
     assert.deepEqual(parsePtacMessage({ bytes: xml }).unitIds, [], `should reject ${JSON.stringify(bad)}`);
   }
+});
+
+test("vehicleCountAtBoardCall counts each vehicle of the units on the train once", () => {
+  const veh = (ids) => ids.map((vehicleId) => ({ vehicleId }));
+  const row = {
+    json: JSON.stringify({
+      allocations: [
+        {
+          allocationOrigin: { tiploc: "ABRDEEN" },
+          allocationOriginDateTime: "2026-11-17T11:00:00",
+          allocationDestination: { tiploc: "GLGQHL" },
+          allocationDestinationDateTime: "2026-11-17T14:00:00",
+          resourceGroups: [{ unitId: "HA01", vehicles: veh(["43031", "42004", "42561", "42046", "42009", "43012", "43012"]) }],
+        },
+      ],
+    }),
+  };
+  assert.equal(vehicleCountAtBoardCall(row, { tiploc: "ABRDEEN", hhmm: "11:00", movement: "departure" }), 6);
+  assert.equal(vehicleCountAtBoardCall({ json: "{}" }), null);
 });

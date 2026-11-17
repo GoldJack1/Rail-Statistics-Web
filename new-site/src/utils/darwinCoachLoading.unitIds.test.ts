@@ -50,4 +50,9 @@ describe('coachCountFromUnitIds for InterCity 225 sets', () => {
     expect(coachCountFromUnitIds(['NLX12'])).toBeNull()
     expect(coachCountFromUnitIds(['AB12'])).toBeNull()
   })
+
+  it('counts a ScotRail HST set as seven vehicles when nothing better is known', () => {
+    expect(coachCountFromUnitIds(['HA18'])).toBe(7)
+    expect(coachCountFromUnitIds(['HA03', 'HA04'])).toBe(14)
+  })
 })

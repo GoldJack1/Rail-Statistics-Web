@@ -9,7 +9,7 @@ import { callScheduledMinutes, dropCifTailAfterPublicTerminus, isPublicPassenger
 import { isPassengerHeadcode } from "./headcode.js";
 import { maskCallAsOf, maskCallsAsOf, maskTrustOverlay, maskTrustOverlayCalls } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
-import { lookupConsistsForUids, unitIdsAtBoardCall } from "./ptac-apply.js";
+import { lookupConsistsForUids, unitIdsAtBoardCall, vehicleCountAtBoardCall } from "./ptac-apply.js";
 import { reinstatementDonorUid } from "./reinstatement.js";
 import {
   associationsForRid,
@@ -463,6 +463,10 @@ export function buildStationBoard({
     const unitIds = consistRow
       ? unitIdsAtBoardCall(consistRow, { tiploc: sourceTpl, hhmm: schedClock, movement })
       : [];
+    // The timetable gives no train length for locomotive-hauled sets and HSTs; the consist lists their vehicles.
+    const consistVehicles = consistRow
+      ? vehicleCountAtBoardCall(consistRow, { tiploc: sourceTpl, hhmm: schedClock, movement })
+      : null;
     const cancelInfo = r.s_cancelled || r.cancelled ? cancellationReason(r.cancel_reason) : null;
     const plat = platformText(r.platform);
     const isPassing = slot === "PP";
@@ -498,7 +502,7 @@ export function buildStationBoard({
       cancelled: Boolean(cancelInfo),
       cancellation: cancelInfo,
       delayReason: r.delay_reason ? { source: "ts", reason: r.delay_reason } : null,
-      trainLength: r.length_cars ?? null,
+      trainLength: r.length_cars ?? consistVehicles ?? null,
       // Lets the site pick stock art for services with no unit numbers (e.g. LNER 91 + Mk4 = timing load 330).
       timingLoad: r.timing_load || null,
       powerType: r.power_type || null,

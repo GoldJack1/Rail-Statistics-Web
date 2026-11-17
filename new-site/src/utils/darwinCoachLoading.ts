@@ -87,6 +87,12 @@ export function coachCountFromUnitIds(unitIds: string[] | null | undefined, toc?
       total += NL_SET_VEHICLES
       continue
     }
+    // ScotRail HST sets (HA01-HA26): two power cars and four or five Mk3 coaches. The board gives the real count
+    // when it has one; without it a set is most often 2 + 5.
+    if (/^HA\d{2}$/i.test(id)) {
+      total += HST_SET_VEHICLES
+      continue
+    }
     const match = id.match(/^(\d{3})/)
     if (!match) continue
     total += carsForClassNumber(Number(match[1]), toc)
@@ -96,6 +102,9 @@ export function coachCountFromUnitIds(unitIds: string[] | null | undefined, toc?
 
 /** Vehicles in an LNER InterCity 225 set: locomotive + 7 Mk4 coaches + driving trailer. */
 const NL_SET_VEHICLES = 9
+
+/** Vehicles in a ScotRail HST set, when the board does not say: two power cars + five Mk3 coaches. */
+const HST_SET_VEHICLES = 7
 
 export function coachCountFromRow(row: DepartureRow): number | null {
   if (row.trainLength && row.trainLength > 0) return row.trainLength

@@ -115,10 +115,13 @@ export function hauledSetSummary(
   let coaches = 0
   for (const stage of stages) {
     for (const unit of stage.units) {
-      const loco = unit.vehicles.find((v) => String(v.typeOfVehicle || '').trim().toUpperCase() === 'L')
-      if (!loco) continue
-      const id = String(loco.vehicleId || '').trim()
-      if (id && !locomotives.includes(id)) locomotives.push(id)
+      const locos = unit.vehicles.filter((v) => String(v.typeOfVehicle || '').trim().toUpperCase() === 'L')
+      if (locos.length === 0) continue
+      // An InterCity 125 has a power car at each end, so a set can name two locomotives.
+      for (const loco of locos) {
+        const id = String(loco.vehicleId || '').trim()
+        if (id && !locomotives.includes(id)) locomotives.push(id)
+      }
       if (unit.unitId && !sets.includes(unit.unitId)) sets.push(unit.unitId)
       const here = unit.vehicles.filter((v) => String(v.typeOfVehicle || '').trim().toUpperCase() !== 'L' && !(v.cabs && v.cabs > 0)).length
       coaches = Math.max(coaches, here)

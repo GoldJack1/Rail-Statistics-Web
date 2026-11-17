@@ -37,6 +37,43 @@ interface PlacedCar {
   size: number
   insetLeft: number
   insetRight: number
+  /** Overlap for this car's class joints when the class has a fixed one (see FIXED_JOINT_OVERLAP_UNITS). */
+  fixedOverlap?: number
+}
+
+/**
+ * Classes whose joints are set by eye in the design-system "Train Unit Diagrams" page, as overlap in drawing units
+ * (10 per metre). Where cars end in half a gangway (150, 153, 155, 156...) butting them makes the halves kiss, and
+ * any more would lay one gangway over the other. Other classes follow the measured body insets (see joinOverlapUnits).
+ */
+const FIXED_JOINT_OVERLAP_UNITS: Record<string, number> = {
+  '150': 1.75, '153': 0.75, '155': 0.5, '156': 1.5, '158': 2, '159': 2,
+  '165': 1.75, '166': 1.75, '168': 1.5, '170': 2, '171': 1.5,
+  '172': 1.25, '175': 2.25, '180': 1.75, '185': 1, '195': 0.25, '196': 0, '197': 0.25,
+  '220': 2.75, '221': 2.5, '222': 2.5, '230': 0.5, '231': 18.75,
+  '318': 1.25, '320': 1.75, '323': 1.25, '331': 0.25, '333': 2, '334': 0.75, '345': 1, '350': 0, '357': 0.25,
+  '360': 0, '375': 0.5, '376': 1.75, '377': 0.5, '379': 0.5, '380': 1, '385': 0.5, '387': 0.5, '390': 6.5,
+  '395': 0.75, '397': 0.25, '398': 1, '399': 0.5,
+  '444': 0.25, '450': 0.25, '458': 0.5, '465': 2, '466': 2, '484': 1.5, '700': 0.75, '701': 0.25, '707': 0.75,
+  '717': 0.75, '720': 0.75, '730': 0.75, '745': 19.5, '755': 19.5, '756': 19.5, '769': 1.25, '777': 15,
+  '800': 1.75, '801': 1.75, '802': 2, '803': 1.75, '805': 1.75, '807': 1.75, '810': 0.5,
+  '68': 1.5, 'ic125': 1.75, 'ic225': 1.25, 't-w-555': 14.5,
+}
+
+/** Joints that differ from their class's overlap, keyed "<class>/<operator>/<cars>" (the 221s). */
+const FIXED_JOINT_OVERLAP_BY_SET: Record<string, number> = {
+  '221/crosscountry/4': 2.75,
+  '221/grand-central/5': 2.75,
+}
+
+function fixedOverlapFor(slug: string, operator: string, cars: number): number | undefined {
+  return FIXED_JOINT_OVERLAP_BY_SET[`${slug}/${operator}/${cars}`] ?? FIXED_JOINT_OVERLAP_UNITS[slug]
+}
+
+/** The fixed gap between cars of a class, in drawing units (negative = overlap), or undefined when it follows the measured insets. */
+export function classJointGapUnits(slug: string, operator?: string, cars?: number): number | undefined {
+  const overlap = operator && cars ? fixedOverlapFor(slug, operator, cars) : FIXED_JOINT_OVERLAP_UNITS[slug]
+  return overlap === undefined ? undefined : -overlap
 }
 
 /**
@@ -48,12 +85,17 @@ export function joinOverlapUnits(a: PlacedCar | undefined, b: PlacedCar | undefi
   if (!a || !b) return MIN_JOIN_OVERLAP_UNITS
   const right = a.flip ? a.insetLeft : a.insetRight
   const left = b.flip ? b.insetRight : b.insetLeft
+  if (a.fixedOverlap !== undefined && b.fixedOverlap !== undefined) return Math.max(a.fixedOverlap, b.fixedOverlap)
   return Math.min(MAX_JOIN_OVERLAP_UNITS, Math.max(MIN_JOIN_OVERLAP_UNITS, right + left + 1))
 }
 
 /** CSS length for an overlap in drawing units, at the strip's scale (at least 1px). */
-function overlapCss(units: number): string {
-  return `max(1px, calc(${units} * var(--cmap-diagram-scale, 0.42) * 1px))`
+function overlapCss(units: number, exact = false): string {
+  // Joints of 1 unit or more keep at least 1px so no seam shows; an exact value (a hairline, or a gap set on the
+  // design-system page) is used as it is, and a negative overlap opens a real gap.
+  return !exact && units >= 1
+    ? `max(1px, calc(${units} * var(--cmap-diagram-scale, 0.42) * 1px))`
+    : `calc(${units} * var(--cmap-diagram-scale, 0.42) * 1px)`
 }
 export interface DiagramIndex {
   credit: string
@@ -83,6 +125,8 @@ export interface DiagramUnit {
   vehicleCount: number
   /** Force this operator's art (a folder name such as "gwr"); the design-system preview uses it. */
   operator?: string
+  /** With `operator`: draw exactly this named formation ("standard", "3car"...) instead of the closest length. */
+  formation?: string
   /**
    * The unit's actual vehicles, front first (already reversed for a reversed formation). When given, the
    * cars are chosen vehicle by vehicle, so a locomotive and a driving trailer land where the consist puts
@@ -95,7 +139,7 @@ const ENABLED = process.env.NEXT_PUBLIC_BETA_SITE === 'true'
 
 /** GB Trains uses different slugs for a few classes. */
 /** 91 = LNER InterCity 225 (class 91 + Mk4 coaches), drawn as one train under `ic225`. */
-const CLASS_ALIAS: Record<string, string> = { '555': 't-w-555', '91': 'ic225' }
+const CLASS_ALIAS: Record<string, string> = { '555': 't-w-555', '91': 'ic225', '253': 'ic125', '254': 'ic125' }
 
 /** Darwin TOC code -> operator folder in train-svgs (livery). Falls back to "base". */
 const TOC_TO_OPERATOR: Record<string, string> = {
@@ -126,8 +170,9 @@ export function defaultDiagramUnitsForToc(toc: string | null | undefined): Diagr
 let indexPromise: Promise<DiagramIndex | null> | null = null
 function loadIndex(): Promise<DiagramIndex | null> {
   if (!indexPromise) {
-    // No `cache: 'no-store'` here: the API sends a short cache header, so repeat page loads are free.
-    indexPromise = fetch(drawingUrl('index.json', undefined, resolveDarwinBrowserUrl))
+    // `no-cache` = always revalidate with the server (a tiny 304 when unchanged). Without it the browser may serve
+    // the index stale for up to an hour after the art is updated. Cars are versioned in their URLs, so they stay cached.
+    indexPromise = fetch(drawingUrl('index.json', undefined, resolveDarwinBrowserUrl), { cache: 'no-cache' })
       .then((r) => (r.ok ? (r.json() as Promise<DiagramIndex>) : null))
       .catch(() => null)
       .then((index) => {
@@ -150,12 +195,20 @@ export function useDiagramIndex(): DiagramIndex | null {
   return index
 }
 
+/** Drawings that are not a plain class number: asked for by their own name. */
+const NAMED_SLUGS = new Set(['ic125', 'ic225', 't-w-555'])
+
 export function classSlug(unit: DiagramUnit): string | null {
+  const named = (unit.fleetId || '').trim().toLowerCase()
+  if (NAMED_SLUGS.has(named)) return named
   // Fleet ids look like "800/1", "087/2" or, for locomotive + coach sets, "G91/M".
   const fromFleet = /^\s*[A-Za-z]?0*(\d{1,3})(?:\/|\s*$)/.exec(unit.fleetId || '')
   const fromUnit = /^\s*(\d{3})\d{3}\s*$/.exec(unit.unitId || '')
   const num = fromFleet?.[1] || fromUnit?.[1]
   if (num) return CLASS_ALIAS[num] || num
+  // ScotRail InterCity 125 sets (two Class 43 power cars and Mk3 coaches, fleet "253/4" or "253/5") are numbered
+  // HA01-HA26; boards carry no fleet id.
+  if (/^\s*HA\d{2}\s*$/i.test(unit.unitId || '')) return 'ic125'
   // LNER InterCity 225 sets are numbered NL01-NL31 (fleet "G91/M"); boards carry no fleet id.
   if (/^\s*NL\d{2}\s*$/i.test(unit.unitId || '')) return 'ic225'
   return null
@@ -338,7 +391,10 @@ function buildView(
   const withVehicles = !!unit.vehicles?.length
   const count = withVehicles ? unit.vehicles!.length : unit.vehicleCount
   // count 0 = unknown: draw the set as GB Trains drew it.
-  const drawn = count > 0
+  const exact = unit.formation ? art.formations[unit.formation] : undefined
+  const drawn = exact?.length
+    ? exact
+    : count > 0
     ? pickFormation(art, count)
     : (art.formations.standard?.length ? art.formations.standard : pickFormation(art, 99))
   if (!drawn) return null
@@ -432,11 +488,13 @@ export const TrainDiagram: React.FC<{
   loadTones?: DiagramLoadTone[]
   /** Shown while loading and when there is no art for these units. */
   fallback?: React.ReactNode
+  /** Design-system preview: set every joint to exactly this gap in drawing units (negative = overlap). */
+  gapUnits?: number
   className?: string
-}> = ({ units, reversed = false, toc, loadTones, fallback = null, className }) => {
+}> = ({ units, reversed = false, toc, loadTones, fallback = null, className, gapUnits }) => {
   const index = useDiagramIndex()
   const unitsKey = units
-    .map((u) => `${u.operator || ''}|${u.fleetId || ''}|${u.unitId || ''}|${u.vehicleCount}|${(u.vehicles || []).map((v) => `${v.lengthMm ?? ''}/${v.cabs ?? ''}/${v.isLoco ? 'L' : ''}`).join('+')}`)
+    .map((u) => `${u.operator || ''}|${u.formation || ''}|${u.fleetId || ''}|${u.unitId || ''}|${u.vehicleCount}|${(u.vehicles || []).map((v) => `${v.lengthMm ?? ''}/${v.cabs ?? ''}/${v.isLoco ? 'L' : ''}`).join('+')}`)
     .join(',')
 
   const views = useMemo(() => {
@@ -528,6 +586,7 @@ export const TrainDiagram: React.FC<{
       size: v.art.sizes[c.car] || 0,
       insetLeft: v.art.insets?.[c.car]?.[0] ?? 0,
       insetRight: v.art.insets?.[c.car]?.[1] ?? 0,
+      fixedOverlap: fixedOverlapFor(v.slug, v.path.split('/').pop() || '', v.cars.length),
     })),
   )
   let carNo = 0
@@ -560,7 +619,7 @@ export const TrainDiagram: React.FC<{
               // A car keeps its true width; the next car is pulled back over its end by the joint overlap.
               // The last car has nothing after it, so it sits flush with the end of the strip.
               const isLast = at === placed.length - 1
-              const overlap = overlapCss(joinOverlapUnits(placed[at], placed[at + 1]))
+              const overlap = gapUnits !== undefined ? overlapCss(-gapUnits, true) : overlapCss(joinOverlapUnits(placed[at], placed[at + 1]))
               return (
                 <div
                   key={`${c.car}-${i}`}

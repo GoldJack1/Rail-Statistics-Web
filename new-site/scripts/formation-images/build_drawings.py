@@ -23,7 +23,7 @@ PNG_PX_PER_UNIT = 2.0  # art is 10 units per metre: a 26 m car is about 520 px w
 CLASSES = ("150 153 155 156 158 159 165 166 168 170 171 172 175 180 185 195 196 197 220 221 222 230 231 "
            "318 320 323 331 333 334 345 350 357 360 375 376 377 379 380 385 387 390 395 397 398 444 450 "
            "458 465 466 484 700 701 707 717 720 730 745 755 756 769 777 800 801 802 803 805 807 810 "
-           "139 399 t-w-555 ic125 ic225").split()
+           "139 399 68 t-w-555 ic125 ic225").split()
 
 def rasterize(svg_files):
     """Render each car SVG to a PNG next to it, using headless Chrome (canvas), PNG_PX_PER_UNIT px per unit."""
@@ -137,6 +137,29 @@ out = {"credit": idx["credit"], "licence": idx["licence"], "licenceUrl": idx["li
 if DST.exists():
     shutil.rmtree(DST)
 n = 0
+TWO_CAR_FROM_ENDS = {"171"}
+
+REMOVE = {
+    "150/lnr/3car", "150/tfw/3car", "150/base/standard", "150/base/3car", "150/gwr/3car",
+    "153/scotrail/2car", "153/base/2car", "153/base/standard", "156/base/standard",
+    "158/base/standard", "158/tfw/3car", "158/scotrail/3car", "158/swr/3car", "158/base/3car",
+    "159/base/2car", "165/base/3car", "165/base/standard", "170/base/standard", "170/base/3car",
+    "170/northern/2car", "170/scotrail/2car", "180/base/2car", "185/base/2car",
+    "220/base/2car", "221/crosscountry/2car", "221/grand-central/4car", "221/grand-central/2car",
+    "221/base/standard", "221/base/4car", "222/emr-2019/2car", "222/emr/standard", "222/emr/2car",
+    "222/lumo/2car", "222/base/standard", "230/gwr/2car", "230/tfw/2car", "230/base/standard",
+    "323/northern/2car", "323/wmr/2car", "323/base/standard", "331/base/2car", "333/base/2car", "345/base/7car",
+    "357/base/2car", "377/southeastern/2car", "377/southern/2car", "377/base/5car", "377/base/standard",
+    "377/base/3car", "379/base/2car", "387/gatwick-express/2car", "387/base/standard", "387/gtr-white/2car",
+    "387/gwr/2car", "387/heathrow-express/2car", "395/base/2car", "397/base/2car",
+    "444/base/2car", "450/base/2car", "458/base/2car", "465/nse-465908/2car", "465/southeastern/2car",
+    "465/base/standard", "701/base/2car", "717/base/2car", "720/c2c/2car", "720/greater-anglia/2car",
+    "720/base/standard", "730/lnr/2car", "730/wmr/2car", "730/base/standard", "769/base/2car", "777/base/2car",
+    "800/gwr/2car", "800/lner/2car", "800/base/standard", "800/base/9car", "802/gwr/2car", "802/gwr/9car",
+    "802/hull/9car", "802/tpe/9car", "802/hull/2car", "802/tpe/2car", "802/base/standard", "802/base/9car",
+    "68/base/2car", "ic125/intercity/2car", "ic125/scotrail/2car", "ic125/base/standard",
+}
+
 # Lengths of single units seen in service (design-system "Train Unit Diagrams" check) that have no drawing.
 EXTRA_LENGTHS = {
     "150": [3], "153": [2], "158": [3], "168": [4], "195": [2], "196": [2], "221": [4], "331": [3],
@@ -215,6 +238,32 @@ for c in CLASSES:
             if cars:
                 art["formations"][f"{want}car"] = cars
                 have.add(want)
+    # The GB "-2car" file of a 171 shows a driving car and a plain carriage. A 171 2-car is driving car + driving car.
+    for op, art in ops.items():
+        std = art["formations"].get("standard", [])
+        if c in TWO_CAR_FROM_ENDS and len(std) > 2:
+            art["formations"]["2car"] = [std[0], std[-1]]
+
+    # Drawings reviewed and rejected (design-system "Train Unit Diagrams" page): "<class>/<operator>/<formation>".
+    for key in REMOVE:
+        k_cls, k_op, k_name = key.split("/")
+        if k_cls == c and k_op in ops:
+            forms = ops[k_op]["formations"]
+            if k_name in forms:
+                # Formations of the same cars are one drawing on the review page, so remove them together.
+                sig = [(x["car"], x["flip"]) for x in forms[k_name]]
+                for name in [n for n, f in forms.items() if [(x["car"], x["flip"]) for x in f] == sig]:
+                    del forms[name]
+    for op in [o for o, art in ops.items() if not art["formations"]]:
+        shutil.rmtree(DST / e["group"] / c / op, ignore_errors=True)
+        del ops[op]
+    # Drop the cars no remaining formation uses.
+    for op, art in ops.items():
+        used = {x["car"] for f in art["formations"].values() for x in f}
+        for code in set(art["sizes"]) - used:
+            (DST / e["group"] / c / op / f"{code}.svg").unlink(missing_ok=True)
+            art["sizes"].pop(code, None)
+            art["heights"].pop(code, None)
     out["classes"][c] = {"group": e["group"], "operators": ops}
 n_png, insets = rasterize(sorted(DST.rglob("*.svg")))
 print("png cars", n_png)
