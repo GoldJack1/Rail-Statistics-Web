@@ -533,6 +533,26 @@ async function computeLiveDepartures(crs, opts) {
   return board;
 }
 
+/**
+ * Vehicle count and total length of the unit itself. The stored vehicle list can hold the vehicles of units it
+ * was coupled with, so only vehicles planned into this unit (plannedGroupId) are counted when the list says.
+ */
+function ownVehicleStats(vehicles, unitId) {
+  if (!Array.isArray(vehicles) || vehicles.length === 0) return { vehicleCount: null, lengthMm: null };
+  const own = vehicles.filter((v) => String(v?.plannedGroupId || "") === unitId);
+  // The same vehicle can be listed more than once, so count each vehicle number once.
+  const seen = new Set();
+  const list = (own.length ? own : vehicles).filter((v) => {
+    const id = String(v?.vehicleId ?? "");
+    if (!id) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  const lengthMm = list.reduce((n, v) => n + (Number(v?.lengthMm) || 0), 0);
+  return { vehicleCount: list.length, lengthMm: lengthMm || null };
+}
+
 function parseUnitCatalogJson(raw) {
   let parsed = {};
   try {
@@ -1259,6 +1279,7 @@ function listUnitCatalog(params) {
       fleetId,
       serviceCount: milesByUnit.get(unitId)?.serviceCount || 0,
       lastEndOfDayMiles: inner.last_end_of_day_miles ?? inner.lastEndOfDayMiles ?? null,
+      ...ownVehicleStats(inner.vehicles, unitId),
     });
   }
   const slice = units.slice(cursor, cursor + limit);

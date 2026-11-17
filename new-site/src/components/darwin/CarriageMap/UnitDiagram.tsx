@@ -55,7 +55,7 @@ export function joinOverlapUnits(a: PlacedCar | undefined, b: PlacedCar | undefi
 function overlapCss(units: number): string {
   return `max(1px, calc(${units} * var(--cmap-diagram-scale, 0.42) * 1px))`
 }
-interface DiagramIndex {
+export interface DiagramIndex {
   credit: string
   /** Hash of the whole set; added to car URLs so an update bypasses cached cars. */
   version?: string
@@ -81,6 +81,8 @@ export interface DiagramUnit {
   /** Unit number such as "800033"; the class is read from its first three digits. */
   unitId?: string | null
   vehicleCount: number
+  /** Force this operator's art (a folder name such as "gwr"); the design-system preview uses it. */
+  operator?: string
   /**
    * The unit's actual vehicles, front first (already reversed for a reversed formation). When given, the
    * cars are chosen vehicle by vehicle, so a locomotive and a driving trailer land where the consist puts
@@ -137,7 +139,7 @@ function loadIndex(): Promise<DiagramIndex | null> {
   return indexPromise
 }
 
-function useDiagramIndex(): DiagramIndex | null {
+export function useDiagramIndex(): DiagramIndex | null {
   const [index, setIndex] = useState<DiagramIndex | null>(null)
   useEffect(() => {
     if (!ENABLED) return
@@ -328,7 +330,9 @@ function buildView(
   const cls = slug ? index.classes[slug] : null
   if (!slug || !cls) return null
   const wanted = (toc && TOC_TO_OPERATOR[toc.toUpperCase()]) || 'base'
-  const opKey = chooseOperatorKey(cls.operators, wanted, unit.vehicleCount)
+  const opKey = unit.operator && cls.operators[unit.operator]
+    ? unit.operator
+    : chooseOperatorKey(cls.operators, wanted, unit.vehicleCount)
   const art = opKey ? cls.operators[opKey] : null
   if (!art) return null
   const withVehicles = !!unit.vehicles?.length
@@ -432,7 +436,7 @@ export const TrainDiagram: React.FC<{
 }> = ({ units, reversed = false, toc, loadTones, fallback = null, className }) => {
   const index = useDiagramIndex()
   const unitsKey = units
-    .map((u) => `${u.fleetId || ''}|${u.unitId || ''}|${u.vehicleCount}|${(u.vehicles || []).map((v) => `${v.lengthMm ?? ''}/${v.cabs ?? ''}/${v.isLoco ? 'L' : ''}`).join('+')}`)
+    .map((u) => `${u.operator || ''}|${u.fleetId || ''}|${u.unitId || ''}|${u.vehicleCount}|${(u.vehicles || []).map((v) => `${v.lengthMm ?? ''}/${v.cabs ?? ''}/${v.isLoco ? 'L' : ''}`).join('+')}`)
     .join(',')
 
   const views = useMemo(() => {

@@ -137,6 +137,13 @@ out = {"credit": idx["credit"], "licence": idx["licence"], "licenceUrl": idx["li
 if DST.exists():
     shutil.rmtree(DST)
 n = 0
+# Lengths of single units seen in service (design-system "Train Unit Diagrams" check) that have no drawing.
+EXTRA_LENGTHS = {
+    "150": [3], "153": [2], "158": [3], "168": [4], "195": [2], "196": [2], "221": [4], "331": [3],
+    "345": [7], "375": [3], "377": [3, 5], "380": [4], "390": [9], "701": [5], "755": [4],
+    "800": [9], "801": [9], "802": [9],
+}
+
 for c in CLASSES:
     e = idx["classes"].get(c)
     if not e:
@@ -176,6 +183,38 @@ for c in CLASSES:
         art["heights"][mid_code] = h
         art["formations"]["3car"] = [std[0], {"car": mid_code, "flip": False}, std[1]]
         print("  middle car for", c, op)
+    # Sub-classes run at other lengths than the art was drawn (an 800/1 is 9 cars, a 168/2 is 4, a 150/3 is 3).
+    # Publish those lengths as formations of the same cars: ends kept, middle cars repeated or dropped, and a
+    # 3-car from a 2-car drawing gets an assembled middle car. Which lengths: see EXTRA_LENGTHS.
+    for op, art in ops.items():
+        std = art["formations"].get("standard", [])
+        have = {len(f) for f in art["formations"].values()}
+        for want in EXTRA_LENGTHS.get(c, []):
+            if want in have or not std:
+                continue
+            if len(std) == 1:
+                cars = [std[0], {"car": std[0]["car"], "flip": not std[0]["flip"]}] if want == 2 else None
+            elif len(std) == 2 and want == 3 and not std[0]["flip"] and std[1]["flip"]:
+                car_dir = DST / e["group"] / c / op
+                if "MIDX" not in art["sizes"]:
+                    w, h = make_middle_car(car_dir, std[0]["car"], std[1]["car"], "MIDX", c)
+                    art["sizes"]["MIDX"] = w
+                    art["heights"]["MIDX"] = h
+                cars = [std[0], {"car": "MIDX", "flip": False}, std[1]]
+            elif len(std) == 2:
+                cars = None
+            else:
+                mids = std[1:-1]
+                want_mids = want - 2
+                if want_mids <= len(mids):
+                    start = (len(mids) - want_mids) // 2
+                    chosen = mids[start:start + want_mids]
+                else:
+                    chosen = [mids[i % len(mids)] for i in range(want_mids)]
+                cars = [std[0], *chosen, std[-1]]
+            if cars:
+                art["formations"][f"{want}car"] = cars
+                have.add(want)
     out["classes"][c] = {"group": e["group"], "operators": ops}
 n_png, insets = rasterize(sorted(DST.rglob("*.svg")))
 print("png cars", n_png)

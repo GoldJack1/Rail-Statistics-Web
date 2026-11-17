@@ -1,0 +1,27 @@
+.ds-tdp-page { background-color: var(--bg-tertiary); }
+.ds-tdp { padding: var(--space-lg) 0 var(--space-4xl); display: flex; flex-direction: column; gap: var(--space-lg); }
+.ds-tdp__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-md); }
+.ds-tdp__search {
+  flex: 1 1 16rem; min-width: 0; padding: 0.6rem 0.9rem; font: inherit;
+  color: var(--text-primary); background: var(--bg-secondary);
+  border: 1px solid var(--border-color); border-radius: var(--radius-md, 8px);
+}
+.ds-tdp__toggle { display: inline-flex; align-items: center; gap: 0.4rem; font-size: var(--text-sm); color: var(--text-secondary); }
+.ds-tdp__note { margin: 0; font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.45; max-width: 52rem; }
+.ds-tdp__class { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-lg, 12px); padding: var(--space-md); min-width: 0; }
+.ds-tdp__class-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-sm); }
+.ds-tdp__class-head h2 { margin: 0; font-size: var(--text-xl, 1.25rem); }
+.ds-tdp__lengths { font-size: var(--text-sm); color: var(--text-secondary); }
+.ds-tdp__fleets { list-style: none; margin: var(--space-sm) 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-xs, 6px); }
+.ds-tdp__fleet {
+  display: inline-flex; flex-direction: column; gap: 2px; padding: 6px 10px; font-size: 12px;
+  background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-secondary);
+}
+.ds-tdp__fleet strong { color: var(--text-primary); font-size: 13px; }
+.ds-tdp__fleet--ok { border-color: hsl(141 72% 42%); }
+.ds-tdp__fleet--bad { border-color: hsl(0 72% 52%); background: hsl(0 72% 52% / 0.1); }
+.ds-tdp__operator h3 { margin: var(--space-md) 0 var(--space-xs, 6px); font-size: var(--text-sm); text-transform: capitalize; color: var(--text-secondary); }
+.ds-tdp__row { display: grid; grid-template-columns: 9rem minmax(0, 1fr); align-items: end; gap: var(--space-sm); padding: 4px 0; }
+.ds-tdp__row-label { font-size: 12px; color: var(--text-secondary); padding-bottom: 10px; }
+.ds-tdp__row .cmap-diagram { margin-bottom: 0; }
+@media (max-width: 600px) { .ds-tdp__row { grid-template-columns: minmax(0, 1fr); gap: 0; } .ds-tdp__row-label { padding-bottom: 0; } }

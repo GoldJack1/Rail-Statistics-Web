@@ -37,6 +37,11 @@ const SECTIONS = [
     to: '/admin/design-system/icons',
   },
   {
+    title: 'Train Unit Diagrams',
+    description: 'Every drawn train formation by class and operator, checked against the cars each fleet really runs with.',
+    to: '/admin/design-system/train-diagrams',
+  },
+  {
     title: 'Heroes',
     description: 'Static and carousel heroes: type scale, panel fill, CTAs, button colours, and carousel chrome.',
     to: '/admin/design-system/heros',
