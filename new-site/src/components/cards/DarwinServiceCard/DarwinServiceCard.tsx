@@ -13,12 +13,6 @@ import {
 } from '@/utils/darwinCoachLoading'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
 import { boardDestinationLabel } from '@/utils/splitWorking'
-import { diagramUnitsForTrain } from '@/utils/diagramUnits'
-import {
-  TrainDiagram,
-  defaultDiagramUnitsForToc,
-  type DiagramLoadTone,
-} from '@/components/darwin/CarriageMap'
 import '../StationCard/StationCard.css'
 import '../StationCardActionBar/StationCardActionBar.css'
 import '@/components/buttons/base/BUTBaseButton/BUTBaseButton.css'
@@ -236,7 +230,6 @@ function coachClassName(index: number, count: number): string {
   return 'rs-service-card__coach'
 }
 
-
 const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
   row,
   historicalMode,
@@ -303,15 +296,6 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
       </section>
       {showFormation ? (
         <section className="rs-station-text-card rs-service-card__formation-bar" aria-hidden="true">
-          <TrainDiagram
-            units={(() => {
-              const own = diagramUnitsForTrain(row.unitIds || [], coachCount)
-              return own.length > 0 ? own : defaultDiagramUnitsForToc(row.toc)
-            })()}
-            reversed={row.reverseFormation}
-            toc={row.toc}
-            loadTones={loadValues.map((v): DiagramLoadTone => coachLoadTone(v ?? null, loadAsPercent))}
-            fallback={
           <div
             className={[
               'rs-service-card__coaches',
@@ -347,8 +331,6 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
                 })
               : <span className="rs-service-card__coach" />}
           </div>
-            }
-          />
           <p className="rs-service-card__formation">{formation || '\u00a0'}</p>
         </section>
       ) : null}

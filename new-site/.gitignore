@@ -51,9 +51,5 @@ next-env.d.ts
 /functions/node_modules
 /functions/lib
 
-# Local formation-diagram dataset (raw GB Trains / Commons downloads and the per-car cut, ~120 MB).
-# Regenerate with scripts/formation-images/*.py; only public/train-svgs is committed.
+# Local formation-diagram dataset (regenerable, not used by the site).
 /data/formation-images/
-
-# The train drawings are served by the VPS API (/api/drawings), never bundled with the site.
-/public/train-svgs/

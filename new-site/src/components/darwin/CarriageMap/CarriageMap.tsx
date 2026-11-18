@@ -22,8 +22,6 @@ import {
   stageBoundaryLabel,
   type PtacStage,
 } from '../../../utils/ptacStages'
-import { UnitDiagram } from './UnitDiagram'
-import { diagramVehiclesFromPtac } from '../../../utils/diagramUnits'
 import './CarriageMap.css'
 
 const SHOW_ALL_STOPS = '__all__'
@@ -56,9 +54,7 @@ export const CarriageMap: React.FC<{
   onUnitClick?: (unitId: string) => void
   /** Overview / Formation / Loading as separate pages. */
   layout?: 'full' | 'loading-only' | 'stock-only'
-  /** Darwin TOC code (e.g. "GW"), used to pick the livery for the side-on drawing. */
-  toc?: string | null
-}> = ({ formation, consist, stops, reverse, initialTpl, onUnitClick, layout = 'full', toc }) => {
+}> = ({ formation, consist, stops, reverse, initialTpl, onUnitClick, layout = 'full' }) => {
   const loadingStops = useMemo(
     () => loadingStopsForView(stops, initialTpl),
     [stops, initialTpl],
@@ -151,7 +147,7 @@ export const CarriageMap: React.FC<{
 
   const renderStockMap = () =>
     havePtac
-      ? renderPtacStages(stages, formation, new Map(), tiplocName, onUnitClick, false, 'stock', toc)
+      ? renderPtacStages(stages, formation, new Map(), tiplocName, onUnitClick, false, 'stock')
       : renderDarwinOnly(formation!, new Map(), reverse, false, 'stock')
 
   return (
@@ -395,7 +391,6 @@ function renderPtacStages(
   onUnitClick: ((unitId: string) => void) | undefined,
   asPercent: boolean,
   purpose: 'loading' | 'stock',
-  toc?: string | null,
 ): React.ReactNode {
   const darwinByPosition = new Map<number, FormationCoach>()
   if (darwinFormation) {
@@ -486,14 +481,6 @@ function renderPtacStages(
                         </BUTOperatorChip>
                       )}
                     </div>
-                    )}
-                    {purpose === 'stock' && (
-                      <UnitDiagram
-                        fleetId={g.fleetId}
-                        vehicleCount={g.vehicles.length}
-                        toc={toc}
-                        vehicles={diagramVehiclesFromPtac(g.vehicles, g.reversed)}
-                      />
                     )}
                     {purpose === 'stock' ? (
                     <div className="cmap-loading-bar" role="list" aria-label={`${g.unitId || 'Unit'} coaches`}>

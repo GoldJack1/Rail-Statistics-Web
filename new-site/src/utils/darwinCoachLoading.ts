@@ -37,18 +37,8 @@ export function unitIdsFromConsist(consist: ConsistData | null | undefined): str
   return ids.length ? ids : null
 }
 
-/**
- * Classes whose length depends on who runs them, keyed by TOPS class then Darwin TOC code. Used before
- * the class default. Northern's 170s are all 3-car; East Midlands Railway's are 2-car.
- */
-const CARS_BY_CLASS_AND_TOC: Record<number, Record<string, number>> = {
-  170: { NT: 3, EM: 2 },
-}
-
 /** Typical vehicles per TOPS class, used when Darwin has no trainLength. */
-function carsForClassNumber(n: number, toc?: string | null): number {
-  const byOperator = toc ? CARS_BY_CLASS_AND_TOC[n]?.[toc.trim().toUpperCase()] : undefined
-  if (byOperator) return byOperator
+function carsForClassNumber(n: number): number {
   if (n === 139 || n === 153) return 1
   if (n === 159 || n === 166 || n === 185 || n === 195 || n === 196 || n === 197) return 3
   if (n === 180) return 5
@@ -75,36 +65,16 @@ function carsForClassNumber(n: number, toc?: string | null): number {
   return 2
 }
 
-/** Estimated vehicles for a list of unit numbers. `toc` (Darwin operator code) refines classes that vary by operator. */
-export function coachCountFromUnitIds(unitIds: string[] | null | undefined, toc?: string | null): number | null {
+export function coachCountFromUnitIds(unitIds: string[] | null | undefined): number | null {
   if (!unitIds?.length) return null
   let total = 0
   for (const raw of unitIds) {
-    const id = String(raw).trim()
-    // LNER InterCity 225 sets (NL01-NL31, fleet G91/M) are numbered by set, not by class: the locomotive,
-    // seven Mk4 coaches and the driving trailer, nine vehicles.
-    if (/^NL\d{2}$/i.test(id)) {
-      total += NL_SET_VEHICLES
-      continue
-    }
-    // ScotRail HST sets (HA01-HA26): two power cars and four or five Mk3 coaches. The board gives the real count
-    // when it has one; without it a set is most often 2 + 5.
-    if (/^HA\d{2}$/i.test(id)) {
-      total += HST_SET_VEHICLES
-      continue
-    }
-    const match = id.match(/^(\d{3})/)
+    const match = String(raw).match(/^(\d{3})/)
     if (!match) continue
-    total += carsForClassNumber(Number(match[1]), toc)
+    total += carsForClassNumber(Number(match[1]))
   }
   return total > 0 ? total : null
 }
-
-/** Vehicles in an LNER InterCity 225 set: locomotive + 7 Mk4 coaches + driving trailer. */
-const NL_SET_VEHICLES = 9
-
-/** Vehicles in a ScotRail HST set, when the board does not say: two power cars + five Mk3 coaches. */
-const HST_SET_VEHICLES = 7
 
 export function coachCountFromRow(row: DepartureRow): number | null {
   if (row.trainLength && row.trainLength > 0) return row.trainLength
@@ -112,7 +82,7 @@ export function coachCountFromRow(row: DepartureRow): number | null {
   if (formationCoaches && formationCoaches > 0) return formationCoaches
   const loadingCoaches = row.coachLoading?.length
   if (loadingCoaches && loadingCoaches > 0) return loadingCoaches
-  return coachCountFromUnitIds(row.unitIds, row.toc)
+  return coachCountFromUnitIds(row.unitIds)
 }
 
 export function coachLoadValues(row: DepartureRow, count: number): Array<number | null> {

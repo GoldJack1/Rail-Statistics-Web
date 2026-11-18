@@ -10,13 +10,7 @@ import { useStations } from '@/hooks/useStations'
 import { BUTTwoButtonBar, BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import { TextCard } from '@/components/cards'
-import { diagramStagesFromConsist, diagramUnitsForTrain, hauledSetSummary } from '@/utils/diagramUnits'
-import {
-  CarriageMap,
-  DiagramAttribution,
-  TrainDiagram,
-  defaultDiagramUnitsForToc,
-} from '@/components/darwin/CarriageMap'
+import { CarriageMap } from '@/components/darwin/CarriageMap'
 import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
 import { ServiceSchedulePanel } from '@/components/darwin/ServiceSchedulePanel'
 import { ServiceStopList } from '@/components/darwin/ServiceStopList/ServiceStopList'
@@ -132,45 +126,19 @@ function serviceCoachCount(data: ServiceDetail): number | null {
   if (formationCount > 0) return formationCount
   const consistCount = coachCountFromConsist(data.consist)
   if (consistCount) return consistCount
-  return coachCountFromUnitIds(serviceUnitIds(data), data.toc)
+  return coachCountFromUnitIds(serviceUnitIds(data))
 }
 
 function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
   const count = serviceCoachCount(data)
   const units = serviceUnitIds(data)
-  const fallbackUnits = defaultDiagramUnitsForToc(data.toc)
-  if (count == null && !units.length && !fallbackUnits.length) return null
+  if (count == null && !units.length) return null
   const visible = count != null ? Math.min(count, 12) : 0
   const prefix = data.cancelled ? 'Was formed of' : 'Formed of'
   const carriagePhrase = count != null ? `${count} carriage${count === 1 ? '' : 's'}` : ''
-  // A locomotive-hauled set reads like Realtime Trains: "Formed of 7 coaches by 91130 (set NL12)".
-  const hauled = hauledSetSummary(data.consist)
-  const title = hauled
-    ? [
-        prefix,
-        `${hauled.coaches} coach${hauled.coaches === 1 ? '' : 'es'}`,
-        `by ${hauled.locomotives.join(' + ')}`,
-        hauled.sets.length ? `(set ${hauled.sets.join(' + ')})` : '',
-      ]
-        .filter(Boolean)
-        .join(' ')
-    : [prefix, carriagePhrase, units.length ? `by ${units.join(' + ')}` : '']
-        .filter(Boolean)
-        .join(' ')
-  const pills = visible > 0 ? (
-    <span className="svc-formation-strip__coaches">
-      {Array.from({ length: visible }, (_, index) => {
-        const place = visible === 1 ? 'solo' : index === 0 ? 'front' : index === visible - 1 ? 'rear' : 'mid'
-        return <span key={index} className={`svc-formation-strip__coach svc-formation-strip__coach--${place}`} />
-      })}
-    </span>
-  ) : undefined
-  // Drawn from the consist's own vehicles when it lists them, one strip per leg when the formation changes
-  // (a hauled set can leave with the driving trailer leading and reverse so the locomotive leads).
-  const stages = diagramStagesFromConsist(data.consist)
-  const stopName = new Map((data.stops || []).map((stop) => [stop.tpl, stop.name || stop.tpl]))
-  const place = (tpl: string | null) => (tpl ? stopName.get(tpl) || tpl : '?')
-  const clock = (dt: string | null) => (dt ? dt.slice(11, 16) : '')
+  const title = [prefix, carriagePhrase, units.length ? `by ${units.join(' + ')}` : '']
+    .filter(Boolean)
+    .join(' ')
   return (
     <TextCard
       static
@@ -178,34 +146,17 @@ function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
       className="svc-formation-card"
       title={title}
       ariaLabel={title}
-      description={
-        stages.length > 0 ? (
-          <div className="svc-formation-stages">
-            {stages.map((stage, i) => (
-              <div key={`${stage.startTpl}-${stage.startDt}-${i}`} className="svc-formation-stage">
-                {stages.length > 1 && (
-                  <p className="svc-formation-stage__label">
-                    {place(stage.startTpl)} → {place(stage.endTpl)}
-                    {clock(stage.startDt) ? ` · ${clock(stage.startDt)}–${clock(stage.endDt)}` : ''}
-                  </p>
-                )}
-                <TrainDiagram units={stage.units} toc={data.toc} fallback={i === 0 ? pills : null} />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <TrainDiagram
-            units={diagramUnitsForTrain(units, count).length ? diagramUnitsForTrain(units, count) : fallbackUnits}
-            reversed={data.reverseFormation}
-            toc={data.toc}
-            fallback={pills}
-          />
-        )
-      }
+      description={visible > 0 ? (
+        <span className="svc-formation-strip__coaches">
+          {Array.from({ length: visible }, (_, index) => {
+            const place = visible === 1 ? 'solo' : index === 0 ? 'front' : index === visible - 1 ? 'rear' : 'mid'
+            return <span key={index} className={`svc-formation-strip__coach svc-formation-strip__coach--${place}`} />
+          })}
+        </span>
+      ) : undefined}
     />
   )
 }
-
 
 function WorkingFooter({
   previous,
@@ -824,9 +775,6 @@ const ServiceDetailPage: React.FC = () => {
               Signalling actuals come from Network Rail TRUST, where shown.
             </p>
             <p>Contains public sector information licensed under the Open Government Licence v3.0.</p>
-            <p>
-              <DiagramAttribution />
-            </p>
             <p>
               Map data ©{' '}
               <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">

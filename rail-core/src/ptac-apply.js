@@ -210,13 +210,14 @@ function clockMinutes(raw) {
  * Units physically on the train at a board call. Uses PTAC allocation
  * windows so a detached portion is not shown after the divide.
  */
-function coveredGroupsAtBoardCall(row, { tiploc, hhmm, movement } = {}) {
+export function unitIdsAtBoardCall(row, { tiploc, hhmm, movement } = {}) {
   const parsed = parseJson(row?.json);
   const allocs = parsed.allocations || [];
-  if (!allocs.length) return null;
+  if (!allocs.length) return unitIdsFromRow(row);
   const here = String(tiploc || "").toUpperCase();
   const t = clockMinutes(hhmm);
-  const groups = [];
+  const ids = new Set();
+  let matched = false;
   for (const a of allocs) {
     const orig = String(a.allocationOrigin?.tiploc || "").toUpperCase();
     const dest = String(a.allocationDestination?.tiploc || "").toUpperCase();
@@ -229,40 +230,19 @@ function coveredGroupsAtBoardCall(row, { tiploc, hhmm, movement } = {}) {
       cover = o <= d ? t >= o && t <= d : t >= o || t <= d;
     }
     if (!cover) continue;
-    for (const g of a.resourceGroups || []) groups.push(g);
+    matched = true;
+    for (const g of a.resourceGroups || []) {
+      if (g.unitId) ids.add(String(g.unitId));
+    }
   }
-  return groups.length ? groups : null;
-}
-
-export function unitIdsAtBoardCall(row, opts = {}) {
-  const groups = coveredGroupsAtBoardCall(row, opts);
-  if (!groups) return unitIdsFromRow(row);
-  const ids = new Set();
-  for (const g of groups) if (g.unitId) ids.add(String(g.unitId));
+  if (!matched) return unitIdsFromRow(row);
   return [...ids];
 }
 
 /**
- * How many vehicles are on the train at a board call, counted from the consist's own vehicle lists (each vehicle
- * number once). Null when the consist lists no vehicles. Used for services whose timetable gives no train length,
- * such as locomotive-hauled sets and HSTs, so the board can say how many carriages and draw them.
+ * A diagram can change unit along the way. A continuation that starts
+ * mid-diagram only keeps the units still on the train at that departure.
  */
-export function vehicleCountAtBoardCall(row, opts = {}) {
-  const groups = coveredGroupsAtBoardCall(row, opts);
-  if (!groups) return null;
-  const seen = new Set();
-  let anonymous = 0;
-  for (const g of groups) {
-    for (const v of g.vehicles || []) {
-      const id = String(v?.vehicleId ?? "");
-      if (!id) anonymous += 1;
-      else seen.add(id);
-    }
-  }
-  const total = seen.size + anonymous;
-  return total > 0 ? total : null;
-}
-
 export function consistFromOrigin(doc, { tiploc, hhmm } = {}) {
   const allocations = doc?.allocations;
   if (!Array.isArray(allocations) || !allocations.length) return doc;
