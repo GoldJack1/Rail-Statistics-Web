@@ -1155,7 +1155,7 @@ async function computeServiceDetail(ymd, rid, atRaw, hop = 0) {
     trainId: svc.headcode,
     ssd: ymd,
     toc: svc.toc,
-    tocName: tocDisplayName(svc.toc) || svc.operator_name,
+    tocName: tocDisplayName(svc.toc, { originCrs: originStop?.crs || svc.origin_crs, destCrs: destStop?.crs || svc.destination_crs }) || svc.operator_name,
     trainCat: svc.category,
     trainClass: trainClassDigit(svc.headcode || svc.train_id),
     powerType: svc.power_type || null,

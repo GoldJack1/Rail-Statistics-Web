@@ -58,3 +58,15 @@ test("candidates take loco numbers from vehicles and honour onlyUnits", () => {
   assert.deepEqual(drawingCandidateIds(consist), ["TW01", "67008", "11111", "OTHER", "67012"]);
   assert.deepEqual(drawingsForTrain("AW", consist, { onlyUnits: ["TW01"], lookup }).map((d) => d.id), ["67/mk4/tfw/exlner"]);
 });
+
+test("set codes alone (no loco number) still match", () => {
+  const withSets = buildLookup({
+    version: "t",
+    drawings: [
+      { id: "68/mk5/chiltern/mk5", toc: ["CH"], units: [...expandUnitRange("68019-68032"), ...expandUnitRange("CH01-CH13")], classes: [], width: 1, height: 40 },
+    ],
+  });
+  assert.deepEqual(resolveDrawings(withSets, "CH", ["CH03"]).map((d) => d.id), ["68/mk5/chiltern/mk5"]);
+  assert.deepEqual(resolveDrawings(withSets, "CH", ["CH14"]), []);
+  assert.equal(expandUnitRange("CH01-CH13").length, 13);
+});

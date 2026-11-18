@@ -428,7 +428,7 @@ export function buildStationBoard({
     const viaNames = after.slice(0, 3).map((c) => stationName(c.crs, c.tiploc)).filter(Boolean);
     const via = r.via || (viaNames.length ? viaNames.join(", ") : null);
     const toc = r.toc || "";
-    const tocName = tocDisplayName(toc) || (toc.length === 2 ? null : r.operator_name) || null;
+    const tocName = tocDisplayName(toc, { originCrs, destCrs }) || (toc.length === 2 ? null : r.operator_name) || null;
     const consistRow = consistByUid?.get(String(r.uid || "").toUpperCase()) || null;
     let consistDoc = null;
     if (consistRow?.json) {
