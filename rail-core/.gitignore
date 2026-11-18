@@ -3,3 +3,4 @@ data/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+assets/train-drawings-build/

@@ -5,11 +5,13 @@
 import { platformText } from "./db.js";
 import { tocDisplayName } from "./toc-names.js";
 import { tidyStationName } from "./tiploc-names.js";
+import { drawingsForTrain } from "./drawings-index.js";
+import { addCalendarDays } from "./calendar-day.js";
 import { callScheduledMinutes, dropCifTailAfterPublicTerminus, isPublicPassengerCall, isWorkingPass, recoverBookedPublic, sortCallsByJourneyTime } from "./journey-order.js";
 import { isPassengerHeadcode } from "./headcode.js";
 import { maskCallAsOf, maskCallsAsOf, maskTrustOverlay, maskTrustOverlayCalls } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
-import { lookupConsistsForUids, unitIdsAtBoardCall } from "./ptac-apply.js";
+import { lookupConsistsForUids, unitIdsAtBoardCall, vehicleCountAtBoardCall } from "./ptac-apply.js";
 import { reinstatementDonorUid } from "./reinstatement.js";
 import {
   associationsForRid,
@@ -344,6 +346,16 @@ export function buildStationBoard({
       rows.map((r) => r.uid),
     );
   }
+  // A consist can be filed under the day either side of the service's (the service detail already looks there).
+  if (consistByUid && catalog) {
+    for (const adjacent of [addCalendarDays(ymd, 1), addCalendarDays(ymd, -1)]) {
+      const missing = rows.map((r) => String(r.uid || "").toUpperCase()).filter((u) => u && !consistByUid.has(u));
+      if (!adjacent || !missing.length) break;
+      for (const [uid, row] of lookupConsistsForUids(catalog, adjacent, missing)) {
+        if (!consistByUid.has(uid)) consistByUid.set(uid, row);
+      }
+    }
+  }
   if (consistByUid && catalog) {
     for (const raw of rows) {
       const uid = String(raw.uid || "").toUpperCase();
@@ -463,6 +475,10 @@ export function buildStationBoard({
     const unitIds = consistRow
       ? unitIdsAtBoardCall(consistRow, { tiploc: sourceTpl, hhmm: schedClock, movement })
       : [];
+    // The timetable gives no train length for locomotive-hauled sets; the consist lists their vehicles.
+    const consistVehicles = consistRow
+      ? vehicleCountAtBoardCall(consistRow, { tiploc: sourceTpl, hhmm: schedClock, movement })
+      : null;
     const cancelInfo = r.s_cancelled || r.cancelled ? cancellationReason(r.cancel_reason) : null;
     const plat = platformText(r.platform);
     const isPassing = slot === "PP";
@@ -498,7 +514,7 @@ export function buildStationBoard({
       cancelled: Boolean(cancelInfo),
       cancellation: cancelInfo,
       delayReason: r.delay_reason ? { source: "ts", reason: r.delay_reason } : null,
-      trainLength: r.length_cars ?? null,
+      trainLength: r.length_cars ?? consistVehicles ?? null,
       timingLoad: r.timing_load || null,
       powerType: r.power_type || null,
       platform: plat,
@@ -512,6 +528,7 @@ export function buildStationBoard({
       hasFormation: false,
       formation: null,
       unitIds: unitIds.length ? unitIds : null,
+      drawings: drawingsForTrain(toc, consistDoc || { allocations: [{ resourceGroups: unitIds.map((unitId) => ({ unitId })) }] }, { onlyUnits: unitIds }),
       sourceTiploc: sourceTpl,
       actualSource: r.actual_source,
       locationLabel: locFresh ? loc.label : null,

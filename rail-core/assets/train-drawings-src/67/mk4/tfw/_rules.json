@@ -1,0 +1,15 @@
+{
+  "name": "Transport for Wales Class 67 with Mk 4 set",
+  "toc": ["AW"],
+  "liveries": {
+    "exlner": {
+      "file": "tfw67mk4exlner.svg",
+      "units": ["67008", "67010", "67013", "67014", "67015", "67017", "67025", "67029"],
+      "classes": ["67"]
+    },
+    "black": {
+      "file": "tfw67mk4black.svg",
+      "units": ["67012", "67016", "67020", "67022"]
+    }
+  }
+}

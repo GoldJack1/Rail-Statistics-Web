@@ -1,0 +1,46 @@
+.unit-drawings {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  pointer-events: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.unit-drawings::-webkit-scrollbar {
+  display: none;
+}
+
+.unit-drawings__img {
+  flex: 0 0 auto;
+  display: block;
+  max-width: none;
+}
+
+.unit-drawings--scrollable {
+  cursor: grab;
+  touch-action: pan-x pan-y;
+}
+
+.unit-drawings--scrollable:active {
+  cursor: grabbing;
+}
+
+/* Fade on the side that has more to scroll to. */
+.unit-drawings--more {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+
+.unit-drawings--less {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+
+.unit-drawings--more.unit-drawings--less {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}

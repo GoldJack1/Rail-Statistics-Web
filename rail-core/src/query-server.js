@@ -24,6 +24,8 @@ import { ensurePassengerRail, passengerRailRevision, routePassengerJourney } fro
 import { platformCoords } from "./quai-platforms.js";
 import { readPlatformRules } from "./platform-rules.js";
 import { serviceRoute } from "./service-route.js";
+import { serveDrawing } from "./drawings-route.js";
+import { drawingsForTrain } from "./drawings-index.js";
 import {
   associationsForRid,
   combinedDestinationName,
@@ -1173,6 +1175,7 @@ async function computeServiceDetail(ymd, rid, atRaw, hop = 0) {
     reverseFormation: false,
     formation: storedFormation(svc.formation),
     consist,
+    drawings: drawingsForTrain(svc.toc, consist),
     associations,
     alerts: [],
     units,
@@ -1340,6 +1343,8 @@ const server = createServer(async (req, res) => {
     return;
   }
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+  // Train drawings are public static art: no key, cached hard, served from DRAWINGS_DIR.
+  if (serveDrawing(req, res, url.pathname)) return;
   const key =
     url.searchParams.get("key") ??
     req.headers["x-internal-key"] ??

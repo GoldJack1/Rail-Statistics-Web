@@ -11,6 +11,7 @@ import { BUTTwoButtonBar, BUTWideButton } from '@/components/buttons'
 import { BackIcon } from '@/components/icons'
 import { TextCard } from '@/components/cards'
 import { CarriageMap } from '@/components/darwin/CarriageMap'
+import { UnitDrawings } from '@/components/darwin/UnitDrawings/UnitDrawings'
 import { DarwinDetailsLayout } from '@/components/darwin/DarwinDetailsLayout'
 import { ServiceSchedulePanel } from '@/components/darwin/ServiceSchedulePanel'
 import { ServiceStopList } from '@/components/darwin/ServiceStopList/ServiceStopList'
@@ -146,7 +147,9 @@ function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
       className="svc-formation-card"
       title={title}
       ariaLabel={title}
-      description={visible > 0 ? (
+      description={data.drawings?.length ? (
+        <UnitDrawings drawings={data.drawings} height={22} />
+      ) : visible > 0 ? (
         <span className="svc-formation-strip__coaches">
           {Array.from({ length: visible }, (_, index) => {
             const place = visible === 1 ? 'solo' : index === 0 ? 'front' : index === visible - 1 ? 'rear' : 'mid'

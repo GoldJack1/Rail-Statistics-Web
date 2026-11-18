@@ -13,6 +13,7 @@ import {
 } from '@/utils/darwinCoachLoading'
 import { delayMinutesTone, type CallingPatternTone } from '@/components/darwin/callingPatternTone'
 import { boardDestinationLabel } from '@/utils/splitWorking'
+import { UnitDrawings } from '@/components/darwin/UnitDrawings/UnitDrawings'
 import '../StationCard/StationCard.css'
 import '../StationCardActionBar/StationCardActionBar.css'
 import '@/components/buttons/base/BUTBaseButton/BUTBaseButton.css'
@@ -296,6 +297,9 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
       </section>
       {showFormation ? (
         <section className="rs-station-text-card rs-service-card__formation-bar" aria-hidden="true">
+          {row.drawings?.length ? (
+            <UnitDrawings drawings={row.drawings} height={16} />
+          ) : (
           <div
             className={[
               'rs-service-card__coaches',
@@ -331,6 +335,7 @@ const DarwinServiceCard: React.FC<DarwinServiceCardProps> = ({
                 })
               : <span className="rs-service-card__coach" />}
           </div>
+          )}
           <p className="rs-service-card__formation">{formation || '\u00a0'}</p>
         </section>
       ) : null}

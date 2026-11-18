@@ -1,0 +1,7 @@
+{
+  "name": "Chiltern Railways Class 68 with Mk 5A set",
+  "toc": ["CH"],
+  "liveries": {
+    "mk5": { "file": "chiltern68mk5.svg", "units": ["68019-68032"] }
+  }
+}

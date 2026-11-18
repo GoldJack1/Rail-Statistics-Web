@@ -1,0 +1,7 @@
+{
+  "name": "West Midlands Railway Class 139",
+  "toc": ["LM", "WM"],
+  "liveries": {
+    "std": { "file": "wmr139.svg", "classes": ["139"] }
+  }
+}

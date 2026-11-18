@@ -36,6 +36,15 @@ export type DepartureServiceType =
   | 'rail-replacement'
   | 'other';
 
+/** A whole-unit drawing the API serves at /api/darwin/drawings/<id>.svg (id is class/sub-class/operator/livery). */
+export interface TrainDrawing {
+  id: string;
+  width: number;
+  height: number;
+  /** Index version, added to the URL so an art update is picked up. */
+  v?: string | null;
+}
+
 export interface DepartureRow {
   rid: string;
   trainId: string;
@@ -136,6 +145,8 @@ export interface DepartureRow {
   formation?: FormationData | null;
   /** PTAC unit numbers extracted from consist when present. */
   unitIds?: string[] | null;
+  /** Drawings for the units on this train; empty or missing means keep the coach pills. */
+  drawings?: TrainDrawing[] | null;
   hasAssociations: boolean;
   hasAlerts: boolean;
 
@@ -368,6 +379,7 @@ export interface ServiceAlert {
  * Returned by GET /api/darwin/service/:rid — full per-service detail.
  */
 export interface ServiceDetail {
+  drawings?: TrainDrawing[] | null;
   rid: string;
   uid: string;
   trainId: string;
