@@ -63,7 +63,7 @@ export async function ensureFirebaseAuthApp(): Promise<{ app: FirebaseApp; auth:
   if (app && auth) return { app, auth }
 
   validateFirebaseConfigForDev()
-  app = getApps().length > 0 ? getApps()[0]! : initializeApp(firebaseConfig)
+  app = getApps().find((a) => a.name === '[DEFAULT]') ?? initializeApp(firebaseConfig)
   auth = getAuth(app)
   return { app, auth }
 }

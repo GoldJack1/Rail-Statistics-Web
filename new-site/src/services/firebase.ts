@@ -158,7 +158,7 @@ export const initializeFirebase = async () => {
   try {
     validateFirebaseConfigForDev()
     // Prefer an app already created by the lean auth bootstrap (dynamic to avoid cycles).
-    let existingApp: FirebaseApp | null = getApps().length > 0 ? getApps()[0]! : null
+    let existingApp: FirebaseApp | null = getApps().find((a) => a.name === '[DEFAULT]') ?? null
     if (!existingApp) {
       try {
         const authBootstrap = await import('@/services/firebaseAuthBootstrap')

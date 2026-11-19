@@ -28,7 +28,7 @@ async function ensureApp(): Promise<FirebaseApp | null> {
     /* ignore */
   }
   if (!app) {
-    app = getApps().length > 0 ? getApps()[0]! : initializeApp(firebaseConfig)
+    app = getApps().find((a) => a.name === '[DEFAULT]') ?? initializeApp(firebaseConfig)
   }
   return app
 }
