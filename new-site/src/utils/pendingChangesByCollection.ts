@@ -15,6 +15,9 @@ export function resolvePendingTargetCollectionId(
       ? entry.targetCollectionId
       : null
 
+  // New stations are explicitly created in the chosen network; never override it.
+  if (entry.isNew && stored) return stored
+
   // Resolve from station identity first — do not pass `fallback` here or every
   // stop without `sourceCollectionId` would inherit GBNR before `stnarea` is checked.
   const fromStationIdentity = entry.original ? getStationNetworkCollectionId(entry.original) : null
