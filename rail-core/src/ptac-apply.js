@@ -243,6 +243,21 @@ export function unitIdsAtBoardCall(row, opts = {}) {
 }
 
 /**
+ * Locomotive numbers for each unit on the train at a board call (vehicles of type "L"), keyed by unit id.
+ * Locomotive-hauled sets such as the LNER Mk 4 sets are known by set number (NL17) but run behind a loco (91110).
+ */
+export function unitLocosAtBoardCall(row, opts = {}) {
+  const groups = coveredGroupsAtBoardCall(row, opts);
+  const out = {};
+  for (const g of groups || []) {
+    if (!g?.unitId) continue;
+    const locos = (g.vehicles || []).filter((v) => v?.typeOfVehicle === "L" && v?.vehicleId).map((v) => String(v.vehicleId));
+    if (locos.length) out[String(g.unitId)] = [...new Set(locos)].join(" & ");
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
  * How many vehicles are on the train at a board call, counted from the consist's own vehicle lists (each vehicle
  * number once). Null when the consist lists no vehicles. Used for services whose timetable gives no train length,
  * such as locomotive-hauled sets and HSTs, so the board can say how many carriages and draw them.

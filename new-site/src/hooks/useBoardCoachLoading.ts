@@ -7,6 +7,7 @@ import {
   pickCoachLoadingFromService,
   rowHasCoachLoading,
   unitIdsFromConsist,
+  unitLocosFromConsist,
 } from '@/utils/darwinCoachLoading'
 
 export type BoardFormationOverlay = {
@@ -15,6 +16,7 @@ export type BoardFormationOverlay = {
   formation: FormationData | null
   trainLength: number | null
   unitIds: string[] | null
+  unitLocos?: Record<string, string> | null
 }
 
 const FETCH_CONCURRENCY = 2
@@ -84,6 +86,7 @@ export function applyBoardFormationOverlay(
     formation: overlay.formation ?? row.formation,
     trainLength: overlay.trainLength ?? row.trainLength,
     unitIds: overlay.unitIds ?? row.unitIds,
+    unitLocos: row.unitLocos ?? overlay.unitLocos ?? null,
     hasFormation: Boolean(overlay.formation || row.hasFormation),
   }
 }
@@ -185,6 +188,7 @@ export function useBoardCoachLoading(
         formation: detail.formation || row.formation || null,
         trainLength: row.trainLength || trainLengthFromDetail(detail, row),
         unitIds: (row.unitIds && row.unitIds.length ? row.unitIds : unitIdsFromConsist(detail.consist)),
+        unitLocos: row.unitLocos ?? unitLocosFromConsist(detail.consist),
       })
     }
     return overlays

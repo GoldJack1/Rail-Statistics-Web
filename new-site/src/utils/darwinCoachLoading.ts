@@ -37,6 +37,28 @@ export function unitIdsFromConsist(consist: ConsistData | null | undefined): str
   return ids.length ? ids : null
 }
 
+/** Locomotive number per unit id from a consist's loco vehicles (type L), e.g. NL17 -> 91110. */
+export function unitLocosFromConsist(consist: ConsistData | null | undefined): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const allocation of consist?.allocations || []) {
+    for (const group of allocation.resourceGroups || []) {
+      const unitId = group.unitId?.trim()
+      if (!unitId) continue
+      const locos = (group.vehicles || [])
+        .filter((v) => v.typeOfVehicle === 'L' && v.vehicleId)
+        .map((v) => String(v.vehicleId))
+      if (locos.length) out[unitId] = Array.from(new Set(locos)).join(' & ')
+    }
+  }
+  return out
+}
+
+/** "91110 · NL17" when the unit has a loco, else the unit id alone. */
+export function unitWithLoco(unitId: string, locos?: Record<string, string> | null): string {
+  const loco = locos?.[unitId]
+  return loco ? `${loco} · ${unitId}` : unitId
+}
+
 /** Typical vehicles per TOPS class, used when Darwin has no trainLength. */
 function carsForClassNumber(n: number): number {
   if (n === 139 || n === 153) return 1

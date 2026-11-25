@@ -196,6 +196,7 @@ function rowFromRailCore(r: Record<string, unknown>): DepartureRow {
     reverseFormation: false,
     hasConsist: Boolean(r.hasConsist),
     unitIds: Array.isArray(r.unitIds) ? (r.unitIds as string[]) : null,
+    unitLocos: r.unitLocos && typeof r.unitLocos === 'object' ? (r.unitLocos as Record<string, string>) : null,
     actualSource: r.actualSource ? String(r.actualSource) : null,
     locationLabel: r.locationLabel ? String(r.locationLabel) : null,
     hasAssociations: Boolean(r.hasAssociations),

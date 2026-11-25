@@ -27,7 +27,7 @@ import type { ServiceDetail } from '@/types/darwin'
 import { railwayOperatingDayIsoFromLondonParts } from '@/utils/railwayOperatingDayUk'
 import { formatLmTocName } from '@/utils/formatLmTocName'
 import { prefetchServiceRoute } from '@/utils/serviceRoutePrefetch'
-import { coachCountFromConsist, coachCountFromUnitIds, stopHasPublishedLoading, unitIdsFromConsist } from '@/utils/darwinCoachLoading'
+import { coachCountFromConsist, coachCountFromUnitIds, stopHasPublishedLoading, unitIdsFromConsist, unitLocosFromConsist, unitWithLoco } from '@/utils/darwinCoachLoading'
 import {
   consumeLegacyFromParam,
   isServiceSection,
@@ -137,7 +137,7 @@ function ServiceFormationStrip({ data }: { data: ServiceDetail }) {
   const visible = count != null ? Math.min(count, 12) : 0
   const prefix = data.cancelled ? 'Was formed of' : 'Formed of'
   const carriagePhrase = count != null ? `${count} carriage${count === 1 ? '' : 's'}` : ''
-  const title = [prefix, carriagePhrase, units.length ? `by ${units.join(' + ')}` : '']
+  const title = [prefix, carriagePhrase, units.length ? `by ${units.map((u) => unitWithLoco(u, unitLocosFromConsist(data.consist))).join(' + ')}` : '']
     .filter(Boolean)
     .join(' ')
   return (

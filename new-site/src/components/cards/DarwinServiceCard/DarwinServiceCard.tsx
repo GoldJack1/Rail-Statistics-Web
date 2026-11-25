@@ -16,6 +16,7 @@ import { boardDestinationLabel } from '@/utils/splitWorking'
 import { UnitDrawings } from '@/components/darwin/UnitDrawings/UnitDrawings'
 import '../StationCard/StationCard.css'
 import '../StationCardActionBar/StationCardActionBar.css'
+import { unitWithLoco } from '@/utils/darwinCoachLoading'
 import '@/components/buttons/base/BUTBaseButton/BUTBaseButton.css'
 import '@/components/darwin/callingPatternTones.css'
 import './DarwinServiceCard.css'
@@ -61,7 +62,7 @@ function formatUnitList(unitIds: string[]): string {
 
 function unitLabel(row: DepartureRow): string | null {
   if (!row.unitIds || row.unitIds.length === 0) return null
-  return `(${formatUnitList(row.unitIds)})`
+  return `(${formatUnitList(row.unitIds.map((id) => unitWithLoco(id, row.unitLocos)))})`
 }
 
 function buildHeadline(row: DepartureRow): string {

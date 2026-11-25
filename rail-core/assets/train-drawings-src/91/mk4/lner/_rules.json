@@ -1,0 +1,11 @@
+{
+  "name": "LNER Class 91 with Mk 4 set",
+  "toc": ["GR"],
+  "liveries": {
+    "lner": {
+      "file": "lner91mk4.svg",
+      "units": ["NL01-NL99"],
+      "classes": ["91"]
+    }
+  }
+}

@@ -11,7 +11,7 @@ import { callScheduledMinutes, dropCifTailAfterPublicTerminus, isPublicPassenger
 import { isPassengerHeadcode } from "./headcode.js";
 import { maskCallAsOf, maskCallsAsOf, maskTrustOverlay, maskTrustOverlayCalls } from "./replay-at.js";
 import { computeServiceLocation, locationIsFresh } from "./location.js";
-import { lookupConsistsForUids, unitIdsAtBoardCall, vehicleCountAtBoardCall } from "./ptac-apply.js";
+import { lookupConsistsForUids, unitIdsAtBoardCall, unitLocosAtBoardCall, vehicleCountAtBoardCall } from "./ptac-apply.js";
 import { reinstatementDonorUid } from "./reinstatement.js";
 import {
   associationsForRid,
@@ -475,6 +475,9 @@ export function buildStationBoard({
     const unitIds = consistRow
       ? unitIdsAtBoardCall(consistRow, { tiploc: sourceTpl, hhmm: schedClock, movement })
       : [];
+    const unitLocos = consistRow
+      ? unitLocosAtBoardCall(consistRow, { tiploc: sourceTpl, hhmm: schedClock, movement })
+      : null;
     // The timetable gives no train length for locomotive-hauled sets; the consist lists their vehicles.
     const consistVehicles = consistRow
       ? vehicleCountAtBoardCall(consistRow, { tiploc: sourceTpl, hhmm: schedClock, movement })
@@ -528,6 +531,7 @@ export function buildStationBoard({
       hasFormation: false,
       formation: null,
       unitIds: unitIds.length ? unitIds : null,
+      unitLocos,
       drawings: drawingsForTrain(toc, consistDoc || { allocations: [{ resourceGroups: unitIds.map((unitId) => ({ unitId })) }] }, { onlyUnits: unitIds }),
       sourceTiploc: sourceTpl,
       actualSource: r.actual_source,

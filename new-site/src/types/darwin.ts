@@ -145,6 +145,8 @@ export interface DepartureRow {
   formation?: FormationData | null;
   /** PTAC unit numbers extracted from consist when present. */
   unitIds?: string[] | null;
+  /** Locomotive number per unit id, for loco-hauled sets (NL17 -> 91110). */
+  unitLocos?: Record<string, string> | null;
   /** Drawings for the units on this train; empty or missing means keep the coach pills. */
   drawings?: TrainDrawing[] | null;
   hasAssociations: boolean;
